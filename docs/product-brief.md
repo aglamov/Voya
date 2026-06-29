@@ -298,3 +298,7 @@ The most important early question:
 > Can Voya consistently give users three better travel options than they would find by opening five separate apps themselves?
 
 If the answer is yes, the product has a reason to exist even before direct booking.
+
+## Architecture
+
+See [architecture.md](architecture.md) for the initial technical architecture.
