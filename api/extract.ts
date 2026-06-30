@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { openai } from "@ai-sdk/openai";
-import { generateObject } from "ai";
+import { generateObject, generateText } from "ai";
 import { z } from "zod";
 
 const itemSchema = z.object({
@@ -25,6 +25,24 @@ const requestSchema = z.object({
   text: z.string().min(1).max(50000)
 });
 
+const modelName = () => process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+
+const schemaInstructions = [
+  "Return only JSON with this exact shape:",
+  "{",
+  '  "type": "Flight + Hotel",',
+  '  "title": "Trip to Rome",',
+  '  "primaryTime": "Aug 12, 09:40",',
+  '  "confidence": 0.91,',
+  '  "items": [',
+  '    {"kind":"flight","title":"BA2490 to Rome Fiumicino","time":"Aug 12, 09:40","location":"London Heathrow to Rome Fiumicino","status":"Confirmed"}',
+  "  ],",
+  '  "warnings": []',
+  "}",
+  "kind must be one of: flight, hotel, event, transit.",
+  "confidence must be a number from 0 to 1."
+].join("\n");
+
 function extractionErrorDetails(error: unknown) {
   if (!(error instanceof Error)) {
     return {
@@ -37,7 +55,7 @@ function extractionErrorDetails(error: unknown) {
     message: error.message,
     statusCode: "statusCode" in error ? error.statusCode : undefined,
     type: "type" in error ? error.type : undefined,
-    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini"
+    model: modelName()
   };
 }
 
@@ -56,15 +74,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const { object } = await generateObject({
-      model: openai(process.env.OPENAI_MODEL ?? "gpt-4o-mini"),
+      model: openai(modelName()),
       schema: extractionSchema,
+      schemaName: "TravelConfirmationExtraction",
+      schemaDescription: "Structured itinerary data extracted from a travel booking confirmation.",
       system: [
         "You extract travel booking confirmations for Voya, an iPhone trip companion.",
-        "Return concise structured data only.",
+        "Return concise structured data only as valid JSON.",
         "Use the user's visible confirmation text as the source of truth.",
         "Prefer exact airline flight numbers, airports, terminals, hotel names, venue names, dates, and times.",
         "When details are missing, keep the item but mark the missing field plainly and add a warning.",
-        "Do not invent confirmation numbers, addresses, gates, or statuses."
+        "Do not invent confirmation numbers, addresses, gates, or statuses.",
+        schemaInstructions
       ].join(" "),
       prompt: [
         `Source file: ${sourceName}`,
@@ -73,7 +94,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         "Make title useful in a timeline, primaryTime the first relevant date/time, and confidence your extraction confidence.",
         "",
         text
-      ].join("\n")
+      ].join("\n"),
+      experimental_repairText: async ({ text: generatedText, error }) => {
+        const { text: repairedText } = await generateText({
+          model: openai(modelName()),
+          system: "Repair invalid JSON so it matches the requested travel extraction schema. Return only JSON.",
+          prompt: [
+            schemaInstructions,
+            "",
+            "Validation error:",
+            error.message,
+            "",
+            "Invalid output:",
+            generatedText
+          ].join("\n")
+        });
+
+        return repairedText;
+      }
     });
 
     return res.status(200).json(object);
