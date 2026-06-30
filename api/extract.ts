@@ -25,6 +25,22 @@ const requestSchema = z.object({
   text: z.string().min(1).max(50000)
 });
 
+function extractionErrorDetails(error: unknown) {
+  if (!(error instanceof Error)) {
+    return {
+      message: "Unknown AI extraction error"
+    };
+  }
+
+  return {
+    name: error.name,
+    message: error.message,
+    statusCode: "statusCode" in error ? error.statusCode : undefined,
+    type: "type" in error ? error.type : undefined,
+    model: process.env.AI_GATEWAY_MODEL ?? "openai/gpt-5-mini"
+  };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -63,6 +79,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(object);
   } catch (error) {
     console.error("Confirmation extraction failed", error);
-    return res.status(502).json({ error: "AI extraction failed" });
+    return res.status(502).json({
+      error: "AI extraction failed",
+      details: extractionErrorDetails(error)
+    });
   }
 }
