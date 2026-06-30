@@ -200,22 +200,221 @@ final class VoyaStore: ObservableObject {
 
     func confirmExtraction() {
         guard let preview = extractedPreview else { return }
-        let trip = Trip(
-            title: preview.title,
-            dates: preview.primaryTime,
-            summary: "\(preview.items.count) confirmed item\(preview.items.count == 1 ? "" : "s") from \(preview.sourceName)",
-            items: preview.items,
-            sourceName: preview.sourceName
-        )
-        trips.insert(trip, at: 0)
-        selectedTripID = trip.id
+
+        if let matchingTripIndex = tripIndexForMerge(with: preview.items) {
+            var trip = trips[matchingTripIndex]
+            trip.items = sortedItinerary(uniqueItems(from: trip.items + preview.items))
+            trip.title = tripTitle(for: trip.items, fallback: preview.title)
+            trip.dates = tripDates(for: trip.items, fallback: trip.dates)
+            trip.summary = "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain"
+            trip.sourceName = combinedSourceName(trip.sourceName, preview.sourceName)
+            trips[matchingTripIndex] = trip
+            selectedTripID = trip.id
+            importMessage = "Added to trip: \(trip.title)"
+        } else {
+            let items = sortedItinerary(uniqueItems(from: preview.items))
+            let trip = Trip(
+                title: tripTitle(for: items, fallback: preview.title),
+                dates: tripDates(for: items, fallback: preview.primaryTime),
+                summary: "\(items.count) confirmed item\(items.count == 1 ? "" : "s") from \(preview.sourceName)",
+                items: items,
+                sourceName: preview.sourceName
+            )
+            trips.insert(trip, at: 0)
+            selectedTripID = trip.id
+            importMessage = "Trip created: \(trip.title)"
+        }
+
         extractedPreview = nil
-        importMessage = "Trip created: \(trip.title)"
     }
 
     private func refreshPreviewFields() {
         guard let preview = extractedPreview else { return }
         extractedPreview?.fields = ConfirmationParser.fields(for: preview.items, sourceName: preview.sourceName)
+    }
+
+    private func tripIndexForMerge(with incomingItems: [ItineraryItem]) -> Int? {
+        if let selectedTripID,
+           let selectedIndex = trips.firstIndex(where: { $0.id == selectedTripID }),
+           shouldMerge(incomingItems, into: trips[selectedIndex], allowDateOnlyMatch: true) {
+            return selectedIndex
+        }
+
+        return trips.indices.first { index in
+            shouldMerge(incomingItems, into: trips[index], allowDateOnlyMatch: false)
+        }
+    }
+
+    private func shouldMerge(_ incomingItems: [ItineraryItem], into trip: Trip, allowDateOnlyMatch: Bool) -> Bool {
+        let incomingDates = Set(incomingItems.compactMap { dateKey(from: $0.time) })
+        let tripDates = Set(trip.items.compactMap { dateKey(from: $0.time) })
+        let sharesDate = !incomingDates.isDisjoint(with: tripDates)
+
+        let incomingPlaces = placeTokens(for: incomingItems)
+        let tripPlaces = placeTokens(for: trip.items)
+        let sharesPlace = !incomingPlaces.isDisjoint(with: tripPlaces)
+
+        return sharesDate && (sharesPlace || allowDateOnlyMatch || hasComplementaryTravelKinds(incomingItems, trip.items))
+    }
+
+    private func hasComplementaryTravelKinds(_ incomingItems: [ItineraryItem], _ tripItems: [ItineraryItem]) -> Bool {
+        let incomingKinds = Set(incomingItems.map(\.kind))
+        let tripKinds = Set(tripItems.map(\.kind))
+
+        return (incomingKinds.contains(.flight) && tripKinds.contains(.hotel))
+            || (incomingKinds.contains(.hotel) && tripKinds.contains(.flight))
+    }
+
+    private func uniqueItems(from items: [ItineraryItem]) -> [ItineraryItem] {
+        var seen: Set<String> = []
+        return items.filter { item in
+            let key = [item.kind.rawValue, item.title, item.time, item.location]
+                .joined(separator: "|")
+                .lowercased()
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func sortedItinerary(_ items: [ItineraryItem]) -> [ItineraryItem] {
+        items.sorted { first, second in
+            let firstKey = sortKey(for: first)
+            let secondKey = sortKey(for: second)
+
+            if firstKey.date != secondKey.date {
+                return firstKey.date < secondKey.date
+            }
+
+            if firstKey.time != secondKey.time {
+                return firstKey.time < secondKey.time
+            }
+
+            return firstKey.kind < secondKey.kind
+        }
+    }
+
+    private func sortKey(for item: ItineraryItem) -> (date: Int, time: Int, kind: Int) {
+        let parsedDate = parsedDateTime(from: item.time)
+        return (
+            date: parsedDate.map { $0.month * 100 + $0.day } ?? Int.max,
+            time: parsedDate.map { $0.hour * 60 + $0.minute } ?? Int.max,
+            kind: kindSortOrder(item.kind)
+        )
+    }
+
+    private func kindSortOrder(_ kind: ItineraryKind) -> Int {
+        switch kind {
+        case .flight: 0
+        case .transit: 1
+        case .hotel: 2
+        case .event: 3
+        }
+    }
+
+    private func tripTitle(for items: [ItineraryItem], fallback: String) -> String {
+        if let destination = destinationName(from: items) {
+            return destination
+        }
+
+        return fallback
+            .replacingOccurrences(of: "Trip to ", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "Stay at ", with: "", options: .caseInsensitive)
+    }
+
+    private func destinationName(from items: [ItineraryItem]) -> String? {
+        if let flight = items.first(where: { $0.kind == .flight }),
+           let destination = flight.location.components(separatedBy: " to ").last {
+            return cityName(from: destination)
+        }
+
+        if let hotel = items.first(where: { $0.kind == .hotel }) {
+            return cityName(from: hotel.location)
+        }
+
+        return nil
+    }
+
+    private func tripDates(for items: [ItineraryItem], fallback: String) -> String {
+        let dates = items.compactMap { parsedDateTime(from: $0.time) }
+        guard let first = dates.min(by: { ($0.month, $0.day) < ($1.month, $1.day) }) else {
+            return fallback
+        }
+
+        guard let last = dates.max(by: { ($0.month, $0.day) < ($1.month, $1.day) }),
+              first.month != last.month || first.day != last.day else {
+            return "\(first.monthName) \(first.day)"
+        }
+
+        if first.month == last.month {
+            return "\(first.monthName) \(first.day)-\(last.day)"
+        }
+
+        return "\(first.monthName) \(first.day)-\(last.monthName) \(last.day)"
+    }
+
+    private func combinedSourceName(_ existing: String, _ incoming: String) -> String {
+        existing.localizedCaseInsensitiveContains(incoming) ? existing : "\(existing) + \(incoming)"
+    }
+
+    private func placeTokens(for items: [ItineraryItem]) -> Set<String> {
+        let ignoredWords: Set<String> = [
+            "airport", "terminal", "hotel", "flight", "check", "needed", "confirmed",
+            "the", "and", "from", "with", "to", "at", "in", "on"
+        ]
+
+        return Set(
+            items
+                .flatMap { [$0.title, $0.location] }
+                .flatMap { value in
+                    value
+                        .lowercased()
+                        .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                        .filter { $0.count > 2 && !ignoredWords.contains($0) }
+                }
+        )
+    }
+
+    private func dateKey(from time: String) -> String? {
+        parsedDateTime(from: time).map { "\($0.month)-\($0.day)" }
+    }
+
+    private func parsedDateTime(from value: String) -> (month: Int, monthName: String, day: Int, hour: Int, minute: Int)? {
+        let pattern = #"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:,\s*(\d{1,2}):(\d{2}))?"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
+              let monthRange = Range(match.range(at: 1), in: value),
+              let dayRange = Range(match.range(at: 2), in: value) else {
+            return nil
+        }
+
+        let monthName = String(value[monthRange]).prefix(3).capitalized
+        guard let month = monthNumbers[String(monthName)],
+              let day = Int(value[dayRange]) else {
+            return nil
+        }
+
+        let hour = Range(match.range(at: 3), in: value).flatMap { Int(value[$0]) } ?? 23
+        let minute = Range(match.range(at: 4), in: value).flatMap { Int(value[$0]) } ?? 59
+        return (month, String(monthName), day, hour, minute)
+    }
+
+    private var monthNumbers: [String: Int] {
+        [
+            "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
+            "May": 5, "Jun": 6, "Jul": 7, "Aug": 8,
+            "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
+        ]
+    }
+
+    private func cityName(from location: String) -> String {
+        let suffixes = [
+            " Fiumicino", " Heathrow", " Gatwick", " Airport", " Terminal 1",
+            " Terminal 2", " Terminal 3", " Terminal 4", " Terminal 5"
+        ]
+
+        return suffixes.reduce(location) { result, suffix in
+            result.replacingOccurrences(of: suffix, with: "", options: .caseInsensitive)
+        }
+        .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
 }
 

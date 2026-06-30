@@ -841,7 +841,7 @@ private struct ExtractionReview: View {
             }
 
             Button(action: onConfirm) {
-                Label("Create trip", systemImage: "checkmark")
+                Label("Save to trip", systemImage: "checkmark")
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
