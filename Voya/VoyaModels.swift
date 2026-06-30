@@ -143,6 +143,7 @@ struct ExtractionPreview: Identifiable {
     var sourceName: String
     var type: String
     var title: String
+    var normalizedDestination: String?
     var primaryTime: String
     var confidence: Double
     var fields: [ExtractedField]
@@ -228,22 +229,28 @@ final class VoyaStore: ObservableObject {
             return
         }
 
-        do {
-            let heroImage = try await DestinationImageResolver().image(for: trip.title)
-            guard let currentIndex = trips.firstIndex(where: { $0.id == trip.id }),
-                  trips[currentIndex].destinationImageURL == nil else {
-                return
-            }
+        let resolver = DestinationImageResolver()
+        for searchTerm in heroImageSearchTerms(for: trip) {
+            do {
+                let heroImage = try await resolver.image(for: searchTerm)
+                guard let currentIndex = trips.firstIndex(where: { $0.id == trip.id }),
+                      trips[currentIndex].destinationImageURL == nil else {
+                    return
+                }
 
-            trips[currentIndex].destinationImageURL = heroImage.url
-            trips[currentIndex].destinationImageCredit = heroImage.credit
-        } catch {
-            guard let currentIndex = trips.firstIndex(where: { $0.id == trip.id }) else {
+                trips[currentIndex].destinationImageURL = heroImage.url
+                trips[currentIndex].destinationImageCredit = heroImage.credit
                 return
+            } catch {
+                continue
             }
-
-            trips[currentIndex].destinationImageCredit = nil
         }
+
+        guard let currentIndex = trips.firstIndex(where: { $0.id == trip.id }) else {
+            return
+        }
+
+        trips[currentIndex].destinationImageCredit = nil
     }
 
     func extractFromPastedText() {
@@ -293,10 +300,16 @@ final class VoyaStore: ObservableObject {
         if let matchingTripIndex = tripIndexForMerge(with: preview.items) {
             var trip = trips[matchingTripIndex]
             trip.items = sortedItinerary(uniqueItems(from: trip.items + preview.items))
-            trip.title = tripTitle(for: trip.items, fallback: preview.title)
+            trip.title = tripTitle(
+                for: trip.items,
+                fallback: preview.title,
+                preferredDestination: preview.normalizedDestination
+            )
             trip.dates = tripDates(for: trip.items, fallback: trip.dates)
             trip.summary = "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain"
             trip.sourceName = combinedSourceName(trip.sourceName, preview.sourceName)
+            trip.destinationImageURL = nil
+            trip.destinationImageCredit = nil
             trips[matchingTripIndex] = trip
             selectedTripID = trip.id
             importMessage = "Added to trip: \(trip.title)"
@@ -309,7 +322,11 @@ final class VoyaStore: ObservableObject {
         } else {
             let items = sortedItinerary(uniqueItems(from: preview.items))
             let trip = Trip(
-                title: tripTitle(for: items, fallback: preview.title),
+                title: tripTitle(
+                    for: items,
+                    fallback: preview.title,
+                    preferredDestination: preview.normalizedDestination
+                ),
                 dates: tripDates(for: items, fallback: preview.primaryTime),
                 summary: "\(items.count) confirmed item\(items.count == 1 ? "" : "s") from \(preview.sourceName)",
                 items: items,
@@ -421,7 +438,15 @@ final class VoyaStore: ObservableObject {
         }
     }
 
-    private func tripTitle(for items: [ItineraryItem], fallback: String) -> String {
+    private func tripTitle(for items: [ItineraryItem], fallback: String, preferredDestination: String? = nil) -> String {
+        if let preferredDestination = normalizedPlaceName(preferredDestination), !preferredDestination.isEmpty {
+            return preferredDestination
+        }
+
+        if let longestStayPlace = longestStayPlaceName(from: items) {
+            return longestStayPlace
+        }
+
         if let destination = destinationName(from: items) {
             return destination
         }
@@ -442,6 +467,60 @@ final class VoyaStore: ObservableObject {
         }
 
         return nil
+    }
+
+    private func heroImageSearchTerms(for trip: Trip) -> [String] {
+        uniquePlaceNames([
+            trip.title,
+            longestStayPlaceName(from: trip.items),
+            firstTripPointName(from: trip.items),
+            destinationName(from: trip.items)
+        ])
+    }
+
+    private func firstTripPointName(from items: [ItineraryItem]) -> String? {
+        guard let firstItem = items.first else { return nil }
+
+        if firstItem.kind == .flight,
+           let destination = firstItem.location.components(separatedBy: " to ").last {
+            return cityName(from: destination)
+        }
+
+        return cityName(from: firstItem.location)
+    }
+
+    private func longestStayPlaceName(from items: [ItineraryItem]) -> String? {
+        items
+            .compactMap { item -> (place: String, duration: Int)? in
+                guard let duration = durationMinutes(from: item.time),
+                      let place = placeName(for: item) else {
+                    return nil
+                }
+
+                return (place, duration)
+            }
+            .max { $0.duration < $1.duration }
+            .map(\.place)
+    }
+
+    private func placeName(for item: ItineraryItem) -> String? {
+        switch item.kind {
+        case .flight, .transit:
+            if let destination = item.location.components(separatedBy: " to ").last {
+                return cityName(from: destination)
+            }
+        case .hotel, .event:
+            return cityName(from: item.location)
+        }
+
+        return normalizedPlaceName(item.location)
+    }
+
+    private func uniquePlaceNames(_ values: [String?]) -> [String] {
+        var seen: Set<String> = []
+        return values.compactMap(normalizedPlaceName).filter { value in
+            seen.insert(value.lowercased()).inserted
+        }
     }
 
     private func tripDates(for items: [ItineraryItem], fallback: String) -> String {
@@ -508,6 +587,41 @@ final class VoyaStore: ObservableObject {
         return (month, String(monthName), day, hour, minute)
     }
 
+    private func durationMinutes(from value: String) -> Int? {
+        let dateTimes = parsedDateTimes(from: value)
+        guard let first = dateTimes.first, let last = dateTimes.dropFirst().last else {
+            return nil
+        }
+
+        let firstMinutes = first.month * 31 * 24 * 60 + first.day * 24 * 60 + first.hour * 60 + first.minute
+        let lastMinutes = last.month * 31 * 24 * 60 + last.day * 24 * 60 + last.hour * 60 + last.minute
+        return max(0, lastMinutes - firstMinutes)
+    }
+
+    private func parsedDateTimes(from value: String) -> [(month: Int, monthName: String, day: Int, hour: Int, minute: Int)] {
+        let pattern = #"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:,\s*(\d{1,2}):(\d{2}))?"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return []
+        }
+
+        return regex.matches(in: value, range: NSRange(value.startIndex..., in: value)).compactMap { match in
+            guard let monthRange = Range(match.range(at: 1), in: value),
+                  let dayRange = Range(match.range(at: 2), in: value) else {
+                return nil
+            }
+
+            let monthName = String(value[monthRange]).prefix(3).capitalized
+            guard let month = monthNumbers[String(monthName)],
+                  let day = Int(value[dayRange]) else {
+                return nil
+            }
+
+            let hour = Range(match.range(at: 3), in: value).flatMap { Int(value[$0]) } ?? 23
+            let minute = Range(match.range(at: 4), in: value).flatMap { Int(value[$0]) } ?? 59
+            return (month, String(monthName), day, hour, minute)
+        }
+    }
+
     private var monthNumbers: [String: Int] {
         [
             "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
@@ -525,8 +639,19 @@ final class VoyaStore: ObservableObject {
         return suffixes.reduce(location) { result, suffix in
             result.replacingOccurrences(of: suffix, with: "", options: .caseInsensitive)
         }
+        .replacingOccurrences(of: #".*,\s*\d{4,6}\s+([^,]+),.*"#, with: "$1", options: .regularExpression)
         .replacingOccurrences(of: #"\s*\([A-Z]{3}\)"#, with: "", options: .regularExpression)
         .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func normalizedPlaceName(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = cityName(from: value)
+            .replacingOccurrences(of: "Trip to ", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "Stay at ", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+
+        return normalized.isEmpty ? nil : normalized
     }
 }
 
@@ -568,6 +693,7 @@ private struct VercelConfirmationExtractor {
             sourceName: document.name,
             type: decoded.type,
             title: decoded.title,
+            normalizedDestination: decoded.normalizedDestination,
             primaryTime: decoded.primaryTime,
             confidence: decoded.confidence,
             fields: ConfirmationParser.fields(for: items, sourceName: document.name),
@@ -600,6 +726,7 @@ private struct VercelExtractionRequest: Encodable {
 private struct VercelExtractionResponse: Decodable {
     let type: String
     let title: String
+    let normalizedDestination: String?
     let primaryTime: String
     let confidence: Double
     let items: [VercelItineraryItem]
@@ -678,6 +805,7 @@ enum ConfirmationParser {
             sourceName: document.name,
             type: typeLabel(for: items),
             title: title,
+            normalizedDestination: normalizedDestination(from: items),
             primaryTime: items.first?.time ?? "Date needed",
             confidence: confidence,
             fields: fields(for: items, sourceName: document.name),
@@ -780,6 +908,19 @@ enum ConfirmationParser {
         }
 
         return items.first?.title ?? "Imported trip"
+    }
+
+    private static func normalizedDestination(from items: [ItineraryItem]) -> String? {
+        if let hotel = items.first(where: { $0.kind == .hotel }) {
+            return cleanedPhrase(hotel.location)
+        }
+
+        if let flight = items.first(where: { $0.kind == .flight }),
+           let destination = flight.location.components(separatedBy: " to ").last {
+            return cleanedPhrase(destination)
+        }
+
+        return items.first.map { cleanedPhrase($0.location) }
     }
 
     private static func typeLabel(for items: [ItineraryItem]) -> String {

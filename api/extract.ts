@@ -14,6 +14,7 @@ const itemSchema = z.object({
 const extractionSchema = z.object({
   type: z.string().min(1),
   title: z.string().min(1),
+  normalizedDestination: z.string().min(1),
   primaryTime: z.string().min(1),
   confidence: z.number().min(0).max(1),
   items: z.array(itemSchema).min(1).max(12),
@@ -32,6 +33,7 @@ const schemaInstructions = [
   "{",
   '  "type": "Flight + Hotel",',
   '  "title": "Trip to Rome",',
+  '  "normalizedDestination": "Rome",',
   '  "primaryTime": "Aug 12, 09:40",',
   '  "confidence": 0.91,',
   '  "items": [',
@@ -40,6 +42,8 @@ const schemaInstructions = [
   '  "warnings": []',
   "}",
   "kind must be one of: flight, hotel, event, transit.",
+  "normalizedDestination must be the clean destination/place name for the trip title, without airport codes, hotel names, addresses, dates, or words like Trip to.",
+  "When multiple places exist, choose the place where the traveler spends the longest time. For example, if a flight arrives in Zurich but the hotel stay is in Bad Ragaz for several days, normalizedDestination should be Bad Ragaz.",
   "confidence must be a number from 0 to 1."
 ].join("\n");
 
@@ -83,6 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         "Return concise structured data only as valid JSON.",
         "Use the user's visible confirmation text as the source of truth.",
         "Prefer exact airline flight numbers, airports, terminals, hotel names, venue names, dates, and times.",
+        "Infer a clean normalizedDestination from the itinerary, preferring the longest stay/place over a transit airport.",
         "When details are missing, keep the item but mark the missing field plainly and add a warning.",
         "Do not invent confirmation numbers, addresses, gates, or statuses.",
         schemaInstructions
@@ -91,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `Source file: ${sourceName}`,
         "Extract flights, hotels, events, and transit reservations into itinerary items.",
         "Use kind values only from: flight, hotel, event, transit.",
-        "Make title useful in a timeline, primaryTime the first relevant date/time, and confidence your extraction confidence.",
+        "Make title useful in a timeline, normalizedDestination the clean trip place, primaryTime the first relevant date/time, and confidence your extraction confidence.",
         "",
         text
       ].join("\n"),
