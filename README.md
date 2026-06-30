@@ -122,12 +122,12 @@ See [docs/architecture.md](docs/architecture.md) for the initial iPhone app, bac
 
 ## Vercel AI Extraction
 
-The app calls a Vercel Function at `POST /api/extract` to recognize pasted or uploaded travel confirmations. The function uses Vercel AI Gateway and returns normalized itinerary JSON for the review screen.
+The app calls a Vercel Function at `POST /api/extract` to recognize pasted or uploaded travel confirmations. The function calls OpenAI directly and returns normalized itinerary JSON for the review screen.
 
 Required Vercel environment variables:
 
-- `AI_GATEWAY_API_KEY`: Vercel AI Gateway key.
-- `AI_GATEWAY_MODEL`: optional model override. Defaults to `openai/gpt-5-mini`.
+- `OPENAI_API_KEY`: OpenAI API key.
+- `OPENAI_MODEL`: optional model override. Defaults to `gpt-4o-mini`.
 
 iOS configuration:
 

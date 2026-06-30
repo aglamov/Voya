@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { gateway } from "@ai-sdk/gateway";
+import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { z } from "zod";
 
@@ -37,7 +37,7 @@ function extractionErrorDetails(error: unknown) {
     message: error.message,
     statusCode: "statusCode" in error ? error.statusCode : undefined,
     type: "type" in error ? error.type : undefined,
-    model: process.env.AI_GATEWAY_MODEL ?? "openai/gpt-5-mini"
+    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini"
   };
 }
 
@@ -56,7 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const { object } = await generateObject({
-      model: gateway(process.env.AI_GATEWAY_MODEL ?? "openai/gpt-5-mini"),
+      model: openai(process.env.OPENAI_MODEL ?? "gpt-4o-mini"),
       schema: extractionSchema,
       system: [
         "You extract travel booking confirmations for Voya, an iPhone trip companion.",
