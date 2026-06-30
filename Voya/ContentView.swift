@@ -331,6 +331,10 @@ private struct ImportView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
 
+                if store.isExtractingConfirmation {
+                    RecognitionAnimationCard(message: store.importMessage ?? "Recognizing confirmation...")
+                }
+
                 if let preview = store.extractedPreview, preview.sourceName != VoyaStore.pastedConfirmationSourceName {
                     ExtractionReview(preview: preview) { item in
                         store.updatePreviewItem(item)
@@ -491,6 +495,10 @@ private struct PasteConfirmationView: View {
                     .foregroundStyle(Color.voyaInk)
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+
+                    if store.isExtractingConfirmation {
+                        RecognitionAnimationCard(message: store.importMessage ?? "Recognizing confirmation...")
+                    }
 
                     if let pastedPreview {
                         ExtractionReview(preview: pastedPreview) { item in
@@ -865,6 +873,117 @@ private struct ImportOption: View {
         .padding(14)
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct RecognitionAnimationCard: View {
+    let message: String
+
+    private let tags = ["Dates", "Flights", "Hotels", "Places"]
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let phase = timeline.date.timeIntervalSinceReferenceDate
+            let scanProgress = (sin(phase * 1.8) + 1) / 2
+            let pulse = 0.94 + (sin(phase * 2.4) + 1) * 0.03
+
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .center, spacing: 16) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(Color.voyaMint)
+                            .frame(width: 78, height: 92)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .stroke(Color.voyaTeal.opacity(0.18), lineWidth: 1)
+                            )
+                            .scaleEffect(pulse)
+
+                        VStack(alignment: .leading, spacing: 7) {
+                            ForEach(0..<4, id: \.self) { index in
+                                Capsule()
+                                    .fill(index == 0 ? Color.voyaTeal : Color.voyaInk.opacity(0.16))
+                                    .frame(width: index == 2 ? 34 : 46, height: 5)
+                            }
+                        }
+                        .offset(y: 2)
+
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [.clear, .white.opacity(0.95), .clear],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: 66, height: 8)
+                            .blur(radius: 0.5)
+                            .offset(y: -32 + scanProgress * 64)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .frame(width: 86, height: 100)
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Reading confirmation")
+                            .font(.headline)
+                            .foregroundStyle(Color.voyaInk)
+                        Text(message)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 8) {
+                    ForEach(Array(tags.enumerated()), id: \.offset) { index, tag in
+                        RecognitionTag(title: tag, isActive: sin(phase * 2.2 + Double(index)) > -0.15)
+                    }
+                }
+
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.voyaLine)
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [.voyaTeal, .voyaGold, .voyaCoral],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: max(36, proxy.size.width * (0.24 + scanProgress * 0.76)))
+                    }
+                }
+                .frame(height: 7)
+            }
+            .padding(18)
+            .background(.white)
+            .foregroundStyle(Color.voyaInk)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+        }
+        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+    }
+}
+
+private struct RecognitionTag: View {
+    let title: String
+    let isActive: Bool
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.bold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .foregroundStyle(isActive ? Color.voyaInk : Color.voyaMuted)
+            .frame(maxWidth: .infinity)
+            .frame(height: 32)
+            .background(isActive ? Color.voyaMint : Color.voyaSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .animation(.easeInOut(duration: 0.35), value: isActive)
     }
 }
 
