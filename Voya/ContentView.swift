@@ -17,7 +17,7 @@ struct ContentView: View {
                 case .trips:
                     TripsView()
                 case .import:
-                    ImportView()
+                    ImportView(selectedTab: $selectedTab)
                 case .assistant:
                     AssistantView()
                 }
@@ -283,6 +283,7 @@ private struct TripsView: View {
 
 private struct ImportView: View {
     @EnvironmentObject private var store: VoyaStore
+    @Binding var selectedTab: VoyaTab
     @State private var isFileImporterPresented = false
     @State private var isPasteImporterPresented = false
 
@@ -335,6 +336,15 @@ private struct ImportView: View {
                     RecognitionAnimationCard(message: store.importMessage ?? "Recognizing confirmation...")
                 }
 
+                if let importSuccess = store.importSuccess {
+                    ImportSuccessAnimationCard(success: importSuccess, actionTitle: "Import another item") {
+                        selectedTab = .trips
+                    } onAction: {
+                        store.prepareForNextImport()
+                        isFileImporterPresented = true
+                    }
+                }
+
                 if let preview = store.extractedPreview, preview.sourceName != VoyaStore.pastedConfirmationSourceName {
                     ExtractionReview(preview: preview) { item in
                         store.updatePreviewItem(item)
@@ -354,7 +364,7 @@ private struct ImportView: View {
             handleFileImport(result)
         }
         .sheet(isPresented: $isPasteImporterPresented) {
-            PasteConfirmationView()
+            PasteConfirmationView(selectedTab: $selectedTab)
                 .environmentObject(store)
         }
     }
@@ -397,6 +407,7 @@ private struct ImportView: View {
 private struct PasteConfirmationView: View {
     @EnvironmentObject private var store: VoyaStore
     @Environment(\.dismiss) private var dismiss
+    @Binding var selectedTab: VoyaTab
 
     private var pastedPreview: ExtractionPreview? {
         guard store.extractedPreview?.sourceName == VoyaStore.pastedConfirmationSourceName else { return nil }
@@ -500,12 +511,20 @@ private struct PasteConfirmationView: View {
                         RecognitionAnimationCard(message: store.importMessage ?? "Recognizing confirmation...")
                     }
 
+                    if let importSuccess = store.importSuccess {
+                        ImportSuccessAnimationCard(success: importSuccess, actionTitle: "Paste another item") {
+                            dismiss()
+                            selectedTab = .trips
+                        } onAction: {
+                            store.prepareForNextPastedImport()
+                        }
+                    }
+
                     if let pastedPreview {
                         ExtractionReview(preview: pastedPreview) { item in
                             store.updatePreviewItem(item)
                         } onConfirm: {
                             store.confirmExtraction()
-                            dismiss()
                         }
                     }
                 }
@@ -984,6 +1003,96 @@ private struct RecognitionTag: View {
             .background(isActive ? Color.voyaMint : Color.voyaSurface)
             .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
             .animation(.easeInOut(duration: 0.35), value: isActive)
+    }
+}
+
+private struct ImportSuccessAnimationCard: View {
+    let success: ImportSuccess
+    let actionTitle: String
+    let onViewTrip: () -> Void
+    let onAction: () -> Void
+    @State private var isCheckVisible = false
+
+    private var itemLabel: String {
+        "\(success.itemCount) trip item\(success.itemCount == 1 ? "" : "s")"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 17) {
+            HStack(alignment: .center, spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(Color.voyaTeal.opacity(0.13))
+                        .frame(width: 88, height: 88)
+
+                    Circle()
+                        .stroke(Color.voyaTeal.opacity(0.22), lineWidth: 2)
+                        .frame(width: 74, height: 74)
+
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 30, weight: .black))
+                        .foregroundStyle(.white)
+                        .frame(width: 54, height: 54)
+                        .background(Color.voyaTeal)
+                        .clipShape(Circle())
+                        .shadow(color: Color.voyaTeal.opacity(0.28), radius: 14, y: 8)
+                        .scaleEffect(isCheckVisible ? 1 : 0.68)
+                        .opacity(isCheckVisible ? 1 : 0)
+                }
+                .frame(width: 94, height: 94)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(success.didCreateTrip ? "Trip created" : "Added to trip")
+                        .font(.title3.bold())
+                        .foregroundStyle(Color.voyaInk)
+                    Text("\(itemLabel) from \(success.sourceName) is now in \(success.tripTitle).")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 10) {
+                Button(action: onViewTrip) {
+                    Label("View trip", systemImage: "calendar")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .foregroundStyle(Color.voyaInk)
+                        .background(Color.voyaSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                Button(action: onAction) {
+                    Label(actionTitle, systemImage: "plus")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .foregroundStyle(.white)
+                        .background(Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .foregroundStyle(Color.voyaInk)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 18, y: 12)
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .onAppear {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.68)) {
+                isCheckVisible = true
+            }
+        }
     }
 }
 

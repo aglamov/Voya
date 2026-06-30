@@ -97,6 +97,14 @@ struct ExtractionPreview: Identifiable {
     var warnings: [String]
 }
 
+struct ImportSuccess: Identifiable {
+    let id = UUID()
+    var tripTitle: String
+    var itemCount: Int
+    var sourceName: String
+    var didCreateTrip: Bool
+}
+
 enum ImportErrorMessage: Identifiable {
     case emptyInput
     case unreadableFile(String)
@@ -146,6 +154,7 @@ final class VoyaStore: ObservableObject {
     @Published var trips = SampleData.trips
     @Published var selectedTripID: UUID?
     @Published var importMessage: String?
+    @Published var importSuccess: ImportSuccess?
     @Published var isExtractingConfirmation = false
 
     var selectedTrip: Trip? {
@@ -171,6 +180,7 @@ final class VoyaStore: ObservableObject {
             return
         }
 
+        importSuccess = nil
         let document = ImportedDocument(name: sourceName, text: cleanedText, importedAt: Date())
         importedDocuments.insert(document, at: 0)
 
@@ -213,6 +223,12 @@ final class VoyaStore: ObservableObject {
             trips[matchingTripIndex] = trip
             selectedTripID = trip.id
             importMessage = "Added to trip: \(trip.title)"
+            importSuccess = ImportSuccess(
+                tripTitle: trip.title,
+                itemCount: preview.items.count,
+                sourceName: preview.sourceName,
+                didCreateTrip: false
+            )
         } else {
             let items = sortedItinerary(uniqueItems(from: preview.items))
             let trip = Trip(
@@ -225,9 +241,25 @@ final class VoyaStore: ObservableObject {
             trips.insert(trip, at: 0)
             selectedTripID = trip.id
             importMessage = "Trip created: \(trip.title)"
+            importSuccess = ImportSuccess(
+                tripTitle: trip.title,
+                itemCount: items.count,
+                sourceName: preview.sourceName,
+                didCreateTrip: true
+            )
         }
 
         extractedPreview = nil
+    }
+
+    func prepareForNextImport() {
+        importSuccess = nil
+        importMessage = nil
+    }
+
+    func prepareForNextPastedImport() {
+        importText = ""
+        prepareForNextImport()
     }
 
     private func refreshPreviewFields() {
