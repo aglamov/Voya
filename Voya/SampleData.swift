@@ -35,6 +35,16 @@ enum SampleData {
         ItineraryItem(kind: .event, title: "Trastevere food walk", time: "Aug 13, 19:30", location: "Piazza Trilussa", status: "Ticket link saved")
     ]
 
+    static let trips: [Trip] = [
+        Trip(
+            title: "Rome",
+            dates: "Aug 12-16",
+            summary: "4 confirmed items from sample confirmations",
+            items: itinerary,
+            sourceName: "Sample itinerary"
+        )
+    ]
+
     static let alerts: [TravelAlert] = [
         TravelAlert(title: "Leave at 06:50", message: "Traffic is normal. This keeps 35 minutes of airport buffer.", severity: .calm),
         TravelAlert(title: "Gate not posted yet", message: "Voya will check again 2 hours before departure.", severity: .watch),

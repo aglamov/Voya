@@ -119,3 +119,17 @@ Examples:
 See [docs/product-brief.md](docs/product-brief.md) for the fuller concept, AI responsibilities, data model direction, and possible API providers.
 
 See [docs/architecture.md](docs/architecture.md) for the initial iPhone app, backend, AI, data, and provider architecture.
+
+## Vercel AI Extraction
+
+The app calls a Vercel Function at `POST /api/extract` to recognize pasted or uploaded travel confirmations. The function uses Vercel AI Gateway and returns normalized itinerary JSON for the review screen.
+
+Required Vercel environment variables:
+
+- `AI_GATEWAY_API_KEY`: Vercel AI Gateway key.
+- `AI_GATEWAY_MODEL`: optional model override. Defaults to `openai/gpt-5-mini`.
+
+iOS configuration:
+
+- Set the Xcode build setting `VOYA_API_BASE_URL` to the deployed Vercel URL, for example `https://your-project.vercel.app`.
+- If the URL is not configured or the AI request fails, Voya falls back to the built-in on-device parser so imports still work during development.

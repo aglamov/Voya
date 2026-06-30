@@ -1,4 +1,6 @@
 import SwiftUI
+import PDFKit
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var selectedTab: VoyaTab = .inspire
@@ -205,43 +207,61 @@ private struct TripsView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
-                HeaderBar(title: "Trips", subtitle: "Rome, Aug 12-16")
+                HeaderBar(title: "Trips", subtitle: store.selectedTrip.map { "\($0.title), \($0.dates)" } ?? "No trips yet")
 
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Next up")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.72))
-                            Text("BA2490 to Rome")
-                                .font(.title2.bold())
+                if let trip = store.selectedTrip {
+                    VStack(alignment: .leading, spacing: 18) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Next up")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white.opacity(0.72))
+                                Text(store.itinerary.first?.title ?? trip.title)
+                                    .font(.title2.bold())
+                                    .foregroundStyle(.white)
+                                Text(store.itinerary.first.map { "\($0.time) · \($0.location)" } ?? trip.summary)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white.opacity(0.72))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: store.itinerary.first?.kind.symbol ?? "calendar")
+                                .font(.title2.weight(.bold))
                                 .foregroundStyle(.white)
-                            Text("Leave at 06:50 · LHR Terminal 5")
-                                .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.72))
+                                .frame(width: 58, height: 58)
+                                .background(Color.voyaCoral)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         }
 
-                        Spacer()
-
-                        Image(systemName: "airplane.departure")
-                            .font(.title2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 58, height: 58)
-                            .background(Color.voyaCoral)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        HStack(spacing: 10) {
+                            MetricPill(title: "Items", value: "\(trip.items.count)")
+                            MetricPill(title: "Source", value: trip.sourceName)
+                            MetricPill(title: "Status", value: "Ready")
+                        }
                     }
+                    .padding(18)
+                    .background(Color.voyaInk)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .shadow(color: .black.opacity(0.10), radius: 22, y: 14)
+                }
 
-                    HStack(spacing: 10) {
-                        MetricPill(title: "Flight", value: "On time")
-                        MetricPill(title: "Transit", value: "42 min")
-                        MetricPill(title: "Buffer", value: "35 min")
+                if store.trips.count > 1 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(store.trips) { trip in
+                                TripChip(
+                                    trip: trip,
+                                    isSelected: trip.id == store.selectedTrip?.id
+                                ) {
+                                    store.selectedTripID = trip.id
+                                }
+                            }
+                        }
                     }
                 }
-                .padding(18)
-                .background(Color.voyaInk)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                .shadow(color: .black.opacity(0.10), radius: 22, y: 14)
 
                 SectionHeader(title: "Timeline", action: "Add")
 
@@ -263,6 +283,7 @@ private struct TripsView: View {
 
 private struct ImportView: View {
     @EnvironmentObject private var store: VoyaStore
+    @State private var isFileImporterPresented = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -280,10 +301,22 @@ private struct ImportView: View {
                         .foregroundStyle(Color.voyaInk)
 
                     LazyVGrid(columns: columns, spacing: 12) {
-                        ImportOption(symbol: "doc.text", title: "PDF", tint: .voyaTeal)
-                        ImportOption(symbol: "photo.on.rectangle", title: "Screenshot", tint: .voyaCoral)
-                        ImportOption(symbol: "camera.viewfinder", title: "Photo", tint: .indigo)
+                        Button {
+                            isFileImporterPresented = true
+                        } label: {
+                            ImportOption(symbol: "doc.text", title: "PDF/TXT", tint: .voyaTeal)
+                        }
+                        .buttonStyle(.plain)
+
+                        ImportOption(symbol: "photo.on.rectangle", title: "Screenshot", tint: .voyaCoral, isEnabled: false)
+                        ImportOption(symbol: "camera.viewfinder", title: "Photo", tint: .indigo, isEnabled: false)
                         ImportOption(symbol: "text.alignleft", title: "Paste", tint: .voyaGold)
+                    }
+
+                    if let importMessage = store.importMessage {
+                        Label(importMessage, systemImage: "checkmark.circle.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Color.voyaTeal)
                     }
                 }
                 .padding(18)
@@ -307,10 +340,15 @@ private struct ImportView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                     Button {
-                        store.runMockExtraction()
+                        store.extractFromPastedText()
                     } label: {
                         HStack {
-                            Label("Extract trip details", systemImage: "wand.and.stars")
+                            if store.isExtractingConfirmation {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Label("Extract trip details", systemImage: "wand.and.stars")
+                            }
                             Spacer()
                             Image(systemName: "arrow.right")
                         }
@@ -321,6 +359,8 @@ private struct ImportView: View {
                         .background(Color.voyaInk)
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
+                    .disabled(store.isExtractingConfirmation)
+                    .opacity(store.isExtractingConfirmation ? 0.82 : 1)
                 }
                 .padding(18)
                 .background(.white)
@@ -329,12 +369,57 @@ private struct ImportView: View {
                 .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
 
                 if let preview = store.extractedPreview {
-                    ExtractionReview(preview: preview)
+                    ExtractionReview(preview: preview) { item in
+                        store.updatePreviewItem(item)
+                    } onConfirm: {
+                        store.confirmExtraction()
+                    }
                 }
             }
             .padding(.horizontal, 18)
             .padding(.top, 18)
         }
+        .fileImporter(
+            isPresented: $isFileImporterPresented,
+            allowedContentTypes: [.pdf, .plainText, .text],
+            allowsMultipleSelection: false
+        ) { result in
+            handleFileImport(result)
+        }
+    }
+
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let sourceName = url.lastPathComponent
+        if url.pathExtension.localizedCaseInsensitiveCompare("pdf") == .orderedSame {
+            guard let text = readPDFText(from: url), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
+                return
+            }
+            store.extract(text: text, sourceName: sourceName)
+            return
+        }
+
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            store.extract(text: text, sourceName: sourceName)
+        } catch {
+            store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
+        }
+    }
+
+    private func readPDFText(from url: URL) -> String? {
+        guard let document = PDFDocument(url: url) else { return nil }
+        return (0..<document.pageCount)
+            .compactMap { document.page(at: $0)?.string }
+            .joined(separator: "\n")
     }
 }
 
@@ -497,6 +582,32 @@ private struct MoodChip: View {
     }
 }
 
+private struct TripChip: View {
+    let trip: Trip
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(trip.title)
+                    .font(.subheadline.weight(.bold))
+                    .lineLimit(1)
+                Text(trip.dates)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isSelected ? .white : Color.voyaInk)
+            .padding(.horizontal, 14)
+            .frame(width: 148, height: 58, alignment: .leading)
+            .background(isSelected ? Color.voyaInk : .white)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(isSelected ? 0.08 : 0.04), radius: 12, y: 8)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct DestinationMark: View {
     let destination: String
     let color: Color
@@ -634,19 +745,32 @@ private struct ImportOption: View {
     let symbol: String
     let title: String
     let tint: Color
+    var isEnabled = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Image(systemName: symbol)
                 .font(.title3.weight(.bold))
-                .foregroundStyle(tint)
+                .foregroundStyle(isEnabled ? tint : Color.voyaMuted)
                 .frame(width: 42, height: 42)
-                .background(tint.opacity(0.12))
+                .background((isEnabled ? tint : Color.voyaMuted).opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(Color.voyaInk)
+            HStack {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(isEnabled ? Color.voyaInk : Color.voyaMuted)
+                Spacer()
+                if !isEnabled {
+                    Text("Soon")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(Color.voyaMuted)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(.white)
+                        .clipShape(Capsule())
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 112)
@@ -658,6 +782,8 @@ private struct ImportOption: View {
 
 private struct ExtractionReview: View {
     let preview: ExtractionPreview
+    let onItemChange: (ItineraryItem) -> Void
+    let onConfirm: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -676,14 +802,28 @@ private struct ExtractionReview: View {
                 ProgressRing(value: preview.confidence)
             }
 
+            if !preview.warnings.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(preview.warnings, id: \.self) { warning in
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Color.voyaGold)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(12)
+                .background(Color.voyaGold.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+
             VStack(spacing: 10) {
-                ForEach(preview.fields, id: \.0) { field in
+                ForEach(preview.fields) { field in
                     HStack(alignment: .top) {
-                        Text(field.0)
+                        Text(field.label)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Color.voyaMuted)
                             .frame(width: 72, alignment: .leading)
-                        Text(field.1)
+                        Text(field.value)
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(Color.voyaInk)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -694,16 +834,82 @@ private struct ExtractionReview: View {
             .background(Color.voyaSurface)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-            HStack(spacing: 12) {
-                IconTextButton(title: "Edit", symbol: "pencil", style: .secondary)
-                IconTextButton(title: "Confirm", symbol: "checkmark", style: .primary)
+            VStack(spacing: 12) {
+                ForEach(preview.items) { item in
+                    EditableItineraryItem(item: item, onChange: onItemChange)
+                }
             }
+
+            Button(action: onConfirm) {
+                Label("Create trip", systemImage: "checkmark")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .foregroundStyle(.white)
+                    .background(Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
         .padding(18)
         .background(.white)
         .foregroundStyle(Color.voyaInk)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+}
+
+private struct EditableItineraryItem: View {
+    @State private var draft: ItineraryItem
+    let onChange: (ItineraryItem) -> Void
+
+    init(item: ItineraryItem, onChange: @escaping (ItineraryItem) -> Void) {
+        _draft = State(initialValue: item)
+        self.onChange = onChange
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(draft.kind.rawValue, systemImage: draft.kind.symbol)
+                    .font(.headline)
+                    .foregroundStyle(Color.voyaInk)
+                Spacer()
+                Text(draft.status)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.voyaMuted)
+            }
+
+            editableField("Title", text: $draft.title)
+            editableField("Time", text: $draft.time)
+            editableField("Place", text: $draft.location)
+            editableField("Status", text: $draft.status)
+        }
+        .padding(14)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onChange(of: draft.title) { _, _ in onChange(draft) }
+        .onChange(of: draft.time) { _, _ in onChange(draft) }
+        .onChange(of: draft.location) { _, _ in onChange(draft) }
+        .onChange(of: draft.status) { _, _ in onChange(draft) }
+    }
+
+    private func editableField(_ label: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaMuted)
+            TextField(label, text: text, axis: .vertical)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.voyaInk)
+                .lineLimit(1...3)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 38)
+                .background(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        }
     }
 }
 
