@@ -284,6 +284,7 @@ private struct TripsView: View {
 private struct ImportView: View {
     @EnvironmentObject private var store: VoyaStore
     @State private var isFileImporterPresented = false
+    @State private var isPasteImporterPresented = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -310,7 +311,12 @@ private struct ImportView: View {
 
                         ImportOption(symbol: "photo.on.rectangle", title: "Screenshot", tint: .voyaCoral, isEnabled: false)
                         ImportOption(symbol: "camera.viewfinder", title: "Photo", tint: .indigo, isEnabled: false)
-                        ImportOption(symbol: "text.alignleft", title: "Paste", tint: .voyaGold)
+                        Button {
+                            isPasteImporterPresented = true
+                        } label: {
+                            ImportOption(symbol: "text.alignleft", title: "Paste", tint: .voyaGold)
+                        }
+                        .buttonStyle(.plain)
                     }
 
                     if let importMessage = store.importMessage {
@@ -325,50 +331,7 @@ private struct ImportView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Pasted confirmation")
-                        .font(.headline)
-                        .foregroundStyle(Color.voyaInk)
-
-                    TextEditor(text: $store.importText)
-                        .scrollContentBackground(.hidden)
-                        .font(.callout)
-                        .foregroundStyle(Color.voyaInk)
-                        .frame(minHeight: 126)
-                        .padding(12)
-                        .background(Color.voyaSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                    Button {
-                        store.extractFromPastedText()
-                    } label: {
-                        HStack {
-                            if store.isExtractingConfirmation {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Label("Extract trip details", systemImage: "wand.and.stars")
-                            }
-                            Spacer()
-                            Image(systemName: "arrow.right")
-                        }
-                        .font(.headline)
-                        .padding(.horizontal, 16)
-                        .frame(height: 54)
-                        .foregroundStyle(.white)
-                        .background(Color.voyaInk)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    }
-                    .disabled(store.isExtractingConfirmation)
-                    .opacity(store.isExtractingConfirmation ? 0.82 : 1)
-                }
-                .padding(18)
-                .background(.white)
-                .foregroundStyle(Color.voyaInk)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
-
-                if let preview = store.extractedPreview {
+                if let preview = store.extractedPreview, preview.sourceName != VoyaStore.pastedConfirmationSourceName {
                     ExtractionReview(preview: preview) { item in
                         store.updatePreviewItem(item)
                     } onConfirm: {
@@ -385,6 +348,10 @@ private struct ImportView: View {
             allowsMultipleSelection: false
         ) { result in
             handleFileImport(result)
+        }
+        .sheet(isPresented: $isPasteImporterPresented) {
+            PasteConfirmationView()
+                .environmentObject(store)
         }
     }
 
@@ -420,6 +387,127 @@ private struct ImportView: View {
         return (0..<document.pageCount)
             .compactMap { document.page(at: $0)?.string }
             .joined(separator: "\n")
+    }
+}
+
+private struct PasteConfirmationView: View {
+    @EnvironmentObject private var store: VoyaStore
+    @Environment(\.dismiss) private var dismiss
+
+    private var pastedPreview: ExtractionPreview? {
+        guard store.extractedPreview?.sourceName == VoyaStore.pastedConfirmationSourceName else { return nil }
+        return store.extractedPreview
+    }
+
+    var body: some View {
+        ZStack {
+            AppBackground()
+                .ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Paste")
+                                .font(.system(size: 28, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.voyaInk)
+                            Text("Manual confirmation")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                                .frame(width: 42, height: 42)
+                                .background(.white)
+                                .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Pasted confirmation")
+                            .font(.headline)
+                            .foregroundStyle(Color.voyaInk)
+
+                        ZStack(alignment: .topLeading) {
+                            TextEditor(text: $store.importText)
+                                .scrollContentBackground(.hidden)
+                                .font(.callout)
+                                .foregroundStyle(Color.voyaInk)
+                                .frame(minHeight: 188)
+                                .padding(12)
+
+                            if store.importText.isEmpty {
+                                Text("Paste booking confirmation text")
+                                    .font(.callout)
+                                    .foregroundStyle(Color.voyaMuted)
+                                    .padding(.horizontal, 17)
+                                    .padding(.vertical, 20)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .background(Color.voyaSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                        Button {
+                            store.extractFromPastedText()
+                        } label: {
+                            HStack {
+                                if store.isExtractingConfirmation {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Label("Extract trip details", systemImage: "wand.and.stars")
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.right")
+                            }
+                            .font(.headline)
+                            .padding(.horizontal, 16)
+                            .frame(height: 54)
+                            .foregroundStyle(.white)
+                            .background(Color.voyaInk)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+                        .disabled(store.isExtractingConfirmation)
+                        .opacity(store.isExtractingConfirmation ? 0.82 : 1)
+
+                        if let importMessage = store.importMessage {
+                            Label(importMessage, systemImage: store.isExtractingConfirmation ? "wand.and.stars" : "checkmark.circle.fill")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color.voyaTeal)
+                        }
+                    }
+                    .padding(18)
+                    .background(.white)
+                    .foregroundStyle(Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+
+                    if let pastedPreview {
+                        ExtractionReview(preview: pastedPreview) { item in
+                            store.updatePreviewItem(item)
+                        } onConfirm: {
+                            store.confirmExtraction()
+                            dismiss()
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 30)
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 }
 

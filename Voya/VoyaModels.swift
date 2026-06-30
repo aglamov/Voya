@@ -136,9 +136,11 @@ enum AlertSeverity {
 
 @MainActor
 final class VoyaStore: ObservableObject {
+    static let pastedConfirmationSourceName = "Pasted confirmation"
+
     @Published var inspirationText = "Warm 4-day trip under $700 with easy transit"
     @Published var selectedMood: TripMood = .warm
-    @Published var importText = "BA2490 London Heathrow to Rome Fiumicino, Aug 12, 09:40. Hotel Artemide check-in Aug 12."
+    @Published var importText = ""
     @Published var extractedPreview: ExtractionPreview?
     @Published var importedDocuments: [ImportedDocument] = []
     @Published var trips = SampleData.trips
@@ -159,7 +161,7 @@ final class VoyaStore: ObservableObject {
     }
 
     func extractFromPastedText() {
-        extract(text: importText, sourceName: "Pasted confirmation")
+        extract(text: importText, sourceName: Self.pastedConfirmationSourceName)
     }
 
     func extract(text: String, sourceName: String) {
