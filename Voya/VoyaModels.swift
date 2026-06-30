@@ -61,15 +61,63 @@ struct Trip: Identifiable {
     var summary: String
     var items: [ItineraryItem]
     var sourceName: String
+    var destinationImageURL: URL?
+    var destinationImageCredit: String?
 
-    init(id: UUID = UUID(), title: String, dates: String, summary: String, items: [ItineraryItem], sourceName: String) {
+    init(id: UUID = UUID(), title: String, dates: String, summary: String, items: [ItineraryItem], sourceName: String, destinationImageURL: URL? = nil, destinationImageCredit: String? = nil) {
         self.id = id
         self.title = title
         self.dates = dates
         self.summary = summary
         self.items = items
         self.sourceName = sourceName
+        self.destinationImageURL = destinationImageURL
+        self.destinationImageCredit = destinationImageCredit
     }
+}
+
+struct DestinationHeroImage {
+    let url: URL
+    let credit: String
+}
+
+struct DestinationImageResolver {
+    func image(for destination: String) async throws -> DestinationHeroImage {
+        let pageTitle = destination
+            .replacingOccurrences(of: "Trip to ", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "_")
+
+        guard let encodedTitle = pageTitle.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "https://en.wikipedia.org/api/rest_v1/page/summary/\(encodedTitle)") else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Voya travel companion", forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              200..<300 ~= httpResponse.statusCode else {
+            throw URLError(.badServerResponse)
+        }
+
+        let summary = try JSONDecoder().decode(WikipediaPageSummary.self, from: data)
+        guard let imageURL = summary.originalimage?.source ?? summary.thumbnail?.source else {
+            throw URLError(.fileDoesNotExist)
+        }
+
+        return DestinationHeroImage(url: imageURL, credit: "Image: Wikipedia")
+    }
+}
+
+private struct WikipediaPageSummary: Decodable {
+    struct PageImage: Decodable {
+        let source: URL
+    }
+
+    let thumbnail: PageImage?
+    let originalimage: PageImage?
 }
 
 struct ImportedDocument: Identifiable {
@@ -167,6 +215,30 @@ final class VoyaStore: ObservableObject {
 
     var itinerary: [ItineraryItem] {
         selectedTrip?.items ?? []
+    }
+
+    func loadHeroImageIfNeeded(for trip: Trip) async {
+        guard trip.destinationImageURL == nil,
+              let index = trips.firstIndex(where: { $0.id == trip.id }) else {
+            return
+        }
+
+        do {
+            let heroImage = try await DestinationImageResolver().image(for: trip.title)
+            guard let currentIndex = trips.firstIndex(where: { $0.id == trip.id }),
+                  trips[currentIndex].destinationImageURL == nil else {
+                return
+            }
+
+            trips[currentIndex].destinationImageURL = heroImage.url
+            trips[currentIndex].destinationImageCredit = heroImage.credit
+        } catch {
+            guard let currentIndex = trips.firstIndex(where: { $0.id == trip.id }) else {
+                return
+            }
+
+            trips[currentIndex].destinationImageCredit = nil
+        }
     }
 
     func extractFromPastedText() {

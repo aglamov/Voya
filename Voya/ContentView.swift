@@ -240,12 +240,23 @@ private struct TripsView: View {
                             MetricPill(title: "Source", value: trip.sourceName)
                             MetricPill(title: "Status", value: "Ready")
                         }
+
+                        if let credit = trip.destinationImageCredit {
+                            Text(credit)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.72))
+                        }
                     }
                     .padding(18)
-                    .background(Color.voyaInk)
+                    .background {
+                        TripHeroBackground(imageURL: trip.destinationImageURL)
+                    }
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
                     .shadow(color: .black.opacity(0.10), radius: 22, y: 14)
+                    .task(id: trip.id) {
+                        await store.loadHeroImageIfNeeded(for: trip)
+                    }
                 }
 
                 if store.trips.count > 1 {
@@ -337,7 +348,7 @@ private struct ImportView: View {
                 }
 
                 if let importSuccess = store.importSuccess {
-                    ImportSuccessAnimationCard(success: importSuccess, actionTitle: "Import another item") {
+                    ImportSuccessAnimationCard(success: importSuccess, actionTitle: "Import") {
                         selectedTab = .trips
                     } onAction: {
                         store.prepareForNextImport()
@@ -512,7 +523,7 @@ private struct PasteConfirmationView: View {
                     }
 
                     if let importSuccess = store.importSuccess {
-                        ImportSuccessAnimationCard(success: importSuccess, actionTitle: "Paste another item") {
+                        ImportSuccessAnimationCard(success: importSuccess, actionTitle: "Paste") {
                             dismiss()
                             selectedTab = .trips
                         } onAction: {
@@ -806,6 +817,43 @@ private struct MetricPill: View {
         .frame(height: 62)
         .background(.white.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct TripHeroBackground: View {
+    let imageURL: URL?
+
+    var body: some View {
+        ZStack {
+            Color.voyaInk
+
+            if let imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .empty:
+                        Color.voyaInk
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        Color.voyaInk
+                    @unknown default:
+                        Color.voyaInk
+                    }
+                }
+            }
+
+            LinearGradient(
+                colors: [
+                    .black.opacity(0.52),
+                    .black.opacity(0.30),
+                    .black.opacity(0.58)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
     }
 }
 
