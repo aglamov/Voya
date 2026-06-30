@@ -951,42 +951,28 @@ private struct RecognitionAnimationCard: View {
     var body: some View {
         TimelineView(.animation) { timeline in
             let phase = timeline.date.timeIntervalSinceReferenceDate
-            let scanProgress = (sin(phase * 1.8) + 1) / 2
-            let pulse = 0.94 + (sin(phase * 2.4) + 1) * 0.03
+            let activeStep = Int(phase * 1.15) % 5
 
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .center, spacing: 16) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Color.voyaMint)
+                            .fill(Color.voyaSurface)
                             .frame(width: 78, height: 92)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .stroke(Color.voyaTeal.opacity(0.18), lineWidth: 1)
+                                    .stroke(Color.voyaLine, lineWidth: 1)
                             )
-                            .scaleEffect(pulse)
 
                         VStack(alignment: .leading, spacing: 7) {
                             ForEach(0..<4, id: \.self) { index in
                                 Capsule()
-                                    .fill(index == 0 ? Color.voyaTeal : Color.voyaInk.opacity(0.16))
+                                    .fill(index <= activeStep ? Color.voyaTeal : Color.voyaInk.opacity(0.14))
                                     .frame(width: index == 2 ? 34 : 46, height: 5)
+                                    .animation(.easeInOut(duration: 0.28), value: activeStep)
                             }
                         }
                         .offset(y: 2)
-
-                        Rectangle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [.clear, .white.opacity(0.95), .clear],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: 66, height: 8)
-                            .blur(radius: 0.5)
-                            .offset(y: -32 + scanProgress * 64)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     .frame(width: 86, height: 100)
 
@@ -1005,26 +991,9 @@ private struct RecognitionAnimationCard: View {
 
                 HStack(spacing: 8) {
                     ForEach(Array(tags.enumerated()), id: \.offset) { index, tag in
-                        RecognitionTag(title: tag, isActive: sin(phase * 2.2 + Double(index)) > -0.15)
+                        RecognitionTag(title: tag, isActive: index <= min(activeStep, tags.count - 1))
                     }
                 }
-
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.voyaLine)
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [.voyaTeal, .voyaGold, .voyaCoral],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: max(36, proxy.size.width * (0.24 + scanProgress * 0.76)))
-                    }
-                }
-                .frame(height: 7)
             }
             .padding(18)
             .background(.white)

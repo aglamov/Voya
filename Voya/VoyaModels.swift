@@ -83,9 +83,8 @@ struct DestinationHeroImage {
 
 struct DestinationImageResolver {
     func image(for destination: String) async throws -> DestinationHeroImage {
-        let pageTitle = destination
+        let pageTitle = Self.normalizedDestination(destination)
             .replacingOccurrences(of: "Trip to ", with: "", options: .caseInsensitive)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: " ", with: "_")
 
         guard let encodedTitle = pageTitle.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
@@ -108,6 +107,12 @@ struct DestinationImageResolver {
         }
 
         return DestinationHeroImage(url: imageURL, credit: "Image: Wikipedia")
+    }
+
+    private static func normalizedDestination(_ destination: String) -> String {
+        destination
+            .replacingOccurrences(of: #"\s*\([A-Z]{3}\)"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -219,7 +224,7 @@ final class VoyaStore: ObservableObject {
 
     func loadHeroImageIfNeeded(for trip: Trip) async {
         guard trip.destinationImageURL == nil,
-              let index = trips.firstIndex(where: { $0.id == trip.id }) else {
+              trips.contains(where: { $0.id == trip.id }) else {
             return
         }
 
@@ -520,6 +525,7 @@ final class VoyaStore: ObservableObject {
         return suffixes.reduce(location) { result, suffix in
             result.replacingOccurrences(of: suffix, with: "", options: .caseInsensitive)
         }
+        .replacingOccurrences(of: #"\s*\([A-Z]{3}\)"#, with: "", options: .regularExpression)
         .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
 }
