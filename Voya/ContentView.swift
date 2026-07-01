@@ -298,74 +298,91 @@ private struct ImportView: View {
     @State private var isFileImporterPresented = false
     @State private var isPasteImporterPresented = false
 
+    private enum ScrollTarget {
+        static let recognition = "import-recognition"
+        static let review = "import-review"
+    }
+
     private let columns = [
         GridItem(.flexible(), spacing: 12),
         GridItem(.flexible(), spacing: 12)
     ]
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 22) {
-                HeaderBar(title: "Import", subtitle: "Travel inbox")
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 22) {
+                    HeaderBar(title: "Import", subtitle: "Travel inbox")
 
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Drop confirmations here.")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.voyaInk)
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Drop confirmations here.")
+                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.voyaInk)
 
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        Button {
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            Button {
+                                isFileImporterPresented = true
+                            } label: {
+                                ImportOption(symbol: "doc.text", title: "PDF/TXT", tint: .voyaTeal)
+                            }
+                            .buttonStyle(.plain)
+
+                            ImportOption(symbol: "photo.on.rectangle", title: "Screenshot", tint: .voyaCoral, isEnabled: false)
+                            ImportOption(symbol: "camera.viewfinder", title: "Photo", tint: .indigo, isEnabled: false)
+                            Button {
+                                isPasteImporterPresented = true
+                            } label: {
+                                ImportOption(symbol: "text.alignleft", title: "Paste", tint: .voyaGold)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if let importMessage = store.importMessage {
+                            Label(importMessage, systemImage: "checkmark.circle.fill")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color.voyaTeal)
+                        }
+                    }
+                    .padding(18)
+                    .background(.white)
+                    .foregroundStyle(Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+
+                    if store.isExtractingConfirmation {
+                        RecognitionAnimationCard(message: store.importMessage ?? "Recognizing confirmation...")
+                            .id(ScrollTarget.recognition)
+                    }
+
+                    if let importSuccess = store.importSuccess {
+                        ImportSuccessAnimationCard(success: importSuccess, actionTitle: "Import") {
+                            selectedTab = .trips
+                        } onAction: {
+                            store.prepareForNextImport()
                             isFileImporterPresented = true
-                        } label: {
-                            ImportOption(symbol: "doc.text", title: "PDF/TXT", tint: .voyaTeal)
                         }
-                        .buttonStyle(.plain)
+                    }
 
-                        ImportOption(symbol: "photo.on.rectangle", title: "Screenshot", tint: .voyaCoral, isEnabled: false)
-                        ImportOption(symbol: "camera.viewfinder", title: "Photo", tint: .indigo, isEnabled: false)
-                        Button {
-                            isPasteImporterPresented = true
-                        } label: {
-                            ImportOption(symbol: "text.alignleft", title: "Paste", tint: .voyaGold)
+                    if let preview = store.extractedPreview {
+                        ExtractionReview(preview: preview) { item in
+                            store.updatePreviewItem(item)
+                        } onConfirm: {
+                            store.confirmExtraction()
                         }
-                        .buttonStyle(.plain)
-                    }
-
-                    if let importMessage = store.importMessage {
-                        Label(importMessage, systemImage: "checkmark.circle.fill")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Color.voyaTeal)
+                        .id(ScrollTarget.review)
                     }
                 }
-                .padding(18)
-                .background(.white)
-                .foregroundStyle(Color.voyaInk)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
-
-                if store.isExtractingConfirmation {
-                    RecognitionAnimationCard(message: store.importMessage ?? "Recognizing confirmation...")
-                }
-
-                if let importSuccess = store.importSuccess {
-                    ImportSuccessAnimationCard(success: importSuccess, actionTitle: "Import") {
-                        selectedTab = .trips
-                    } onAction: {
-                        store.prepareForNextImport()
-                        isFileImporterPresented = true
-                    }
-                }
-
-                if let preview = store.extractedPreview {
-                    ExtractionReview(preview: preview) { item in
-                        store.updatePreviewItem(item)
-                    } onConfirm: {
-                        store.confirmExtraction()
-                    }
-                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 18)
+            .onChange(of: store.isExtractingConfirmation) { _, isExtracting in
+                guard isExtracting else { return }
+                scroll(to: ScrollTarget.recognition, with: proxy)
+            }
+            .onChange(of: store.extractedPreview?.id) { _, previewID in
+                guard previewID != nil else { return }
+                scroll(to: ScrollTarget.review, with: proxy)
+            }
         }
         .fileImporter(
             isPresented: $isFileImporterPresented,
@@ -377,6 +394,14 @@ private struct ImportView: View {
         .sheet(isPresented: $isPasteImporterPresented) {
             PasteConfirmationView()
                 .environmentObject(store)
+        }
+    }
+
+    private func scroll(to target: String, with proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) {
+                proxy.scrollTo(target, anchor: .top)
+            }
         }
     }
 
