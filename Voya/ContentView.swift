@@ -209,7 +209,9 @@ private struct RecommendationCard: View {
 
 private struct TripsView: View {
     @EnvironmentObject private var store: VoyaStore
+    @State private var itemBeingEdited: ItineraryItem?
     @State private var itemPendingDeletion: ItineraryItem?
+    @State private var tripPendingDeletion: Trip?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -217,7 +219,9 @@ private struct TripsView: View {
                 HeaderBar(title: "Trips", subtitle: store.selectedTrip.map { "\($0.title), \($0.dates)" } ?? "No trips yet")
 
                 if let trip = store.selectedTrip {
-                    TripHeroCard(trip: trip)
+                    TripHeroCard(trip: trip) {
+                        tripPendingDeletion = trip
+                    }
                     .task(id: trip.id) {
                         await store.loadHeroImageIfNeeded(for: trip)
                     }
@@ -243,6 +247,8 @@ private struct TripsView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(store.itinerary.enumerated()), id: \.element.id) { index, item in
                         TimelineRow(item: item, isLast: index == store.itinerary.count - 1) {
+                            itemBeingEdited = item
+                        } onDelete: {
                             itemPendingDeletion = item
                         }
                     }
@@ -264,6 +270,28 @@ private struct TripsView: View {
         } message: { item in
             Text("\(item.title) will be removed from this trip.")
         }
+        .alert("Delete trip?", isPresented: tripDeleteConfirmationBinding, presenting: tripPendingDeletion) { trip in
+            Button("Delete", role: .destructive) {
+                store.deleteTrip(trip)
+            }
+            Button("Cancel", role: .cancel) {
+            }
+        } message: { trip in
+            Text("\(trip.title) and its timeline will be removed.")
+        }
+        .sheet(item: $itemBeingEdited) { item in
+            EditItineraryItemView(item: item) { draft in
+                store.updateItineraryItem(
+                    item,
+                    kind: draft.kind,
+                    title: draft.title,
+                    startsAt: draft.startsAt,
+                    endsAt: draft.effectiveEndsAt,
+                    location: draft.location,
+                    status: draft.status
+                )
+            }
+        }
     }
 
     private var deleteConfirmationBinding: Binding<Bool> {
@@ -272,6 +300,17 @@ private struct TripsView: View {
             set: { isPresented in
                 if !isPresented {
                     itemPendingDeletion = nil
+                }
+            }
+        )
+    }
+
+    private var tripDeleteConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { tripPendingDeletion != nil },
+            set: { isPresented in
+                if !isPresented {
+                    tripPendingDeletion = nil
                 }
             }
         )
@@ -811,6 +850,7 @@ private struct MetricPill: View {
 
 private struct TripHeroCard: View {
     let trip: Trip
+    let onDelete: () -> Void
 
     private var summary: TripHeroSummary {
         TripHeroSummary(trip: trip)
@@ -835,12 +875,20 @@ private struct TripHeroCard: View {
 
                 Spacer()
 
-                Image(systemName: "calendar")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 54, height: 54)
-                    .background(Color.voyaCoral)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                Menu {
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete trip", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 54, height: 54)
+                        .background(Color.voyaCoral)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Actions for \(trip.title)")
             }
 
             Spacer(minLength: 0)
@@ -1078,6 +1126,7 @@ private struct TripHeroBackground: View {
 private struct TimelineRow: View {
     let item: ItineraryItem
     let isLast: Bool
+    let onEdit: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -1099,7 +1148,7 @@ private struct TimelineRow: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(item.time)
+                    Text(item.displayTime)
                         .font(.caption.weight(.bold))
                         .foregroundStyle(Color.voyaCoral)
                     Spacer()
@@ -1114,16 +1163,24 @@ private struct TimelineRow: View {
                         .foregroundStyle(Color.voyaInk)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Button(role: .destructive, action: onDelete) {
-                        Image(systemName: "trash")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(Color.red)
+                    Menu {
+                        Button(action: onEdit) {
+                            Label("Edit", systemImage: "pencil")
+                        }
+
+                        Button(role: .destructive, action: onDelete) {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(Color.voyaMuted)
                             .frame(width: 30, height: 30)
-                            .background(Color.red.opacity(0.10))
+                            .background(Color.voyaSurface)
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Delete \(item.title)")
+                    .accessibilityLabel("Actions for \(item.title)")
                 }
 
                 Text(item.location)
@@ -1134,6 +1191,167 @@ private struct TimelineRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
+    }
+}
+
+private struct ItineraryItemDraft {
+    var kind: ItineraryKind
+    var title: String
+    var startsAt: Date
+    var endsAt: Date
+    var hasEndDate: Bool
+    var location: String
+    var status: String
+
+    init(item: ItineraryItem) {
+        kind = item.kind
+        title = item.title
+        startsAt = item.startsAt ?? Date()
+        endsAt = item.endsAt ?? item.startsAt ?? Date()
+        hasEndDate = item.endsAt != nil
+        location = item.location
+        status = item.status
+    }
+
+    var effectiveEndsAt: Date? {
+        hasEndDate ? max(endsAt, startsAt) : nil
+    }
+
+    var displayTime: String {
+        ItineraryDateFormatter.displayTime(start: startsAt, end: effectiveEndsAt)
+    }
+}
+
+private struct EditItineraryItemView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: ItineraryItemDraft
+    let onSave: (ItineraryItemDraft) -> Void
+
+    init(item: ItineraryItem, onSave: @escaping (ItineraryItemDraft) -> Void) {
+        _draft = State(initialValue: ItineraryItemDraft(item: item))
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        ZStack {
+            AppBackground()
+                .ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Edit item")
+                                .font(.system(size: 28, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.voyaInk)
+                            Text(draft.kind.rawValue)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                                .frame(width: 42, height: 42)
+                                .background(.white)
+                                .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        Picker("Type", selection: $draft.kind) {
+                            ForEach(ItineraryKind.allCases, id: \.self) { kind in
+                                Label(kind.rawValue, systemImage: kind.symbol)
+                                    .tag(kind)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(Color.voyaInk)
+
+                        editField("Title", text: $draft.title)
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            DatePicker("Start", selection: $draft.startsAt, displayedComponents: [.date, .hourAndMinute])
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.voyaInk)
+
+                            Toggle("End time", isOn: $draft.hasEndDate)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.voyaInk)
+
+                            if draft.hasEndDate {
+                                DatePicker("End", selection: $draft.endsAt, in: draft.startsAt..., displayedComponents: [.date, .hourAndMinute])
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Color.voyaInk)
+                            }
+                        }
+                        .padding(12)
+                        .background(Color.voyaSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .onChange(of: draft.startsAt) { _, startsAt in
+                            if draft.endsAt < startsAt {
+                                draft.endsAt = startsAt
+                            }
+                        }
+
+                        editField("Place", text: $draft.location)
+                        editField("Status", text: $draft.status)
+                    }
+                    .padding(18)
+                    .background(.white)
+                    .foregroundStyle(Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 96)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            Button {
+                onSave(draft)
+                dismiss()
+            } label: {
+                Label("Save changes", systemImage: "checkmark")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .foregroundStyle(.white)
+                    .background(Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            .background(.ultraThinMaterial)
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func editField(_ label: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaMuted)
+            TextField(label, text: text, axis: .vertical)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.voyaInk)
+                .lineLimit(1...3)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 40)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        }
     }
 }
 
@@ -1429,10 +1647,18 @@ private struct ExtractionReview: View {
 
 private struct EditableItineraryItem: View {
     @State private var draft: ItineraryItem
+    @State private var hasStartDate: Bool
+    @State private var startDate: Date
+    @State private var hasEndDate: Bool
+    @State private var endDate: Date
     let onChange: (ItineraryItem) -> Void
 
     init(item: ItineraryItem, onChange: @escaping (ItineraryItem) -> Void) {
         _draft = State(initialValue: item)
+        _hasStartDate = State(initialValue: item.startsAt != nil)
+        _startDate = State(initialValue: item.startsAt ?? Date())
+        _hasEndDate = State(initialValue: item.endsAt != nil)
+        _endDate = State(initialValue: item.endsAt ?? item.startsAt ?? Date())
         self.onChange = onChange
     }
 
@@ -1448,8 +1674,39 @@ private struct EditableItineraryItem: View {
                     .foregroundStyle(Color.voyaMuted)
             }
 
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label(hasStartDate ? draft.displayTime : "Date needed", systemImage: "calendar")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(hasStartDate ? Color.voyaInk : Color.voyaCoral)
+                    Spacer()
+                    Toggle("", isOn: $hasStartDate)
+                        .labelsHidden()
+                        .tint(Color.voyaTeal)
+                }
+
+                if hasStartDate {
+                    DatePicker("Start", selection: $startDate, displayedComponents: [.date, .hourAndMinute])
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaInk)
+
+                    Toggle("End time", isOn: $hasEndDate)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaInk)
+                        .tint(Color.voyaTeal)
+
+                    if hasEndDate {
+                        DatePicker("End", selection: $endDate, in: startDate..., displayedComponents: [.date, .hourAndMinute])
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color.voyaInk)
+                    }
+                }
+            }
+            .padding(10)
+            .background(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
             editableField("Title", text: $draft.title)
-            editableField("Time", text: $draft.time)
             editableField("Place", text: $draft.location)
             editableField("Status", text: $draft.status)
         }
@@ -1457,9 +1714,17 @@ private struct EditableItineraryItem: View {
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onChange(of: draft.title) { _, _ in onChange(draft) }
-        .onChange(of: draft.time) { _, _ in onChange(draft) }
         .onChange(of: draft.location) { _, _ in onChange(draft) }
         .onChange(of: draft.status) { _, _ in onChange(draft) }
+        .onChange(of: hasStartDate) { _, _ in commitDates() }
+        .onChange(of: startDate) { _, value in
+            if endDate < value {
+                endDate = value
+            }
+            commitDates()
+        }
+        .onChange(of: hasEndDate) { _, _ in commitDates() }
+        .onChange(of: endDate) { _, _ in commitDates() }
     }
 
     private func editableField(_ label: String, text: Binding<String>) -> some View {
@@ -1476,6 +1741,13 @@ private struct EditableItineraryItem: View {
                 .background(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
+    }
+
+    private func commitDates() {
+        draft.startsAt = hasStartDate ? startDate : nil
+        draft.endsAt = hasStartDate && hasEndDate ? max(endDate, startDate) : nil
+        draft.updatedAt = Date()
+        onChange(draft)
     }
 }
 

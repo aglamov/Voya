@@ -21,7 +21,7 @@ struct TripRecommendation: Identifiable {
     let accent: Color
 }
 
-enum ItineraryKind: String, Codable {
+enum ItineraryKind: String, CaseIterable, Codable {
     case flight = "Flight"
     case hotel = "Hotel"
     case event = "Event"
@@ -42,7 +42,6 @@ final class ItineraryItem: Identifiable {
     @Attribute(.unique) var id: UUID
     var kind: ItineraryKind
     var title: String
-    var time: String
     var location: String
     var status: String
     var startsAt: Date?
@@ -60,7 +59,6 @@ final class ItineraryItem: Identifiable {
         id: UUID = UUID(),
         kind: ItineraryKind,
         title: String,
-        time: String,
         location: String,
         status: String,
         startsAt: Date? = nil,
@@ -77,7 +75,6 @@ final class ItineraryItem: Identifiable {
         self.id = id
         self.kind = kind
         self.title = title
-        self.time = time
         self.location = location
         self.status = status
         self.startsAt = startsAt
@@ -90,6 +87,10 @@ final class ItineraryItem: Identifiable {
         self.normalizedData = normalizedData
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    var displayTime: String {
+        startsAt.map { ItineraryDateFormatter.displayTime(start: $0, end: endsAt) } ?? "Time needed"
     }
 }
 
@@ -266,6 +267,155 @@ enum AlertSeverity {
     }
 }
 
+enum ItineraryDateFormatter {
+    static func displayTime(start: Date, end: Date?) -> String {
+        let startText = displayFormatter.string(from: start)
+        guard let end else {
+            return startText
+        }
+
+        if Calendar.current.isDate(start, inSameDayAs: end) {
+            return "\(startText)-\(timeOnlyFormatter.string(from: end))"
+        }
+
+        return "\(startText)-\(displayFormatter.string(from: end))"
+    }
+
+    private static let displayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d, HH:mm"
+        return formatter
+    }()
+
+    private static let timeOnlyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+}
+
+enum ItineraryDateParser {
+    static func startDate(from value: String?) -> Date? {
+        dates(from: value).first
+    }
+
+    static func endDate(from value: String?) -> Date? {
+        let parsedDates = dates(from: value)
+        return parsedDates.count > 1 ? parsedDates.last : nil
+    }
+
+    static func dates(from value: String?) -> [Date] {
+        guard let value else { return [] }
+        let normalized = value
+            .replacingOccurrences(of: "–", with: "-")
+            .replacingOccurrences(of: "—", with: "-")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return [] }
+
+        let isoMatches = allMatches(
+            in: normalized,
+            pattern: #"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})"#
+        )
+        let isoDates = isoMatches.compactMap(isoDate)
+        if !isoDates.isEmpty {
+            return isoDates
+        }
+
+        for format in dateFormats {
+            let formatter = formatter(format)
+            let matches = matchesFor(format: format, in: normalized)
+                .compactMap { formatter.date(from: $0) }
+            if !matches.isEmpty {
+                return matches
+            }
+
+            if let date = formatter.date(from: normalized) {
+                return [date]
+            }
+        }
+
+        return []
+    }
+
+    private static func isoDate(from value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value)
+    }
+
+    private static func formatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = format
+        formatter.defaultDate = Calendar.current.date(
+            from: DateComponents(year: Calendar.current.component(.year, from: Date()))
+        )
+        return formatter
+    }
+
+    private static func matchesFor(format: String, in value: String) -> [String] {
+        switch format {
+        case "MMM d, HH:mm", "MMMM d, HH:mm":
+            return allMatches(in: value, pattern: #"\b[A-Z][a-z]{2,8}\s+\d{1,2},\s*\d{1,2}:\d{2}\b"#)
+        case "MMM d", "MMMM d":
+            return allMatches(in: value, pattern: #"\b[A-Z][a-z]{2,8}\s+\d{1,2}\b"#)
+        case "d MMM yyyy HH:mm", "d MMMM yyyy HH:mm":
+            return allMatches(in: value, pattern: #"\b\d{1,2}\s+[A-Z][a-z]{2,8}\s+\d{4}\s+\d{1,2}:\d{2}\b"#)
+        case "d MMM yyyy", "d MMMM yyyy":
+            return allMatches(in: value, pattern: #"\b\d{1,2}\s+[A-Z][a-z]{2,8}\s+\d{4}\b"#)
+        case "yyyy-MM-dd HH:mm":
+            return allMatches(in: value, pattern: #"\b\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}\b"#)
+        case "yyyy-MM-dd":
+            return allMatches(in: value, pattern: #"\b\d{4}-\d{2}-\d{2}\b"#)
+        case "dd.MM.yyyy HH:mm":
+            return allMatches(in: value, pattern: #"\b\d{1,2}\.\d{1,2}\.\d{4}\s+\d{1,2}:\d{2}\b"#)
+        case "dd.MM.yyyy":
+            return allMatches(in: value, pattern: #"\b\d{1,2}\.\d{1,2}\.\d{4}\b"#)
+        case "MM/dd/yyyy HH:mm", "dd/MM/yyyy HH:mm":
+            return allMatches(in: value, pattern: #"\b\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}\b"#)
+        case "MM/dd/yyyy", "dd/MM/yyyy":
+            return allMatches(in: value, pattern: #"\b\d{1,2}/\d{1,2}/\d{4}\b"#)
+        default:
+            return []
+        }
+    }
+
+    private static func allMatches(in value: String, pattern: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(value.startIndex..., in: value)
+        return regex.matches(in: value, range: range).compactMap { match in
+            Range(match.range, in: value).map { String(value[$0]) }
+        }
+    }
+
+    private static let dateFormats = [
+        "MMM d, HH:mm",
+        "MMMM d, HH:mm",
+        "MMM d",
+        "MMMM d",
+        "d MMM yyyy HH:mm",
+        "d MMMM yyyy HH:mm",
+        "d MMM yyyy",
+        "d MMMM yyyy",
+        "yyyy-MM-dd HH:mm",
+        "yyyy-MM-dd",
+        "dd.MM.yyyy HH:mm",
+        "dd.MM.yyyy",
+        "MM/dd/yyyy HH:mm",
+        "MM/dd/yyyy",
+        "dd/MM/yyyy HH:mm",
+        "dd/MM/yyyy"
+    ]
+}
+
 @MainActor
 final class VoyaStore: ObservableObject {
     static let pastedConfirmationSourceName = "Pasted confirmation"
@@ -292,7 +442,7 @@ final class VoyaStore: ObservableObject {
     let alerts = SampleData.alerts
 
     var itinerary: [ItineraryItem] {
-        selectedTrip?.items ?? []
+        selectedTrip.map { sortedItinerary($0.items) } ?? []
     }
 
     func configure(modelContext: ModelContext) {
@@ -510,6 +660,55 @@ final class VoyaStore: ObservableObject {
         saveTrips()
     }
 
+    func deleteTrip(_ trip: Trip) {
+        guard let modelContext,
+              let index = trips.firstIndex(where: { $0.id == trip.id }) else {
+            return
+        }
+
+        let deletedTripID = trip.id
+        let deletedTripTitle = trip.title
+        modelContext.delete(trip)
+        trips.remove(at: index)
+
+        if selectedTripID == deletedTripID || selectedTripID == nil {
+            selectedTripID = trips.first?.id
+        }
+
+        importMessage = "Trip deleted: \(deletedTripTitle)"
+        saveTrips()
+    }
+
+    func updateItineraryItem(
+        _ item: ItineraryItem,
+        kind: ItineraryKind,
+        title: String,
+        startsAt: Date,
+        endsAt: Date?,
+        location: String,
+        status: String
+    ) {
+        guard let trip = trips.first(where: { trip in
+            trip.items.contains(where: { $0.id == item.id })
+        }) else {
+            return
+        }
+
+        item.kind = kind
+        item.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        item.startsAt = startsAt
+        item.endsAt = endsAt
+        item.location = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        item.status = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        item.updatedAt = Date()
+
+        trip.items = sortedItinerary(trip.items)
+        trip.summary = summaryText(for: trip)
+        trip.dates = tripDates(for: trip.items, fallback: trip.dates)
+        trip.updatedAt = Date()
+        saveTrips()
+    }
+
     private func preparePreviewItemsForStorage(_ items: [ItineraryItem], sourceName: String) {
         let now = Date()
         for item in items {
@@ -547,8 +746,8 @@ final class VoyaStore: ObservableObject {
     }
 
     private func shouldMerge(_ incomingItems: [ItineraryItem], into trip: Trip, allowDateOnlyMatch: Bool) -> Bool {
-        let incomingDates = Set(incomingItems.compactMap { dateKey(from: $0.time) })
-        let tripDates = Set(trip.items.compactMap { dateKey(from: $0.time) })
+        let incomingDates = Set(incomingItems.compactMap(dateKey))
+        let tripDates = Set(trip.items.compactMap(dateKey))
         let sharesDate = !incomingDates.isDisjoint(with: tripDates)
 
         let incomingPlaces = placeTokens(for: incomingItems)
@@ -602,7 +801,7 @@ final class VoyaStore: ObservableObject {
 
     private func normalizedItemKey(for item: ItineraryItem) -> String {
         let title = normalizedKeyText(item.title)
-        let time = normalizedTimeKey(item.time)
+        let time = normalizedTimeKey(for: item)
 
         switch item.kind {
         case .hotel:
@@ -625,12 +824,11 @@ final class VoyaStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func normalizedTimeKey(_ value: String) -> String {
-        normalizedKeyText(
-            value
-                .replacingOccurrences(of: #"(?i)\bcheck\s*-?\s*in\s*:?"#, with: "", options: .regularExpression)
-                .replacingOccurrences(of: #"(?i)\bcheck\s*-?\s*out\s*:?"#, with: "", options: .regularExpression)
-        )
+    private func normalizedTimeKey(for item: ItineraryItem) -> String {
+        guard let startsAt = item.startsAt else { return "" }
+        let start = Int(startsAt.timeIntervalSince1970)
+        let end = item.endsAt.map { Int($0.timeIntervalSince1970) }
+        return [start, end].compactMap { $0 }.map(String.init).joined(separator: "-")
     }
 
     private func sortedItinerary(_ items: [ItineraryItem]) -> [ItineraryItem] {
@@ -651,10 +849,18 @@ final class VoyaStore: ObservableObject {
     }
 
     private func sortKey(for item: ItineraryItem) -> (date: Int, time: Int, kind: Int) {
-        let parsedDate = parsedDateTime(from: item.time)
+        if let startsAt = item.startsAt {
+            let components = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: startsAt)
+            return (
+                date: (components.month ?? 99) * 100 + (components.day ?? 99),
+                time: (components.hour ?? 23) * 60 + (components.minute ?? 59),
+                kind: kindSortOrder(item.kind)
+            )
+        }
+
         return (
-            date: parsedDate.map { $0.month * 100 + $0.day } ?? Int.max,
-            time: parsedDate.map { $0.hour * 60 + $0.minute } ?? Int.max,
+            date: Int.max,
+            time: Int.max,
             kind: kindSortOrder(item.kind)
         )
     }
@@ -726,7 +932,7 @@ final class VoyaStore: ObservableObject {
                     return nil
                 }
 
-                guard let duration = durationMinutes(from: item.time),
+                guard let duration = durationMinutes(for: item),
                       let place = placeName(for: item) else {
                     return nil
                 }
@@ -758,22 +964,52 @@ final class VoyaStore: ObservableObject {
     }
 
     private func tripDates(for items: [ItineraryItem], fallback: String) -> String {
-        let dates = items.flatMap { parsedDateTimes(from: $0.time) }
-        guard let first = dates.min(by: { ($0.month, $0.day) < ($1.month, $1.day) }) else {
-            return fallback
+        let storedDates = items.flatMap { item in
+            [item.startsAt, item.endsAt].compactMap { $0 }
         }
 
-        guard let last = dates.max(by: { ($0.month, $0.day) < ($1.month, $1.day) }),
-              first.month != last.month || first.day != last.day else {
-            return "\(first.monthName) \(first.day)"
+        if let first = storedDates.min(),
+           let last = storedDates.max() {
+            return tripDates(from: first, to: last)
         }
 
-        if first.month == last.month {
-            return "\(first.monthName) \(first.day)-\(last.day)"
-        }
-
-        return "\(first.monthName) \(first.day)-\(last.monthName) \(last.day)"
+        return fallback
     }
+
+    private func tripDates(from start: Date, to end: Date) -> String {
+        let calendar = Calendar.current
+        let startComponents = calendar.dateComponents([.month, .day], from: start)
+        let endComponents = calendar.dateComponents([.month, .day], from: end)
+        let startMonth = monthAbbreviation(for: startComponents.month)
+        let endMonth = monthAbbreviation(for: endComponents.month)
+        let startDay = startComponents.day ?? 1
+        let endDay = endComponents.day ?? startDay
+
+        guard startComponents.month != endComponents.month || startDay != endDay else {
+            return "\(startMonth) \(startDay)"
+        }
+
+        if startComponents.month == endComponents.month {
+            return "\(startMonth) \(startDay)-\(endDay)"
+        }
+
+        return "\(startMonth) \(startDay)-\(endMonth) \(endDay)"
+    }
+
+    private func monthAbbreviation(for month: Int?) -> String {
+        let monthSymbols = Self.englishMonthSymbols
+        guard let month, monthSymbols.indices.contains(month - 1) else {
+            return ""
+        }
+
+        return monthSymbols[month - 1]
+    }
+
+    private static let englishMonthSymbols: [String] = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.shortMonthSymbols
+    }()
 
     private func summaryText(for trip: Trip) -> String {
         guard !trip.items.isEmpty else {
@@ -805,71 +1041,20 @@ final class VoyaStore: ObservableObject {
         )
     }
 
-    private func dateKey(from time: String) -> String? {
-        parsedDateTime(from: time).map { "\($0.month)-\($0.day)" }
+    private func dateKey(for item: ItineraryItem) -> String? {
+        guard let startsAt = item.startsAt else { return nil }
+        let components = Calendar.current.dateComponents([.month, .day], from: startsAt)
+        guard let month = components.month, let day = components.day else { return nil }
+        return "\(month)-\(day)"
     }
 
-    private func parsedDateTime(from value: String) -> (month: Int, monthName: String, day: Int, hour: Int, minute: Int)? {
-        let pattern = #"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:,\s*(\d{1,2}):(\d{2}))?"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-              let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
-              let monthRange = Range(match.range(at: 1), in: value),
-              let dayRange = Range(match.range(at: 2), in: value) else {
+    private func durationMinutes(for item: ItineraryItem) -> Int? {
+        guard let startsAt = item.startsAt,
+              let endsAt = item.endsAt else {
             return nil
         }
 
-        let monthName = String(value[monthRange]).prefix(3).capitalized
-        guard let month = monthNumbers[String(monthName)],
-              let day = Int(value[dayRange]) else {
-            return nil
-        }
-
-        let hour = Range(match.range(at: 3), in: value).flatMap { Int(value[$0]) } ?? 23
-        let minute = Range(match.range(at: 4), in: value).flatMap { Int(value[$0]) } ?? 59
-        return (month, String(monthName), day, hour, minute)
-    }
-
-    private func durationMinutes(from value: String) -> Int? {
-        let dateTimes = parsedDateTimes(from: value)
-        guard let first = dateTimes.first, let last = dateTimes.dropFirst().last else {
-            return nil
-        }
-
-        let firstMinutes = first.month * 31 * 24 * 60 + first.day * 24 * 60 + first.hour * 60 + first.minute
-        let lastMinutes = last.month * 31 * 24 * 60 + last.day * 24 * 60 + last.hour * 60 + last.minute
-        return max(0, lastMinutes - firstMinutes)
-    }
-
-    private func parsedDateTimes(from value: String) -> [(month: Int, monthName: String, day: Int, hour: Int, minute: Int)] {
-        let pattern = #"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})(?:,\s*(\d{1,2}):(\d{2}))?"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-            return []
-        }
-
-        return regex.matches(in: value, range: NSRange(value.startIndex..., in: value)).compactMap { match in
-            guard let monthRange = Range(match.range(at: 1), in: value),
-                  let dayRange = Range(match.range(at: 2), in: value) else {
-                return nil
-            }
-
-            let monthName = String(value[monthRange]).prefix(3).capitalized
-            guard let month = monthNumbers[String(monthName)],
-                  let day = Int(value[dayRange]) else {
-                return nil
-            }
-
-            let hour = Range(match.range(at: 3), in: value).flatMap { Int(value[$0]) } ?? 23
-            let minute = Range(match.range(at: 4), in: value).flatMap { Int(value[$0]) } ?? 59
-            return (month, String(monthName), day, hour, minute)
-        }
-    }
-
-    private var monthNumbers: [String: Int] {
-        [
-            "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
-            "May": 5, "Jun": 6, "Jul": 7, "Aug": 8,
-            "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
-        ]
+        return max(0, Int(endsAt.timeIntervalSince(startsAt) / 60))
     }
 
     private func cityName(from location: String) -> String {
@@ -978,17 +1163,22 @@ private struct VercelExtractionResponse: Decodable {
 private struct VercelItineraryItem: Decodable {
     let kind: String
     let title: String
-    let time: String
+    let time: String?
+    let startsAt: String?
+    let endsAt: String?
     let location: String
     let status: String
 
     var itineraryItem: ItineraryItem {
-        ItineraryItem(
+        let parsedStartsAt = ItineraryDateParser.startDate(from: startsAt) ?? ItineraryDateParser.startDate(from: time)
+        let parsedEndsAt = ItineraryDateParser.startDate(from: endsAt) ?? ItineraryDateParser.endDate(from: time)
+        return ItineraryItem(
             kind: itineraryKind,
             title: title,
-            time: time,
             location: location,
-            status: status
+            status: status,
+            startsAt: parsedStartsAt,
+            endsAt: parsedEndsAt
         )
     }
 
@@ -1023,7 +1213,7 @@ enum ConfirmationParser {
             items.append(hotel)
         }
 
-        if let event = parseEvent(from: text, fallbackTime: items.first?.time) {
+        if let event = parseEvent(from: text) {
             items.append(event)
         }
 
@@ -1033,9 +1223,9 @@ enum ConfirmationParser {
                 ItineraryItem(
                     kind: .event,
                     title: firstUsefulLine(in: text) ?? "Imported confirmation",
-                    time: firstDateTime(in: text) ?? "Date needed",
                     location: "Location needed",
-                    status: "Needs review"
+                    status: "Needs review",
+                    startsAt: ItineraryDateParser.startDate(from: firstDateTime(in: text))
                 )
             )
         }
@@ -1048,7 +1238,7 @@ enum ConfirmationParser {
             type: typeLabel(for: items),
             title: title,
             normalizedDestination: normalizedDestination(from: items),
-            primaryTime: items.first?.time ?? "Date needed",
+            primaryTime: items.first?.displayTime ?? "Date needed",
             confidence: confidence,
             fields: fields(for: items, sourceName: document.name),
             items: items,
@@ -1060,7 +1250,7 @@ enum ConfirmationParser {
         var fields = [ExtractedField(label: "Source", value: sourceName)]
         for item in items {
             fields.append(ExtractedField(label: item.kind.rawValue, value: item.title))
-            fields.append(ExtractedField(label: "Time", value: item.time))
+            fields.append(ExtractedField(label: "Time", value: item.displayTime))
             fields.append(ExtractedField(label: "Place", value: item.location))
         }
         return fields
@@ -1072,7 +1262,8 @@ enum ConfirmationParser {
         guard !flightNumbers.isEmpty else { return [] }
 
         let routes = allRouteParts(in: text)
-        let dateTimes = departureDateTimes(in: text)
+        let departures = departureDateTimes(in: text)
+        let arrivals = arrivalDateTimes(in: text)
         let segmentCount = inferredFlightSegmentCount(flightNumberCount: flightNumbers.count, routeCount: routes.count)
 
         return flightNumbers.prefix(segmentCount).enumerated().map { index, flightNumber in
@@ -1080,13 +1271,18 @@ enum ConfirmationParser {
             let destination = route?.to ?? "destination"
             let title = "\(flightNumber) to \(destination)"
             let location = route.map { "\($0.from) to \($0.to)" } ?? "Airport details needed"
+            let departure = departures[safe: index] ?? firstDateTime(in: text)
+            let arrival = arrivals[safe: index]
+            let startsAt = ItineraryDateParser.startDate(from: departure)
+            let endsAt = ItineraryDateParser.startDate(from: arrival)
 
             return ItineraryItem(
                 kind: .flight,
                 title: title,
-                time: dateTimes[safe: index] ?? firstDateTime(in: text) ?? "Departure time needed",
                 location: location,
-                status: "Needs terminal check"
+                status: "Needs terminal check",
+                startsAt: startsAt,
+                endsAt: endsAt
             )
         }
     }
@@ -1113,26 +1309,21 @@ enum ConfirmationParser {
         let hotel = cleanedPhrase(rawHotel)
         let checkIn = labeledDateTime(in: text, labelPattern: #"check\s*-?\s*in"#)
         let checkOut = labeledDateTime(in: text, labelPattern: #"check\s*-?\s*out"#)
-        let time: String
-        if let checkIn, let checkOut {
-            time = "\(dateTimeWithDefault(checkIn, time: "15:00")) - \(dateTimeWithDefault(checkOut, time: "11:00"))"
-        } else if let checkIn {
-            time = dateTimeWithDefault(checkIn, time: "15:00")
-        } else {
-            time = "Check-in time needed"
-        }
+        let startsAt = ItineraryDateParser.startDate(from: checkIn.map { dateTimeWithDefault($0, time: "15:00") })
+        let endsAt = ItineraryDateParser.startDate(from: checkOut.map { dateTimeWithDefault($0, time: "11:00") })
         let destination = routeParts(in: text)?.to ?? fallbackLocation ?? "Address needed"
 
         return ItineraryItem(
             kind: .hotel,
             title: hotel,
-            time: time,
             location: destination,
-            status: "Confirmed"
+            status: "Confirmed",
+            startsAt: startsAt,
+            endsAt: endsAt
         )
     }
 
-    private static func parseEvent(from text: String, fallbackTime: String?) -> ItineraryItem? {
+    private static func parseEvent(from text: String) -> ItineraryItem? {
         guard text.localizedCaseInsensitiveContains("ticket") || text.localizedCaseInsensitiveContains("reservation") else {
             return nil
         }
@@ -1141,9 +1332,9 @@ enum ConfirmationParser {
         return ItineraryItem(
             kind: .event,
             title: cleanedPhrase(event ?? "Event reservation"),
-            time: firstDateTime(in: text) ?? fallbackTime ?? "Event time needed",
             location: routeParts(in: text)?.to ?? "Venue needed",
-            status: "Ticket saved"
+            status: "Ticket saved",
+            startsAt: ItineraryDateParser.startDate(from: firstDateTime(in: text))
         )
     }
 
@@ -1179,9 +1370,9 @@ enum ConfirmationParser {
     }
 
     private static func confidenceScore(for items: [ItineraryItem], warnings: [String]) -> Double {
-        let missingCount = items.flatMap { [$0.title, $0.time, $0.location] }
+        let missingCount = items.flatMap { [$0.title, $0.location] }
             .filter { $0.localizedCaseInsensitiveContains("needed") }
-            .count
+            .count + items.filter { $0.startsAt == nil }.count
         let score = 0.94 - Double(missingCount) * 0.14 - Double(warnings.count) * 0.18
         return max(0.42, min(score, 0.96))
     }
@@ -1260,6 +1451,15 @@ enum ConfirmationParser {
             .flatMap(allDateTimes)
 
         return departureLines.isEmpty ? allDateTimes(in: text) : departureLines
+    }
+
+    private static func arrivalDateTimes(in text: String) -> [String] {
+        text.components(separatedBy: .newlines)
+            .filter { line in
+                let lowercasedLine = line.lowercased()
+                return lowercasedLine.contains("arrival") || lowercasedLine.contains("arrive")
+            }
+            .flatMap(allDateTimes)
     }
 
     private static func allDateTimes(in text: String) -> [String] {

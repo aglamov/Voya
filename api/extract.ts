@@ -6,7 +6,8 @@ import { z } from "zod";
 const itemSchema = z.object({
   kind: z.enum(["flight", "hotel", "event", "transit"]),
   title: z.string().min(1),
-  time: z.string().min(1),
+  startsAt: z.string().datetime().nullable().optional(),
+  endsAt: z.string().datetime().nullable().optional(),
   location: z.string().min(1),
   status: z.string().min(1)
 });
@@ -37,14 +38,16 @@ const schemaInstructions = [
   '  "primaryTime": "Aug 12, 09:40",',
   '  "confidence": 0.91,',
   '  "items": [',
-  '    {"kind":"flight","title":"BA2490 to Rome Fiumicino","time":"Aug 12, 09:40","location":"London Heathrow to Rome Fiumicino","status":"Confirmed"}',
+  '    {"kind":"flight","title":"BA2490 to Rome Fiumicino","startsAt":"2026-08-12T09:40:00Z","endsAt":"2026-08-12T13:10:00Z","location":"London Heathrow to Rome Fiumicino","status":"Confirmed"}',
   "  ],",
   '  "warnings": []',
   "}",
   "kind must be one of: flight, hotel, event, transit.",
+  "For each item, startsAt and endsAt must be ISO 8601 date-time strings when the source has those values. Use null only when the value is not visible.",
+  "For flight items, startsAt is departure and endsAt is arrival when arrival is visible.",
+  "For hotel items, startsAt is check-in and endsAt is check-out when visible.",
   "normalizedDestination must be the clean destination/place name for the trip title, without airport codes, hotel names, addresses, dates, or words like Trip to.",
   "When multiple places exist, choose the place where the traveler spends the longest time. For example, if a flight arrives in Zurich but the hotel stay is in Bad Ragaz for several days, normalizedDestination should be Bad Ragaz.",
-  'For hotel items, put the full stay range in time when available, for example "Jul 7, 15:00 - Jul 10, 11:00", not only the check-in date.',
   "confidence must be a number from 0 to 1."
 ].join("\n");
 
@@ -97,7 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `Source file: ${sourceName}`,
         "Extract flights, hotels, events, and transit reservations into itinerary items.",
         "Use kind values only from: flight, hotel, event, transit.",
-        "For hotels, include both check-in and check-out in the hotel item's time field whenever both are visible.",
+        "For hotels, set startsAt to check-in and endsAt to check-out whenever both are visible.",
         "Make title useful in a timeline, normalizedDestination the clean trip place, primaryTime the first relevant date/time, and confidence your extraction confidence.",
         "",
         text
