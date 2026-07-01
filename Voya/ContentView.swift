@@ -1675,56 +1675,93 @@ private struct EditableItineraryItem: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label(hasStartDate ? draft.displayTime : "Date needed", systemImage: "calendar")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(hasStartDate ? Color.voyaInk : Color.voyaCoral)
-                    Spacer()
-                    Toggle("", isOn: $hasStartDate)
-                        .labelsHidden()
-                        .tint(Color.voyaTeal)
-                }
+                Label(displayTime, systemImage: "calendar")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(hasStartDate ? Color.voyaInk : Color.voyaCoral)
 
                 if hasStartDate {
-                    DatePicker("Start", selection: $startDate, displayedComponents: [.date, .hourAndMinute])
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color.voyaInk)
-
-                    Toggle("End time", isOn: $hasEndDate)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color.voyaInk)
-                        .tint(Color.voyaTeal)
+                    dateTimePickerRow("Start", selection: $startDate)
 
                     if hasEndDate {
-                        DatePicker("End", selection: $endDate, in: startDate..., displayedComponents: [.date, .hourAndMinute])
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Color.voyaInk)
+                        dateTimePickerRow("End", selection: $endDate, range: startDate...)
                     }
                 }
             }
-            .padding(10)
-            .background(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.vertical, 2)
 
             editableField("Title", text: $draft.title)
             editableField("Place", text: $draft.location)
-            editableField("Status", text: $draft.status)
         }
         .padding(14)
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onChange(of: draft.title) { _, _ in onChange(draft) }
         .onChange(of: draft.location) { _, _ in onChange(draft) }
-        .onChange(of: draft.status) { _, _ in onChange(draft) }
-        .onChange(of: hasStartDate) { _, _ in commitDates() }
+        .onChange(of: draft.updatedAt) { _, _ in syncDatesFromDraft() }
         .onChange(of: startDate) { _, value in
             if endDate < value {
                 endDate = value
             }
             commitDates()
         }
-        .onChange(of: hasEndDate) { _, _ in commitDates() }
         .onChange(of: endDate) { _, _ in commitDates() }
+    }
+
+    private var displayTime: String {
+        guard hasStartDate else {
+            return "Date needed"
+        }
+
+        return ItineraryDateFormatter.displayTime(
+            start: startDate,
+            end: hasEndDate ? endDate : nil
+        )
+    }
+
+    private func dateTimePickerRow(
+        _ label: String,
+        selection: Binding<Date>,
+        range: PartialRangeFrom<Date>? = nil
+    ) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.voyaInk)
+                .frame(width: 82, alignment: .leading)
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                if let range {
+                    DatePicker("", selection: selection, in: range, displayedComponents: [.date])
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                        .frame(minWidth: 128)
+                    DatePicker("", selection: selection, in: range, displayedComponents: [.hourAndMinute])
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                        .frame(minWidth: 100)
+                } else {
+                    DatePicker("", selection: selection, displayedComponents: [.date])
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                        .frame(minWidth: 128)
+                    DatePicker("", selection: selection, displayedComponents: [.hourAndMinute])
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                        .frame(minWidth: 100)
+                }
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Color.voyaInk)
+        }
+    }
+
+    private func syncDatesFromDraft() {
+        hasStartDate = draft.startsAt != nil
+        startDate = draft.startsAt ?? Date()
+        hasEndDate = draft.endsAt != nil
+        endDate = draft.endsAt ?? draft.startsAt ?? Date()
     }
 
     private func editableField(_ label: String, text: Binding<String>) -> some View {
@@ -1736,10 +1773,8 @@ private struct EditableItineraryItem: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Color.voyaInk)
                 .lineLimit(1...3)
-                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
                 .frame(minHeight: 38)
-                .background(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
     }
 

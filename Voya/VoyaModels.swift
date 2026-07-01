@@ -341,6 +341,10 @@ enum ItineraryDateParser {
     }
 
     private static func isoDate(from value: String) -> Date? {
+        if let scheduledDate = scheduledDate(fromISODateTime: value) {
+            return scheduledDate
+        }
+
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         if let date = formatter.date(from: value) {
@@ -349,6 +353,38 @@ enum ItineraryDateParser {
 
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: value)
+    }
+
+    private static func scheduledDate(fromISODateTime value: String) -> Date? {
+        let pattern = #"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
+              let year = integerCapture(1, in: value, match: match),
+              let month = integerCapture(2, in: value, match: match),
+              let day = integerCapture(3, in: value, match: match),
+              let hour = integerCapture(4, in: value, match: match),
+              let minute = integerCapture(5, in: value, match: match) else {
+            return nil
+        }
+
+        return Calendar.current.date(
+            from: DateComponents(
+                year: year,
+                month: month,
+                day: day,
+                hour: hour,
+                minute: minute,
+                second: integerCapture(6, in: value, match: match) ?? 0
+            )
+        )
+    }
+
+    private static func integerCapture(_ index: Int, in value: String, match: NSTextCheckingResult) -> Int? {
+        guard let range = Range(match.range(at: index), in: value) else {
+            return nil
+        }
+
+        return Int(value[range])
     }
 
     private static func formatter(_ format: String) -> DateFormatter {
@@ -363,6 +399,12 @@ enum ItineraryDateParser {
 
     private static func matchesFor(format: String, in value: String) -> [String] {
         switch format {
+        case "EEEE, MMMM d, yyyy", "EEE, MMM d, yyyy":
+            return allMatches(in: value, pattern: #"\b[A-Z][a-z]{2,8},?\s+[A-Z][a-z]{2,8}\s+\d{1,2},\s+\d{4}\b"#)
+        case "MMM d, yyyy", "MMMM d, yyyy":
+            return allMatches(in: value, pattern: #"\b[A-Z][a-z]{2,8}\s+\d{1,2},\s+\d{4}\b"#)
+        case "MMM d, yyyy h:mm a", "MMMM d, yyyy h:mm a":
+            return allMatches(in: value, pattern: #"\b[A-Z][a-z]{2,8}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s?(?:AM|PM|am|pm)\b"#)
         case "MMM d, HH:mm", "MMMM d, HH:mm":
             return allMatches(in: value, pattern: #"\b[A-Z][a-z]{2,8}\s+\d{1,2},\s*\d{1,2}:\d{2}\b"#)
         case "MMM d", "MMMM d":
@@ -397,6 +439,12 @@ enum ItineraryDateParser {
     }
 
     private static let dateFormats = [
+        "EEEE, MMMM d, yyyy",
+        "EEE, MMM d, yyyy",
+        "MMM d, yyyy h:mm a",
+        "MMMM d, yyyy h:mm a",
+        "MMM d, yyyy",
+        "MMMM d, yyyy",
         "MMM d, HH:mm",
         "MMMM d, HH:mm",
         "MMM d",
@@ -598,7 +646,9 @@ final class VoyaStore: ObservableObject {
 
         if let matchingTripIndex = tripIndexForMerge(with: preview.items) {
             let trip = trips[matchingTripIndex]
-            trip.items = sortedItinerary(uniqueItems(from: trip.items + preview.items))
+            let previousItemCount = trip.items.count
+            let deduplicated = deduplicatedItems(from: trip.items + preview.items)
+            trip.items = sortedItinerary(deduplicated.unique)
             trip.dates = tripDates(for: trip.items, fallback: trip.dates)
             trip.summary = "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain"
             trip.sourceName = combinedSourceName(trip.sourceName, preview.sourceName)
@@ -606,16 +656,19 @@ final class VoyaStore: ObservableObject {
             trip.destinationImageURL = nil
             trip.destinationImageCredit = nil
             trip.updatedAt = Date()
+            deleteItems(deduplicated.duplicates)
             selectedTripID = trip.id
-            importMessage = "Added to trip: \(trip.title)"
+            let addedItemCount = max(0, trip.items.count - previousItemCount)
+            importMessage = addedItemCount == 0 ? "Already in trip: \(trip.title)" : "Added to trip: \(trip.title)"
             importSuccess = ImportSuccess(
                 tripTitle: trip.title,
-                itemCount: preview.items.count,
+                itemCount: addedItemCount,
                 sourceName: preview.sourceName,
                 didCreateTrip: false
             )
         } else {
-            let items = sortedItinerary(uniqueItems(from: preview.items))
+            let deduplicated = deduplicatedItems(from: preview.items)
+            let items = sortedItinerary(deduplicated.unique)
             let trip = Trip(
                 title: tripTitle(
                     for: items,
@@ -629,6 +682,7 @@ final class VoyaStore: ObservableObject {
                 sourceName: preview.sourceName
             )
             modelContext?.insert(trip)
+            deleteItems(deduplicated.duplicates)
             trips.insert(trip, at: 0)
             selectedTripID = trip.id
             importMessage = "Trip created: \(trip.title)"
@@ -718,6 +772,13 @@ final class VoyaStore: ObservableObject {
         }
     }
 
+    private func deleteItems(_ items: [ItineraryItem]) {
+        guard let modelContext else { return }
+        for item in items {
+            modelContext.delete(item)
+        }
+    }
+
     func prepareForNextImport() {
         importSuccess = nil
         importMessage = nil
@@ -746,15 +807,17 @@ final class VoyaStore: ObservableObject {
     }
 
     private func shouldMerge(_ incomingItems: [ItineraryItem], into trip: Trip, allowDateOnlyMatch: Bool) -> Bool {
-        let incomingDates = Set(incomingItems.compactMap(dateKey))
-        let tripDates = Set(trip.items.compactMap(dateKey))
+        let incomingDates = Set(incomingItems.flatMap(dateKeys))
+        let tripDates = Set(trip.items.flatMap(dateKeys))
         let sharesDate = !incomingDates.isDisjoint(with: tripDates)
+        let hasNearbyDates = dateRangesAreNear(incomingItems, trip.items)
 
         let incomingPlaces = placeTokens(for: incomingItems)
         let tripPlaces = placeTokens(for: trip.items)
         let sharesPlace = !incomingPlaces.isDisjoint(with: tripPlaces)
+        let complementaryKinds = hasComplementaryTravelKinds(incomingItems, trip.items)
 
-        return sharesDate && (sharesPlace || allowDateOnlyMatch || hasComplementaryTravelKinds(incomingItems, trip.items))
+        return (sharesDate || hasNearbyDates) && (sharesPlace || allowDateOnlyMatch || complementaryKinds)
     }
 
     private func hasComplementaryTravelKinds(_ incomingItems: [ItineraryItem], _ tripItems: [ItineraryItem]) -> Bool {
@@ -765,18 +828,12 @@ final class VoyaStore: ObservableObject {
             || (incomingKinds.contains(.hotel) && tripKinds.contains(.flight))
     }
 
-    private func uniqueItems(from items: [ItineraryItem]) -> [ItineraryItem] {
-        deduplicatedItems(from: items).unique
-    }
-
     private func deduplicatedItems(from items: [ItineraryItem]) -> (unique: [ItineraryItem], duplicates: [ItineraryItem]) {
-        var indexesByKey: [String: Int] = [:]
         var unique: [ItineraryItem] = []
         var duplicates: [ItineraryItem] = []
 
         for item in items {
-            let key = normalizedItemKey(for: item)
-            if let existingIndex = indexesByKey[key] {
+            if let existingIndex = unique.firstIndex(where: { areDuplicateItems($0, item) }) {
                 let existing = unique[existingIndex]
                 if duplicatePreferenceScore(for: item) > duplicatePreferenceScore(for: existing) {
                     unique[existingIndex] = item
@@ -785,7 +842,6 @@ final class VoyaStore: ObservableObject {
                     duplicates.append(item)
                 }
             } else {
-                indexesByKey[key] = unique.count
                 unique.append(item)
             }
         }
@@ -799,22 +855,87 @@ final class VoyaStore: ObservableObject {
             + (item.confirmationCode?.isEmpty == false ? 25 : 0)
     }
 
-    private func normalizedItemKey(for item: ItineraryItem) -> String {
-        let title = normalizedKeyText(item.title)
-        let time = normalizedTimeKey(for: item)
+    private func areDuplicateItems(_ first: ItineraryItem, _ second: ItineraryItem) -> Bool {
+        guard first.kind == second.kind else { return false }
 
-        switch item.kind {
+        switch first.kind {
+        case .flight:
+            return duplicateFlight(first, second)
         case .hotel:
-            return [item.kind.rawValue, title, time].joined(separator: "|")
-        case .flight, .transit, .event:
-            return [
-                item.kind.rawValue,
-                title,
-                time,
-                normalizedKeyText(item.location)
-            ]
-            .joined(separator: "|")
+            return duplicateHotel(first, second)
+        case .transit, .event:
+            return duplicateGeneralItem(first, second)
         }
+    }
+
+    private func duplicateFlight(_ first: ItineraryItem, _ second: ItineraryItem) -> Bool {
+        let firstFlightNumbers = flightNumbers(in: first.title)
+        let secondFlightNumbers = flightNumbers(in: second.title)
+        let sharesFlightNumber = !firstFlightNumbers.isEmpty && !firstFlightNumbers.isDisjoint(with: secondFlightNumbers)
+        let sameRoute = routeKey(for: first.location) == routeKey(for: second.location)
+
+        guard sharesFlightNumber && sameRoute else { return false }
+        return sameTravelDay(first, second) || timesAreClose(first.startsAt, second.startsAt, tolerance: 6 * 60 * 60)
+    }
+
+    private func duplicateHotel(_ first: ItineraryItem, _ second: ItineraryItem) -> Bool {
+        let sameName = normalizedKeyText(first.title) == normalizedKeyText(second.title)
+        let samePlace = !placeTokens(for: [first]).isDisjoint(with: placeTokens(for: [second]))
+            || normalizedKeyText(first.location) == normalizedKeyText(second.location)
+
+        guard sameName && samePlace else { return false }
+        return dateRangesOverlap(first, second) || sameTravelDay(first, second)
+    }
+
+    private func duplicateGeneralItem(_ first: ItineraryItem, _ second: ItineraryItem) -> Bool {
+        normalizedKeyText(first.title) == normalizedKeyText(second.title)
+            && normalizedKeyText(first.location) == normalizedKeyText(second.location)
+            && (sameTravelDay(first, second) || timesAreClose(first.startsAt, second.startsAt, tolerance: 2 * 60 * 60))
+    }
+
+    private func flightNumbers(in value: String) -> Set<String> {
+        let pattern = #"\b[A-Z]{2}\s?\d{2,4}\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return []
+        }
+
+        let range = NSRange(value.startIndex..., in: value)
+        return Set(
+            regex.matches(in: value, range: range).compactMap { match in
+                Range(match.range, in: value).map {
+                    value[$0].uppercased().replacingOccurrences(of: " ", with: "")
+                }
+            }
+        )
+    }
+
+    private func routeKey(for location: String) -> String {
+        normalizedKeyText(location)
+            .replacingOccurrences(of: #"(^|\s)(from|to)($|\s)"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func sameTravelDay(_ first: ItineraryItem, _ second: ItineraryItem) -> Bool {
+        guard let firstDate = first.startsAt, let secondDate = second.startsAt else {
+            return false
+        }
+
+        return Calendar.current.isDate(firstDate, inSameDayAs: secondDate)
+    }
+
+    private func timesAreClose(_ first: Date?, _ second: Date?, tolerance: TimeInterval) -> Bool {
+        guard let first, let second else { return false }
+        return abs(first.timeIntervalSince(second)) <= tolerance
+    }
+
+    private func dateRangesOverlap(_ first: ItineraryItem, _ second: ItineraryItem) -> Bool {
+        guard let firstStart = first.startsAt, let secondStart = second.startsAt else {
+            return false
+        }
+
+        let firstEnd = first.endsAt ?? firstStart
+        let secondEnd = second.endsAt ?? secondStart
+        return firstStart <= secondEnd && secondStart <= firstEnd
     }
 
     private func normalizedKeyText(_ value: String) -> String {
@@ -822,13 +943,6 @@ final class VoyaStore: ObservableObject {
             .lowercased()
             .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func normalizedTimeKey(for item: ItineraryItem) -> String {
-        guard let startsAt = item.startsAt else { return "" }
-        let start = Int(startsAt.timeIntervalSince1970)
-        let end = item.endsAt.map { Int($0.timeIntervalSince1970) }
-        return [start, end].compactMap { $0 }.map(String.init).joined(separator: "-")
     }
 
     private func sortedItinerary(_ items: [ItineraryItem]) -> [ItineraryItem] {
@@ -1041,11 +1155,46 @@ final class VoyaStore: ObservableObject {
         )
     }
 
-    private func dateKey(for item: ItineraryItem) -> String? {
-        guard let startsAt = item.startsAt else { return nil }
-        let components = Calendar.current.dateComponents([.month, .day], from: startsAt)
+    private func dateKeys(for item: ItineraryItem) -> [String] {
+        guard let startsAt = item.startsAt else { return [] }
+        let calendar = Calendar.current
+        let end = item.endsAt ?? startsAt
+        let startOfStart = calendar.startOfDay(for: startsAt)
+        let startOfEnd = calendar.startOfDay(for: end)
+        let dayCount = min(calendar.dateComponents([.day], from: startOfStart, to: startOfEnd).day ?? 0, 30)
+
+        return (0...max(0, dayCount)).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: startOfStart).flatMap(dateKey)
+        }
+    }
+
+    private func dateKey(for date: Date) -> String? {
+        let components = Calendar.current.dateComponents([.month, .day], from: date)
         guard let month = components.month, let day = components.day else { return nil }
         return "\(month)-\(day)"
+    }
+
+    private func dateRangesAreNear(_ firstItems: [ItineraryItem], _ secondItems: [ItineraryItem]) -> Bool {
+        guard let firstRange = overallDateRange(for: firstItems),
+              let secondRange = overallDateRange(for: secondItems) else {
+            return false
+        }
+
+        let tolerance: TimeInterval = 36 * 60 * 60
+        return firstRange.start <= secondRange.end.addingTimeInterval(tolerance)
+            && secondRange.start <= firstRange.end.addingTimeInterval(tolerance)
+    }
+
+    private func overallDateRange(for items: [ItineraryItem]) -> (start: Date, end: Date)? {
+        let dates = items.flatMap { item in
+            [item.startsAt, item.endsAt].compactMap { $0 }
+        }
+
+        guard let start = dates.min(), let end = dates.max() else {
+            return nil
+        }
+
+        return (start, end)
     }
 
     private func durationMinutes(for item: ItineraryItem) -> Int? {
@@ -1307,10 +1456,7 @@ enum ConfirmationParser {
 
         guard let rawHotel = patterns.compactMap({ firstMatch(in: text, pattern: $0) }).first else { return nil }
         let hotel = cleanedPhrase(rawHotel)
-        let checkIn = labeledDateTime(in: text, labelPattern: #"check\s*-?\s*in"#)
-        let checkOut = labeledDateTime(in: text, labelPattern: #"check\s*-?\s*out"#)
-        let startsAt = ItineraryDateParser.startDate(from: checkIn.map { dateTimeWithDefault($0, time: "15:00") })
-        let endsAt = ItineraryDateParser.startDate(from: checkOut.map { dateTimeWithDefault($0, time: "11:00") })
+        let stayRange = hotelStayRange(in: text)
         let destination = routeParts(in: text)?.to ?? fallbackLocation ?? "Address needed"
 
         return ItineraryItem(
@@ -1318,8 +1464,8 @@ enum ConfirmationParser {
             title: hotel,
             location: destination,
             status: "Confirmed",
-            startsAt: startsAt,
-            endsAt: endsAt
+            startsAt: stayRange?.startsAt,
+            endsAt: stayRange?.endsAt
         )
     }
 
@@ -1428,12 +1574,117 @@ enum ConfirmationParser {
         allDateTimes(in: text).first
     }
 
-    private static func labeledDateTime(in text: String, labelPattern: String) -> String? {
-        let match = firstMatch(
+    private static func hotelStayRange(in text: String) -> (startsAt: Date?, endsAt: Date?)? {
+        let checkInDates = labeledDates(
             in: text,
-            pattern: #"(?i)"# + labelPattern + #"[:\s]+[A-Z][a-z]{2,8}\s+\d{1,2}(?:,\s*\d{1,2}:\d{2})?"#
+            labelPattern: #"check\W*in"#,
+            defaultTime: "15:00"
         )
-        return match.flatMap(firstDateTime)
+        let checkOutDates = labeledDates(
+            in: text,
+            labelPattern: #"check\W*out"#,
+            defaultTime: "11:00"
+        )
+
+        guard !checkInDates.isEmpty || !checkOutDates.isEmpty else {
+            return nil
+        }
+
+        return (checkInDates.min(), checkOutDates.max())
+    }
+
+    private static func labeledDates(in text: String, labelPattern: String, defaultTime: String) -> [Date] {
+        labelWindows(in: text, labelPattern: labelPattern).flatMap { window -> [Date] in
+            let dates = dateOnlyMatches(in: window)
+            let times = timeMatches(in: window)
+
+            guard !dates.isEmpty else {
+                return []
+            }
+
+            return dates.flatMap { date -> [Date] in
+                if times.isEmpty {
+                    return [dateTime(from: date, time: defaultTime)].compactMap { $0 }
+                }
+
+                return times.compactMap { time in
+                    dateTime(from: date, hour: time.hour, minute: time.minute)
+                }
+            }
+        }
+    }
+
+    private static func labelWindows(in text: String, labelPattern: String) -> [String] {
+        allMatches(
+            in: text,
+            pattern: #"(?i)"# + labelPattern
+        )
+        .map { match in
+            let matchStart = match.range.lowerBound
+            let end = text.index(matchStart, offsetBy: 260, limitedBy: text.endIndex) ?? text.endIndex
+            return String(text[matchStart..<end])
+        }
+    }
+
+    private static func dateOnlyMatches(in text: String) -> [Date] {
+        let patterns = [
+            #"\b(?:Mon|Monday|Tue|Tuesday|Wed|Wednesday|Thu|Thursday|Fri|Friday|Sat|Saturday|Sun|Sunday),?\s+[A-Z][a-z]{2,8}\s+\d{1,2},\s+\d{4}\b"#,
+            #"\b[A-Z][a-z]{2,8}\s+\d{1,2},\s+\d{4}\b"#,
+            #"\b\d{1,2}\s+[A-Z][a-z]{2,8}\s+\d{4}\b"#,
+            #"\b\d{4}-\d{2}-\d{2}\b"#,
+            #"\b\d{1,2}[./]\d{1,2}[./]\d{4}\b"#,
+            #"\b[A-Z][a-z]{2,8}\s+\d{1,2}\b"#
+        ]
+
+        return patterns.flatMap { pattern in
+            allMatches(in: text, pattern: pattern)
+                .compactMap { ItineraryDateParser.startDate(from: $0.value) }
+        }
+    }
+
+    private static func timeMatches(in text: String) -> [(hour: Int, minute: Int)] {
+        allMatches(
+            in: text,
+            pattern: #"\b\d{1,2}(?::\d{2})?\s?(?:AM|PM|am|pm)\b|\b\d{1,2}:\d{2}\b"#
+        )
+        .compactMap { timeComponents(from: $0.value) }
+    }
+
+    private static func timeComponents(from value: String) -> (hour: Int, minute: Int)? {
+        let lowercased = value.lowercased()
+        let numbers = allMatches(in: value, pattern: #"\d{1,2}"#).compactMap { Int($0.value) }
+        guard var hour = numbers.first else { return nil }
+        let minute = numbers.dropFirst().first ?? 0
+
+        if lowercased.contains("pm"), hour < 12 {
+            hour += 12
+        } else if lowercased.contains("am"), hour == 12 {
+            hour = 0
+        }
+
+        guard (0..<24).contains(hour), (0..<60).contains(minute) else {
+            return nil
+        }
+
+        return (hour, minute)
+    }
+
+    private static func dateTime(from date: Date, time: String) -> Date? {
+        timeComponents(from: time).flatMap { dateTime(from: date, hour: $0.hour, minute: $0.minute) }
+    }
+
+    private static func dateTime(from date: Date, hour: Int, minute: Int) -> Date? {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return calendar.date(
+            from: DateComponents(
+                year: components.year,
+                month: components.month,
+                day: components.day,
+                hour: hour,
+                minute: minute
+            )
+        )
     }
 
     private static func dateTimeWithDefault(_ value: String, time: String) -> String {
