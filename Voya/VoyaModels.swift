@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import SwiftUI
 
 enum TripMood: String, CaseIterable, Identifiable {
@@ -36,43 +37,112 @@ enum ItineraryKind: String, Codable {
     }
 }
 
-struct ItineraryItem: Identifiable {
-    let id: UUID
+@Model
+final class ItineraryItem: Identifiable {
+    @Attribute(.unique) var id: UUID
     var kind: ItineraryKind
     var title: String
     var time: String
     var location: String
     var status: String
+    var startsAt: Date?
+    var endsAt: Date?
+    var sourceName: String?
+    var sourceDocumentID: UUID?
+    var confirmationCode: String?
+    var providerName: String?
+    var rawData: String?
+    var normalizedData: String?
+    var createdAt: Date
+    var updatedAt: Date
 
-    init(id: UUID = UUID(), kind: ItineraryKind, title: String, time: String, location: String, status: String) {
+    init(
+        id: UUID = UUID(),
+        kind: ItineraryKind,
+        title: String,
+        time: String,
+        location: String,
+        status: String,
+        startsAt: Date? = nil,
+        endsAt: Date? = nil,
+        sourceName: String? = nil,
+        sourceDocumentID: UUID? = nil,
+        confirmationCode: String? = nil,
+        providerName: String? = nil,
+        rawData: String? = nil,
+        normalizedData: String? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
         self.id = id
         self.kind = kind
         self.title = title
         self.time = time
         self.location = location
         self.status = status
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+        self.sourceName = sourceName
+        self.sourceDocumentID = sourceDocumentID
+        self.confirmationCode = confirmationCode
+        self.providerName = providerName
+        self.rawData = rawData
+        self.normalizedData = normalizedData
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
-struct Trip: Identifiable {
-    let id: UUID
+@Model
+final class Trip: Identifiable {
+    @Attribute(.unique) var id: UUID
     var title: String
     var dates: String
     var summary: String
-    var items: [ItineraryItem]
+    var destination: String?
+    var startsAt: Date?
+    var endsAt: Date?
+    var createdAt: Date
+    var updatedAt: Date
+    @Relationship(deleteRule: .cascade) var items: [ItineraryItem]
     var sourceName: String
     var destinationImageURL: URL?
     var destinationImageCredit: String?
+    var notes: String?
+    var rawData: String?
 
-    init(id: UUID = UUID(), title: String, dates: String, summary: String, items: [ItineraryItem], sourceName: String, destinationImageURL: URL? = nil, destinationImageCredit: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        dates: String,
+        summary: String,
+        destination: String? = nil,
+        startsAt: Date? = nil,
+        endsAt: Date? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        items: [ItineraryItem],
+        sourceName: String,
+        destinationImageURL: URL? = nil,
+        destinationImageCredit: String? = nil,
+        notes: String? = nil,
+        rawData: String? = nil
+    ) {
         self.id = id
         self.title = title
         self.dates = dates
         self.summary = summary
+        self.destination = destination
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
         self.items = items
         self.sourceName = sourceName
         self.destinationImageURL = destinationImageURL
         self.destinationImageCredit = destinationImageCredit
+        self.notes = notes
+        self.rawData = rawData
     }
 }
 
@@ -200,12 +270,14 @@ enum AlertSeverity {
 final class VoyaStore: ObservableObject {
     static let pastedConfirmationSourceName = "Pasted confirmation"
 
+    private var modelContext: ModelContext?
+
     @Published var inspirationText = "Warm 4-day trip under $700 with easy transit"
     @Published var selectedMood: TripMood = .warm
     @Published var importText = ""
     @Published var extractedPreview: ExtractionPreview?
     @Published var importedDocuments: [ImportedDocument] = []
-    @Published var trips = SampleData.trips
+    @Published var trips: [Trip] = []
     @Published var selectedTripID: UUID?
     @Published var importMessage: String?
     @Published var importSuccess: ImportSuccess?
@@ -223,6 +295,47 @@ final class VoyaStore: ObservableObject {
         selectedTrip?.items ?? []
     }
 
+    func configure(modelContext: ModelContext) {
+        guard self.modelContext !== modelContext else { return }
+        self.modelContext = modelContext
+        fetchTrips()
+    }
+
+    private func fetchTrips() {
+        guard let modelContext else { return }
+
+        var descriptor = FetchDescriptor<Trip>(
+            sortBy: [
+                SortDescriptor(\.updatedAt, order: .reverse),
+                SortDescriptor(\.createdAt, order: .reverse)
+            ]
+        )
+        descriptor.relationshipKeyPathsForPrefetching = [\.items]
+
+        do {
+            trips = try modelContext.fetch(descriptor)
+            if let selectedTripID, !trips.contains(where: { $0.id == selectedTripID }) {
+                self.selectedTripID = trips.first?.id
+            } else if selectedTripID == nil {
+                selectedTripID = trips.first?.id
+            }
+        } catch {
+            importMessage = "Could not load saved trips"
+            trips = []
+        }
+    }
+
+    private func saveTrips() {
+        guard let modelContext else { return }
+
+        do {
+            try modelContext.save()
+            fetchTrips()
+        } catch {
+            importMessage = "Could not save trip changes"
+        }
+    }
+
     func loadHeroImageIfNeeded(for trip: Trip) async {
         guard trip.destinationImageURL == nil,
               trips.contains(where: { $0.id == trip.id }) else {
@@ -238,8 +351,11 @@ final class VoyaStore: ObservableObject {
                     return
                 }
 
-                trips[currentIndex].destinationImageURL = heroImage.url
-                trips[currentIndex].destinationImageCredit = heroImage.credit
+                let trip = trips[currentIndex]
+                trip.destinationImageURL = heroImage.url
+                trip.destinationImageCredit = heroImage.credit
+                trip.updatedAt = Date()
+                saveTrips()
                 return
             } catch {
                 continue
@@ -250,7 +366,10 @@ final class VoyaStore: ObservableObject {
             return
         }
 
-        trips[currentIndex].destinationImageCredit = nil
+        let trip = trips[currentIndex]
+        trip.destinationImageCredit = nil
+        trip.updatedAt = Date()
+        saveTrips()
     }
 
     func extractFromPastedText() {
@@ -290,22 +409,25 @@ final class VoyaStore: ObservableObject {
 
     func updatePreviewItem(_ item: ItineraryItem) {
         guard let index = extractedPreview?.items.firstIndex(where: { $0.id == item.id }) else { return }
+        item.updatedAt = Date()
         extractedPreview?.items[index] = item
         refreshPreviewFields()
     }
 
     func confirmExtraction() {
         guard let preview = extractedPreview else { return }
+        preparePreviewItemsForStorage(preview.items, sourceName: preview.sourceName)
 
         if let matchingTripIndex = tripIndexForMerge(with: preview.items) {
-            var trip = trips[matchingTripIndex]
+            let trip = trips[matchingTripIndex]
             trip.items = sortedItinerary(uniqueItems(from: trip.items + preview.items))
             trip.dates = tripDates(for: trip.items, fallback: trip.dates)
             trip.summary = "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain"
             trip.sourceName = combinedSourceName(trip.sourceName, preview.sourceName)
+            trip.destination = tripTitle(for: trip.items, fallback: trip.title, preferredDestination: preview.normalizedDestination)
             trip.destinationImageURL = nil
             trip.destinationImageCredit = nil
-            trips[matchingTripIndex] = trip
+            trip.updatedAt = Date()
             selectedTripID = trip.id
             importMessage = "Added to trip: \(trip.title)"
             importSuccess = ImportSuccess(
@@ -324,9 +446,11 @@ final class VoyaStore: ObservableObject {
                 ),
                 dates: tripDates(for: items, fallback: preview.primaryTime),
                 summary: "\(items.count) confirmed item\(items.count == 1 ? "" : "s") from \(preview.sourceName)",
+                destination: preview.normalizedDestination,
                 items: items,
                 sourceName: preview.sourceName
             )
+            modelContext?.insert(trip)
             trips.insert(trip, at: 0)
             selectedTripID = trip.id
             importMessage = "Trip created: \(trip.title)"
@@ -338,7 +462,17 @@ final class VoyaStore: ObservableObject {
             )
         }
 
+        saveTrips()
         extractedPreview = nil
+    }
+
+    private func preparePreviewItemsForStorage(_ items: [ItineraryItem], sourceName: String) {
+        let now = Date()
+        for item in items {
+            item.sourceName = sourceName
+            item.updatedAt = now
+            modelContext?.insert(item)
+        }
     }
 
     func prepareForNextImport() {

@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 enum SampleData {
     static let recommendations: [TripRecommendation] = [
         TripRecommendation(

@@ -1,8 +1,11 @@
 import SwiftUI
+import SwiftData
 import PDFKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var store: VoyaStore
     @State private var selectedTab: VoyaTab = .inspire
 
     var body: some View {
@@ -28,6 +31,9 @@ struct ContentView: View {
         }
         .tint(.voyaTeal)
         .preferredColorScheme(.light)
+        .onAppear {
+            store.configure(modelContext: modelContext)
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct VoyaApp: App {
@@ -8,6 +9,7 @@ struct VoyaApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
+                .modelContainer(for: [Trip.self, ItineraryItem.self])
         }
     }
 }
