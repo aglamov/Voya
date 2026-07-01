@@ -356,7 +356,7 @@ private struct ImportView: View {
                     }
                 }
 
-                if let preview = store.extractedPreview, preview.sourceName != VoyaStore.pastedConfirmationSourceName {
+                if let preview = store.extractedPreview {
                     ExtractionReview(preview: preview) { item in
                         store.updatePreviewItem(item)
                     } onConfirm: {
@@ -375,7 +375,7 @@ private struct ImportView: View {
             handleFileImport(result)
         }
         .sheet(isPresented: $isPasteImporterPresented) {
-            PasteConfirmationView(selectedTab: $selectedTab)
+            PasteConfirmationView()
                 .environmentObject(store)
         }
     }
@@ -418,12 +418,6 @@ private struct ImportView: View {
 private struct PasteConfirmationView: View {
     @EnvironmentObject private var store: VoyaStore
     @Environment(\.dismiss) private var dismiss
-    @Binding var selectedTab: VoyaTab
-
-    private var pastedPreview: ExtractionPreview? {
-        guard store.extractedPreview?.sourceName == VoyaStore.pastedConfirmationSourceName else { return nil }
-        return store.extractedPreview
-    }
 
     var body: some View {
         ZStack {
@@ -484,7 +478,12 @@ private struct PasteConfirmationView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                         Button {
+                            guard !store.importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                                store.extractFromPastedText()
+                                return
+                            }
                             store.extractFromPastedText()
+                            dismiss()
                         } label: {
                             HStack {
                                 if store.isExtractingConfirmation {
@@ -517,27 +516,6 @@ private struct PasteConfirmationView: View {
                     .foregroundStyle(Color.voyaInk)
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
-
-                    if store.isExtractingConfirmation {
-                        RecognitionAnimationCard(message: store.importMessage ?? "Recognizing confirmation...")
-                    }
-
-                    if let importSuccess = store.importSuccess {
-                        ImportSuccessAnimationCard(success: importSuccess, actionTitle: "Paste") {
-                            dismiss()
-                            selectedTab = .trips
-                        } onAction: {
-                            store.prepareForNextPastedImport()
-                        }
-                    }
-
-                    if let pastedPreview {
-                        ExtractionReview(preview: pastedPreview) { item in
-                            store.updatePreviewItem(item)
-                        } onConfirm: {
-                            store.confirmExtraction()
-                        }
-                    }
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 18)
