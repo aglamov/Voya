@@ -220,6 +220,8 @@ Provider categories:
 
 Each adapter should normalize data into Voya-owned models. The product should not leak provider-specific shapes into iOS.
 
+Flight services need a specific split between confirmation import, live status monitoring, predictive scoring, and alerts. See [Flight Services Strategy](flight-services.md) for the recommended MVP provider stack and normalized flight snapshot model.
+
 ## Suggested Build Order
 
 1. Auth and user profile
@@ -245,7 +247,7 @@ Each adapter should normalize data into Voya-owned models. The product should no
 ## Open Technical Decisions
 
 - Exact backend framework: Fastify or NestJS
-- Initial flight status provider
+- Initial flight status provider: recommended starting point is FlightAware AeroAPI behind a Voya-owned `FlightStatusProvider` adapter
 - Initial flight and hotel search provider
 - Object storage provider
 - OCR provider and fallback strategy

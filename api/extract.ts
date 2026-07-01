@@ -44,6 +44,7 @@ const schemaInstructions = [
   "kind must be one of: flight, hotel, event, transit.",
   "normalizedDestination must be the clean destination/place name for the trip title, without airport codes, hotel names, addresses, dates, or words like Trip to.",
   "When multiple places exist, choose the place where the traveler spends the longest time. For example, if a flight arrives in Zurich but the hotel stay is in Bad Ragaz for several days, normalizedDestination should be Bad Ragaz.",
+  'For hotel items, put the full stay range in time when available, for example "Jul 7, 15:00 - Jul 10, 11:00", not only the check-in date.',
   "confidence must be a number from 0 to 1."
 ].join("\n");
 
@@ -96,6 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `Source file: ${sourceName}`,
         "Extract flights, hotels, events, and transit reservations into itinerary items.",
         "Use kind values only from: flight, hotel, event, transit.",
+        "For hotels, include both check-in and check-out in the hotel item's time field whenever both are visible.",
         "Make title useful in a timeline, normalizedDestination the clean trip place, primaryTime the first relevant date/time, and confidence your extraction confidence.",
         "",
         text

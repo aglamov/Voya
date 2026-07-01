@@ -210,50 +210,7 @@ private struct TripsView: View {
                 HeaderBar(title: "Trips", subtitle: store.selectedTrip.map { "\($0.title), \($0.dates)" } ?? "No trips yet")
 
                 if let trip = store.selectedTrip {
-                    VStack(alignment: .leading, spacing: 18) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Next up")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.white.opacity(0.72))
-                                Text(store.itinerary.first?.title ?? trip.title)
-                                    .font(.title2.bold())
-                                    .foregroundStyle(.white)
-                                Text(store.itinerary.first.map { "\($0.time) · \($0.location)" } ?? trip.summary)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.white.opacity(0.72))
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-
-                            Spacer()
-
-                            Image(systemName: store.itinerary.first?.kind.symbol ?? "calendar")
-                                .font(.title2.weight(.bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 58, height: 58)
-                                .background(Color.voyaCoral)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        }
-
-                        HStack(spacing: 10) {
-                            MetricPill(title: "Items", value: "\(trip.items.count)")
-                            MetricPill(title: "Source", value: trip.sourceName)
-                            MetricPill(title: "Status", value: "Ready")
-                        }
-
-                        if let credit = trip.destinationImageCredit {
-                            Text(credit)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.72))
-                        }
-                    }
-                    .padding(18)
-                    .background {
-                        TripHeroBackground(imageURL: trip.destinationImageURL)
-                    }
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                    .shadow(color: .black.opacity(0.10), radius: 22, y: 14)
+                    TripHeroCard(trip: trip)
                     .task(id: trip.id) {
                         await store.loadHeroImageIfNeeded(for: trip)
                     }
@@ -823,35 +780,264 @@ private struct MetricPill: View {
     }
 }
 
+private struct TripHeroCard: View {
+    let trip: Trip
+
+    private var summary: TripHeroSummary {
+        TripHeroSummary(trip: trip)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(trip.title)
+                        .font(.title2.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .shadow(color: .black.opacity(0.45), radius: 8, y: 2)
+
+                    Text(trip.dates)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.86))
+                        .lineLimit(1)
+                        .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
+                }
+
+                Spacer()
+
+                Image(systemName: "calendar")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 54, height: 54)
+                    .background(Color.voyaCoral)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+
+            Spacer(minLength: 0)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(summary.statusText)
+                    .font(.title3.bold())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .shadow(color: .black.opacity(0.45), radius: 8, y: 2)
+
+                Text(summary.firstUpText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                    .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
+            }
+
+            HStack(spacing: 10) {
+                MetricPill(title: "Duration", value: summary.durationText)
+                MetricPill(title: "Items", value: summary.itemCountText)
+                MetricPill(title: "Status", value: summary.phaseText)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 238, alignment: .topLeading)
+        .background {
+            TripHeroBackground(imageURL: trip.destinationImageURL)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+        }
+        .foregroundStyle(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .shadow(color: .black.opacity(0.10), radius: 22, y: 14)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TripHeroSummary {
+    let statusText: String
+    let durationText: String
+    let itemCountText: String
+    let phaseText: String
+    let firstUpText: String
+
+    init(trip: Trip, now: Date = Date(), calendar: Calendar = .current) {
+        let range = TripDateRange(dates: trip.dates, now: now, calendar: calendar)
+        let daysUntilStart = range.map { calendar.startOfDay(for: now).distanceInDays(to: calendar.startOfDay(for: $0.start), calendar: calendar) }
+
+        if let range, calendar.isDate(now, inSameDayAs: range.start) {
+            statusText = "Starts today"
+            phaseText = "Today"
+        } else if let range, now >= range.start && now <= range.end {
+            statusText = "In progress"
+            phaseText = "Live"
+        } else if let daysUntilStart, daysUntilStart > 0 {
+            statusText = "Starts in \(daysUntilStart) \(daysUntilStart == 1 ? "day" : "days")"
+            phaseText = "Ready"
+        } else if range != nil {
+            statusText = "Trip ended"
+            phaseText = "Done"
+        } else {
+            statusText = "Ready when you are"
+            phaseText = "Ready"
+        }
+
+        if let nights = range?.nights, nights > 0 {
+            durationText = "\(nights) \(nights == 1 ? "night" : "nights")"
+        } else if let days = range?.days, days > 0 {
+            durationText = "\(days) \(days == 1 ? "day" : "days")"
+        } else {
+            durationText = trip.dates
+        }
+
+        itemCountText = "\(trip.items.count) \(trip.items.count == 1 ? "item" : "items")"
+
+        if let firstItem = trip.items.first {
+            firstUpText = "First up: \(firstItem.title)"
+        } else {
+            firstUpText = trip.summary
+        }
+    }
+}
+
+private struct TripDateRange {
+    let start: Date
+    let end: Date
+
+    var days: Int {
+        max(1, Calendar.current.dateComponents([.day], from: start, to: end).day.map { $0 + 1 } ?? 1)
+    }
+
+    var nights: Int {
+        max(0, Calendar.current.dateComponents([.day], from: start, to: end).day ?? 0)
+    }
+
+    init?(dates: String, now: Date, calendar: Calendar) {
+        guard let parsed = Self.parse(dates) else {
+            return nil
+        }
+
+        let currentYear = calendar.component(.year, from: now)
+        var startComponents = DateComponents(year: currentYear, month: parsed.startMonth, day: parsed.startDay)
+        var endComponents = DateComponents(year: currentYear, month: parsed.endMonth, day: parsed.endDay)
+
+        guard var start = calendar.date(from: startComponents),
+              var end = calendar.date(from: endComponents) else {
+            return nil
+        }
+
+        if end < start {
+            endComponents.year = currentYear + 1
+            guard let adjustedEnd = calendar.date(from: endComponents) else {
+                return nil
+            }
+            end = adjustedEnd
+        }
+
+        if end < calendar.startOfDay(for: now) {
+            startComponents.year = currentYear + 1
+            endComponents.year = endComponents.year.map { $0 + 1 }
+            guard let adjustedStart = calendar.date(from: startComponents),
+                  let adjustedEnd = calendar.date(from: endComponents) else {
+                return nil
+            }
+            start = adjustedStart
+            end = adjustedEnd
+        }
+
+        self.start = calendar.startOfDay(for: start)
+        self.end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: end) ?? end
+    }
+
+    private static func parse(_ value: String) -> (startMonth: Int, startDay: Int, endMonth: Int, endDay: Int)? {
+        let dates = parsedDates(in: value)
+        guard let first = dates.first else {
+            return nil
+        }
+
+        let last = dates.dropFirst().last ?? first
+        return (first.month, first.day, last.month, last.day)
+    }
+
+    private static func parsedDates(in value: String) -> [(month: Int, day: Int)] {
+        let pattern = #"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2})|-\s*(\d{1,2})"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return []
+        }
+
+        var latestMonth: Int?
+        return regex.matches(in: value, range: NSRange(value.startIndex..., in: value)).compactMap { match in
+            if let monthRange = Range(match.range(at: 1), in: value),
+               let dayRange = Range(match.range(at: 2), in: value),
+               let month = monthNumber(String(value[monthRange])),
+               let day = Int(value[dayRange]) {
+                latestMonth = month
+                return (month, day)
+            }
+
+            if let dayRange = Range(match.range(at: 3), in: value),
+               let month = latestMonth,
+               let day = Int(value[dayRange]) {
+                return (month, day)
+            }
+
+            return nil
+        }
+    }
+
+    private static func monthNumber(_ value: String) -> Int? {
+        let months = [
+            "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
+            "May": 5, "Jun": 6, "Jul": 7, "Aug": 8,
+            "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
+        ]
+        return months[String(value.prefix(3).capitalized)]
+    }
+}
+
+private extension Date {
+    func distanceInDays(to date: Date, calendar: Calendar) -> Int {
+        calendar.dateComponents([.day], from: self, to: date).day ?? 0
+    }
+}
+
 private struct TripHeroBackground: View {
     let imageURL: URL?
 
     var body: some View {
         ZStack {
-            Color.voyaInk
+            LinearGradient(
+                colors: [
+                    Color.voyaMint,
+                    Color.voyaTeal.opacity(0.86),
+                    Color.voyaInk
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
             if let imageURL {
                 AsyncImage(url: imageURL) { phase in
                     switch phase {
                     case .empty:
-                        Color.voyaInk
+                        Color.clear
                     case .success(let image):
                         image
                             .resizable()
                             .scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
                     case .failure:
-                        Color.voyaInk
+                        Color.clear
                     @unknown default:
-                        Color.voyaInk
+                        Color.clear
                     }
                 }
             }
 
             LinearGradient(
                 colors: [
-                    .black.opacity(0.52),
-                    .black.opacity(0.30),
-                    .black.opacity(0.58)
+                    .black.opacity(0.72),
+                    .black.opacity(0.46),
+                    .black.opacity(0.62)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing

@@ -300,11 +300,6 @@ final class VoyaStore: ObservableObject {
         if let matchingTripIndex = tripIndexForMerge(with: preview.items) {
             var trip = trips[matchingTripIndex]
             trip.items = sortedItinerary(uniqueItems(from: trip.items + preview.items))
-            trip.title = tripTitle(
-                for: trip.items,
-                fallback: preview.title,
-                preferredDestination: preview.normalizedDestination
-            )
             trip.dates = tripDates(for: trip.items, fallback: trip.dates)
             trip.summary = "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain"
             trip.sourceName = combinedSourceName(trip.sourceName, preview.sourceName)
@@ -396,11 +391,34 @@ final class VoyaStore: ObservableObject {
     private func uniqueItems(from items: [ItineraryItem]) -> [ItineraryItem] {
         var seen: Set<String> = []
         return items.filter { item in
-            let key = [item.kind.rawValue, item.title, item.time, item.location]
-                .joined(separator: "|")
-                .lowercased()
+            let key = normalizedItemKey(for: item)
             return seen.insert(key).inserted
         }
+    }
+
+    private func normalizedItemKey(for item: ItineraryItem) -> String {
+        [
+            item.kind.rawValue,
+            normalizedKeyText(item.title),
+            normalizedTimeKey(item.time),
+            normalizedKeyText(item.location)
+        ]
+        .joined(separator: "|")
+    }
+
+    private func normalizedKeyText(_ value: String) -> String {
+        value
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normalizedTimeKey(_ value: String) -> String {
+        normalizedKeyText(
+            value
+                .replacingOccurrences(of: #"(?i)\bcheck\s*-?\s*in\s*:?"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: #"(?i)\bcheck\s*-?\s*out\s*:?"#, with: "", options: .regularExpression)
+        )
     }
 
     private func sortedItinerary(_ items: [ItineraryItem]) -> [ItineraryItem] {
@@ -439,16 +457,16 @@ final class VoyaStore: ObservableObject {
     }
 
     private func tripTitle(for items: [ItineraryItem], fallback: String, preferredDestination: String? = nil) -> String {
-        if let preferredDestination = normalizedPlaceName(preferredDestination), !preferredDestination.isEmpty {
-            return preferredDestination
-        }
-
         if let longestStayPlace = longestStayPlaceName(from: items) {
             return longestStayPlace
         }
 
         if let destination = destinationName(from: items) {
             return destination
+        }
+
+        if let preferredDestination = normalizedPlaceName(preferredDestination), !preferredDestination.isEmpty {
+            return preferredDestination
         }
 
         return fallback
@@ -492,6 +510,10 @@ final class VoyaStore: ObservableObject {
     private func longestStayPlaceName(from items: [ItineraryItem]) -> String? {
         items
             .compactMap { item -> (place: String, duration: Int)? in
+                guard item.kind == .hotel else {
+                    return nil
+                }
+
                 guard let duration = durationMinutes(from: item.time),
                       let place = placeName(for: item) else {
                     return nil
@@ -524,7 +546,7 @@ final class VoyaStore: ObservableObject {
     }
 
     private func tripDates(for items: [ItineraryItem], fallback: String) -> String {
-        let dates = items.compactMap { parsedDateTime(from: $0.time) }
+        let dates = items.flatMap { parsedDateTimes(from: $0.time) }
         guard let first = dates.min(by: { ($0.month, $0.day) < ($1.month, $1.day) }) else {
             return fallback
         }
@@ -869,14 +891,22 @@ enum ConfirmationParser {
 
         guard let rawHotel = patterns.compactMap({ firstMatch(in: text, pattern: $0) }).first else { return nil }
         let hotel = cleanedPhrase(rawHotel)
-        let checkIn = firstMatch(in: text, pattern: #"(?i)check-?in\s+([A-Z][a-z]{2,8}\s+\d{1,2})"#)
-        let time = checkIn.map { cleanedPhrase($0.replacingOccurrences(of: "check-in", with: "", options: .caseInsensitive)) } ?? "Check-in time needed"
+        let checkIn = labeledDateTime(in: text, labelPattern: #"check\s*-?\s*in"#)
+        let checkOut = labeledDateTime(in: text, labelPattern: #"check\s*-?\s*out"#)
+        let time: String
+        if let checkIn, let checkOut {
+            time = "\(dateTimeWithDefault(checkIn, time: "15:00")) - \(dateTimeWithDefault(checkOut, time: "11:00"))"
+        } else if let checkIn {
+            time = dateTimeWithDefault(checkIn, time: "15:00")
+        } else {
+            time = "Check-in time needed"
+        }
         let destination = routeParts(in: text)?.to ?? fallbackLocation ?? "Address needed"
 
         return ItineraryItem(
             kind: .hotel,
             title: hotel,
-            time: time.contains(":") ? time : "\(time), 15:00",
+            time: time,
             location: destination,
             status: "Confirmed"
         )
@@ -985,6 +1015,18 @@ enum ConfirmationParser {
 
     private static func firstDateTime(in text: String) -> String? {
         allDateTimes(in: text).first
+    }
+
+    private static func labeledDateTime(in text: String, labelPattern: String) -> String? {
+        let match = firstMatch(
+            in: text,
+            pattern: #"(?i)"# + labelPattern + #"[:\s]+[A-Z][a-z]{2,8}\s+\d{1,2}(?:,\s*\d{1,2}:\d{2})?"#
+        )
+        return match.flatMap(firstDateTime)
+    }
+
+    private static func dateTimeWithDefault(_ value: String, time: String) -> String {
+        value.contains(":") ? value : "\(value), \(time)"
     }
 
     private static func departureDateTimes(in text: String) -> [String] {

@@ -120,6 +120,8 @@ See [docs/product-brief.md](docs/product-brief.md) for the fuller concept, AI re
 
 See [docs/architecture.md](docs/architecture.md) for the initial iPhone app, backend, AI, data, and provider architecture.
 
+See [docs/flight-services.md](docs/flight-services.md) for the recommended flight confirmation, live status, delay prediction, gate-change, and alert provider strategy.
+
 ## Vercel AI Extraction
 
 The app calls a Vercel Function at `POST /api/extract` to recognize pasted or uploaded travel confirmations. The function calls OpenAI directly and returns normalized itinerary JSON for the review screen.
