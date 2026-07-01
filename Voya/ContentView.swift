@@ -875,12 +875,8 @@ private struct TripHeroCard: View {
 
                 Spacer()
 
-                Menu {
-                    Button(role: .destructive, action: onDelete) {
-                        Label("Delete trip", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
                         .font(.title2.weight(.bold))
                         .foregroundStyle(.white)
                         .frame(width: 54, height: 54)
@@ -888,7 +884,7 @@ private struct TripHeroCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Actions for \(trip.title)")
+                .accessibilityLabel("Delete \(trip.title)")
             }
 
             Spacer(minLength: 0)
