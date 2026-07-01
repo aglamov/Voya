@@ -314,6 +314,7 @@ final class VoyaStore: ObservableObject {
 
         do {
             trips = try modelContext.fetch(descriptor)
+            removeDuplicateItemsFromLoadedTrips()
             if let selectedTripID, !trips.contains(where: { $0.id == selectedTripID }) {
                 self.selectedTripID = trips.first?.id
             } else if selectedTripID == nil {
@@ -333,6 +334,33 @@ final class VoyaStore: ObservableObject {
             fetchTrips()
         } catch {
             importMessage = "Could not save trip changes"
+        }
+    }
+
+    private func removeDuplicateItemsFromLoadedTrips() {
+        guard let modelContext else { return }
+        var removedItems: [ItineraryItem] = []
+
+        for trip in trips {
+            let deduplicated = deduplicatedItems(from: trip.items)
+            guard !deduplicated.duplicates.isEmpty else { continue }
+
+            trip.items = sortedItinerary(deduplicated.unique)
+            trip.summary = "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain"
+            trip.updatedAt = Date()
+            removedItems.append(contentsOf: deduplicated.duplicates)
+        }
+
+        guard !removedItems.isEmpty else { return }
+
+        for item in removedItems {
+            modelContext.delete(item)
+        }
+
+        do {
+            try modelContext.save()
+        } catch {
+            importMessage = "Could not clean up duplicate trip items"
         }
     }
 
@@ -466,6 +494,22 @@ final class VoyaStore: ObservableObject {
         extractedPreview = nil
     }
 
+    func deleteItineraryItem(_ item: ItineraryItem) {
+        guard let trip = trips.first(where: { trip in
+            trip.items.contains(where: { $0.id == item.id })
+        }) else {
+            return
+        }
+
+        trip.items.removeAll { $0.id == item.id }
+        trip.items = sortedItinerary(trip.items)
+        trip.summary = summaryText(for: trip)
+        trip.dates = tripDates(for: trip.items, fallback: trip.dates)
+        trip.updatedAt = Date()
+        modelContext?.delete(item)
+        saveTrips()
+    }
+
     private func preparePreviewItemsForStorage(_ items: [ItineraryItem], sourceName: String) {
         let now = Date()
         for item in items {
@@ -523,21 +567,55 @@ final class VoyaStore: ObservableObject {
     }
 
     private func uniqueItems(from items: [ItineraryItem]) -> [ItineraryItem] {
-        var seen: Set<String> = []
-        return items.filter { item in
+        deduplicatedItems(from: items).unique
+    }
+
+    private func deduplicatedItems(from items: [ItineraryItem]) -> (unique: [ItineraryItem], duplicates: [ItineraryItem]) {
+        var indexesByKey: [String: Int] = [:]
+        var unique: [ItineraryItem] = []
+        var duplicates: [ItineraryItem] = []
+
+        for item in items {
             let key = normalizedItemKey(for: item)
-            return seen.insert(key).inserted
+            if let existingIndex = indexesByKey[key] {
+                let existing = unique[existingIndex]
+                if duplicatePreferenceScore(for: item) > duplicatePreferenceScore(for: existing) {
+                    unique[existingIndex] = item
+                    duplicates.append(existing)
+                } else {
+                    duplicates.append(item)
+                }
+            } else {
+                indexesByKey[key] = unique.count
+                unique.append(item)
+            }
         }
+
+        return (unique, duplicates)
+    }
+
+    private func duplicatePreferenceScore(for item: ItineraryItem) -> Int {
+        normalizedKeyText(item.location).count
+            + (item.status.localizedCaseInsensitiveContains("needs") ? 0 : 50)
+            + (item.confirmationCode?.isEmpty == false ? 25 : 0)
     }
 
     private func normalizedItemKey(for item: ItineraryItem) -> String {
-        [
-            item.kind.rawValue,
-            normalizedKeyText(item.title),
-            normalizedTimeKey(item.time),
-            normalizedKeyText(item.location)
-        ]
-        .joined(separator: "|")
+        let title = normalizedKeyText(item.title)
+        let time = normalizedTimeKey(item.time)
+
+        switch item.kind {
+        case .hotel:
+            return [item.kind.rawValue, title, time].joined(separator: "|")
+        case .flight, .transit, .event:
+            return [
+                item.kind.rawValue,
+                title,
+                time,
+                normalizedKeyText(item.location)
+            ]
+            .joined(separator: "|")
+        }
     }
 
     private func normalizedKeyText(_ value: String) -> String {
@@ -695,6 +773,14 @@ final class VoyaStore: ObservableObject {
         }
 
         return "\(first.monthName) \(first.day)-\(last.monthName) \(last.day)"
+    }
+
+    private func summaryText(for trip: Trip) -> String {
+        guard !trip.items.isEmpty else {
+            return "No confirmed items yet"
+        }
+
+        return "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain"
     }
 
     private func combinedSourceName(_ existing: String, _ incoming: String) -> String {

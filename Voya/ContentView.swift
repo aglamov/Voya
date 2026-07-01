@@ -209,6 +209,7 @@ private struct RecommendationCard: View {
 
 private struct TripsView: View {
     @EnvironmentObject private var store: VoyaStore
+    @State private var itemPendingDeletion: ItineraryItem?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -241,7 +242,9 @@ private struct TripsView: View {
 
                 VStack(spacing: 0) {
                     ForEach(Array(store.itinerary.enumerated()), id: \.element.id) { index, item in
-                        TimelineRow(item: item, isLast: index == store.itinerary.count - 1)
+                        TimelineRow(item: item, isLast: index == store.itinerary.count - 1) {
+                            itemPendingDeletion = item
+                        }
                     }
                 }
                 .padding(.vertical, 8)
@@ -252,6 +255,26 @@ private struct TripsView: View {
             .padding(.horizontal, 18)
             .padding(.top, 18)
         }
+        .alert("Delete trip item?", isPresented: deleteConfirmationBinding, presenting: itemPendingDeletion) { item in
+            Button("Delete", role: .destructive) {
+                store.deleteItineraryItem(item)
+            }
+            Button("Cancel", role: .cancel) {
+            }
+        } message: { item in
+            Text("\(item.title) will be removed from this trip.")
+        }
+    }
+
+    private var deleteConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { itemPendingDeletion != nil },
+            set: { isPresented in
+                if !isPresented {
+                    itemPendingDeletion = nil
+                }
+            }
+        )
     }
 }
 
@@ -1055,6 +1078,7 @@ private struct TripHeroBackground: View {
 private struct TimelineRow: View {
     let item: ItineraryItem
     let isLast: Bool
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -1084,9 +1108,23 @@ private struct TimelineRow: View {
                         .foregroundStyle(Color.voyaMuted)
                 }
 
-                Text(item.title)
-                    .font(.headline)
-                    .foregroundStyle(Color.voyaInk)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(item.title)
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button(role: .destructive, action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.red)
+                            .frame(width: 30, height: 30)
+                            .background(Color.red.opacity(0.10))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Delete \(item.title)")
+                }
 
                 Text(item.location)
                     .font(.subheadline)
