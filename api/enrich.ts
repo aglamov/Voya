@@ -67,6 +67,119 @@ function stripAirportCode(value: string) {
   return value.replace(/\s*\([A-Z]{3}\)\s*/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function parseCoordinatePair(latValue: string, lonValue: string, name = "Map point"): Coordinates | undefined {
+  const lat = Number(latValue);
+  const lon = Number(lonValue);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return undefined;
+  }
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return undefined;
+  }
+
+  return { lat, lon, name };
+}
+
+function coordinatesFromText(value: string, name = "Map point") {
+  const atMatch = value.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:[,/?]|$)/);
+  if (atMatch) {
+    return parseCoordinatePair(atMatch[1], atMatch[2], name);
+  }
+
+  const bangMatch = value.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+  if (bangMatch) {
+    return parseCoordinatePair(bangMatch[1], bangMatch[2], name);
+  }
+
+  const plainMatch = value.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (plainMatch) {
+    return parseCoordinatePair(plainMatch[1], plainMatch[2], name);
+  }
+
+  return undefined;
+}
+
+function isGoogleMapsHost(hostname: string) {
+  return [
+    "google.com",
+    "www.google.com",
+    "maps.google.com",
+    "maps.app.goo.gl",
+    "goo.gl"
+  ].some((host) => hostname === host || hostname.endsWith(`.${host}`));
+}
+
+function mapURL(value: string) {
+  try {
+    const url = new URL(value);
+    return isGoogleMapsHost(url.hostname) ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function coordinatesFromMapURL(url: URL) {
+  const directCoordinates = coordinatesFromText(decodeURIComponent(url.href));
+  if (directCoordinates) {
+    return directCoordinates;
+  }
+
+  for (const parameter of ["q", "query", "ll", "center"]) {
+    const value = url.searchParams.get(parameter);
+    if (!value) {
+      continue;
+    }
+    const coordinates = coordinatesFromText(value, "Map point");
+    if (coordinates) {
+      return coordinates;
+    }
+  }
+
+  return undefined;
+}
+
+function placeNameFromMapURL(url: URL) {
+  const query = url.searchParams.get("q") ?? url.searchParams.get("query");
+  if (query && !coordinatesFromText(query)) {
+    return query;
+  }
+
+  const placeMatch = decodeURIComponent(url.pathname).match(/\/place\/([^/]+)/);
+  if (!placeMatch) {
+    return undefined;
+  }
+
+  return placeMatch[1].replace(/\+/g, " ").trim();
+}
+
+async function resolvedGoogleMapURL(value: string) {
+  const url = mapURL(value);
+  if (!url) {
+    return undefined;
+  }
+
+  if (coordinatesFromMapURL(url) || placeNameFromMapURL(url)) {
+    return url;
+  }
+
+  if (url.hostname !== "maps.app.goo.gl" && url.hostname !== "goo.gl") {
+    return url;
+  }
+
+  try {
+    for (const method of ["HEAD", "GET"] as const) {
+      const response = await fetch(url, { method, redirect: "follow" });
+      const resolvedURL = mapURL(response.url);
+      if (resolvedURL && resolvedURL.href !== url.href) {
+        return resolvedURL;
+      }
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
+
 function cityFromLocation(value: string) {
   const withoutRoute = destinationFromRoute(value);
   const withoutCodes = stripAirportCode(withoutRoute);
@@ -102,6 +215,11 @@ const knownCoordinates: Record<string, Coordinates> = {
 };
 
 function localCoordinates(location: string) {
+  const directCoordinates = coordinatesFromText(location);
+  if (directCoordinates) {
+    return directCoordinates;
+  }
+
   const airportCodes = [...location.matchAll(/\(([A-Z]{3})\)/g)].map((match) => match[1].toLowerCase());
   const lastAirportCode = airportCodes.at(-1);
   if (lastAirportCode && knownCoordinates[lastAirportCode]) {
@@ -191,6 +309,23 @@ function eventDetail(event: TicketmasterEvent) {
 async function geocode(location: string) {
   if (!location) {
     return { error: "missing_input" } satisfies GeocodeResult;
+  }
+
+  const googleMapURL = await resolvedGoogleMapURL(location);
+  if (googleMapURL) {
+    const coordinates = coordinatesFromMapURL(googleMapURL);
+    if (coordinates) {
+      return { place: coordinates };
+    }
+
+    const placeName = placeNameFromMapURL(googleMapURL);
+    if (placeName) {
+      const localPlace = localCoordinates(placeName);
+      if (localPlace) {
+        return { place: localPlace };
+      }
+      location = placeName;
+    }
   }
 
   const localPlace = localCoordinates(location);
