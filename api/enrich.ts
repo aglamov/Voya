@@ -108,7 +108,20 @@ function localCoordinates(location: string) {
     return knownCoordinates[lastAirportCode];
   }
 
-  return knownCoordinates[asciiKey(location)];
+  const candidates = [
+    location,
+    cityFromLocation(location),
+    destinationFromRoute(location)
+  ];
+
+  for (const candidate of candidates) {
+    const coordinates = knownCoordinates[asciiKey(candidate)];
+    if (coordinates) {
+      return coordinates;
+    }
+  }
+
+  return undefined;
 }
 
 function ticketmasterApiKey() {
