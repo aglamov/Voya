@@ -33,6 +33,9 @@ struct ContentView: View {
         .preferredColorScheme(.light)
         .onAppear {
             store.configure(modelContext: modelContext)
+            if store.selectCurrentTripIfAvailable() {
+                selectedTab = .trips
+            }
         }
     }
 }
@@ -212,54 +215,106 @@ private struct TripsView: View {
     @State private var itemBeingEdited: ItineraryItem?
     @State private var itemPendingDeletion: ItineraryItem?
     @State private var tripPendingDeletion: Trip?
+    @State private var tripListMode: TripListMode = .upcoming
+
+    private enum TripListMode: String, CaseIterable, Identifiable {
+        case upcoming = "Upcoming"
+        case archive = "Archive"
+
+        var id: String { rawValue }
+    }
+
+    private var displayedTrips: [Trip] {
+        switch tripListMode {
+        case .upcoming:
+            store.activeTrips
+        case .archive:
+            store.archivedTrips
+        }
+    }
+
+    private var displayedTrip: Trip? {
+        if let selectedTrip = store.selectedTrip,
+           displayedTrips.contains(where: { $0.id == selectedTrip.id }) {
+            return selectedTrip
+        }
+
+        return displayedTrips.first
+    }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
-                HeaderBar(title: "Trips", subtitle: store.selectedTrip.map { "\($0.title), \($0.dates)" } ?? "No trips yet")
+                HeaderBar(
+                    title: "Trips",
+                    subtitle: displayedTrip.map { "\($0.title), \($0.dates)" } ?? emptySubtitle
+                )
 
-                if let trip = store.selectedTrip {
+                Picker("Trips", selection: $tripListMode) {
+                    ForEach(TripListMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if let trip = displayedTrip {
                     TripHeroCard(trip: trip) {
                         tripPendingDeletion = trip
                     }
                     .task(id: trip.id) {
                         await store.loadHeroImageIfNeeded(for: trip)
                     }
-                }
 
-                if store.trips.count > 1 {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(store.trips) { trip in
-                                TripChip(
-                                    trip: trip,
-                                    isSelected: trip.id == store.selectedTrip?.id
-                                ) {
-                                    store.selectedTripID = trip.id
+                    if displayedTrips.count > 1 {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(displayedTrips) { trip in
+                                    TripChip(
+                                        trip: trip,
+                                        isSelected: trip.id == displayedTrip?.id
+                                    ) {
+                                        store.selectedTripID = trip.id
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                SectionHeader(title: "Timeline", action: "Add")
+                    let itinerary = store.itinerary(for: trip)
+                    SectionHeader(title: "Timeline", action: "Add")
 
-                VStack(spacing: 0) {
-                    ForEach(Array(store.itinerary.enumerated()), id: \.element.id) { index, item in
-                        TimelineRow(item: item, isLast: index == store.itinerary.count - 1) {
-                            itemBeingEdited = item
-                        } onDelete: {
-                            itemPendingDeletion = item
+                    VStack(spacing: 0) {
+                        ForEach(Array(itinerary.enumerated()), id: \.element.id) { index, item in
+                            TimelineRow(item: item, isLast: index == itinerary.count - 1) {
+                                itemBeingEdited = item
+                            } onDelete: {
+                                itemPendingDeletion = item
+                            }
                         }
                     }
+                    .padding(.vertical, 8)
+                    .background(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+                } else {
+                    EmptyTripsCard(
+                        title: tripListMode == .archive ? "Archive is empty" : "No upcoming trips",
+                        message: tripListMode == .archive ? "Past trips will appear here after they end." : "Import a confirmation to build your next itinerary.",
+                        symbol: tripListMode == .archive ? "archivebox" : "calendar.badge.plus"
+                    )
                 }
-                .padding(.vertical, 8)
-                .background(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
             }
             .padding(.horizontal, 18)
             .padding(.top, 18)
+        }
+        .onAppear {
+            selectDisplayedTripIfNeeded()
+        }
+        .onChange(of: tripListMode) { _, _ in
+            selectDisplayedTripIfNeeded()
+        }
+        .onChange(of: store.trips.count) { _, _ in
+            selectDisplayedTripIfNeeded()
         }
         .alert("Delete trip item?", isPresented: deleteConfirmationBinding, presenting: itemPendingDeletion) { item in
             Button("Delete", role: .destructive) {
@@ -292,6 +347,23 @@ private struct TripsView: View {
                 )
             }
         }
+    }
+
+    private var emptySubtitle: String {
+        tripListMode == .archive ? "No archived trips" : "No upcoming trips"
+    }
+
+    private func selectDisplayedTripIfNeeded() {
+        guard let firstTrip = displayedTrips.first else {
+            return
+        }
+
+        if let selectedTrip = store.selectedTrip,
+           displayedTrips.contains(where: { $0.id == selectedTrip.id }) {
+            return
+        }
+
+        store.selectedTripID = firstTrip.id
     }
 
     private var deleteConfirmationBinding: Binding<Bool> {
@@ -755,6 +827,37 @@ private struct TripChip: View {
             .shadow(color: .black.opacity(isSelected ? 0.08 : 0.04), radius: 12, y: 8)
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct EmptyTripsCard: View {
+    let title: String
+    let message: String
+    let symbol: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(Color.voyaTeal)
+                .frame(width: 48, height: 48)
+                .background(Color.voyaTeal.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Text(title)
+                .font(.headline.bold())
+                .foregroundStyle(Color.voyaInk)
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(Color.voyaMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
     }
 }
 

@@ -486,6 +486,18 @@ final class VoyaStore: ObservableObject {
         return trips.first { $0.id == selectedTripID } ?? trips.first
     }
 
+    var activeTrips: [Trip] {
+        activeTrips(at: Date())
+    }
+
+    var archivedTrips: [Trip] {
+        archivedTrips(at: Date())
+    }
+
+    var currentOrUpcomingTrip: Trip? {
+        currentOrUpcomingTrip(at: Date())
+    }
+
     let recommendations = SampleData.recommendations
     let alerts = SampleData.alerts
 
@@ -493,10 +505,24 @@ final class VoyaStore: ObservableObject {
         selectedTrip.map { sortedItinerary($0.items) } ?? []
     }
 
+    func itinerary(for trip: Trip) -> [ItineraryItem] {
+        sortedItinerary(trip.items)
+    }
+
     func configure(modelContext: ModelContext) {
         guard self.modelContext !== modelContext else { return }
         self.modelContext = modelContext
         fetchTrips()
+    }
+
+    @discardableResult
+    func selectCurrentTripIfAvailable(at date: Date = Date()) -> Bool {
+        guard let trip = currentOrUpcomingTrip(at: date) else {
+            return false
+        }
+
+        selectedTripID = trip.id
+        return true
     }
 
     private func fetchTrips() {
@@ -522,6 +548,58 @@ final class VoyaStore: ObservableObject {
             importMessage = "Could not load saved trips"
             trips = []
         }
+    }
+
+    private func activeTrips(at date: Date) -> [Trip] {
+        trips.filter { !isArchived($0, at: date) }
+    }
+
+    private func archivedTrips(at date: Date) -> [Trip] {
+        trips.filter { isArchived($0, at: date) }
+    }
+
+    private func currentOrUpcomingTrip(at date: Date) -> Trip? {
+        let datedTrips = activeTrips(at: date).compactMap { trip -> (trip: Trip, interval: DateInterval)? in
+            guard let interval = activeInterval(for: trip) else { return nil }
+            return (trip, interval)
+        }
+
+        if let current = datedTrips
+            .filter({ $0.interval.contains(date) })
+            .min(by: { $0.interval.start < $1.interval.start }) {
+            return current.trip
+        }
+
+        return datedTrips
+            .filter { $0.interval.start > date }
+            .min(by: { $0.interval.start < $1.interval.start })?
+            .trip
+    }
+
+    private func isArchived(_ trip: Trip, at date: Date) -> Bool {
+        guard let interval = activeInterval(for: trip) else {
+            return false
+        }
+
+        return interval.end < Calendar.current.startOfDay(for: date)
+    }
+
+    private func activeInterval(for trip: Trip) -> DateInterval? {
+        let tripDates = [trip.startsAt, trip.endsAt].compactMap { $0 }
+        let itemDates = trip.items.flatMap { item in
+            [item.startsAt, item.endsAt].compactMap { $0 }
+        }
+        let dates = tripDates.isEmpty ? itemDates : tripDates
+
+        guard let firstDate = dates.min(), let lastDate = dates.max() else {
+            return nil
+        }
+
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: firstDate)
+        let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: lastDate) ?? lastDate
+
+        return DateInterval(start: start, end: max(start, end))
     }
 
     private func saveTrips() {
