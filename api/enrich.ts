@@ -229,12 +229,21 @@ function localCoordinates(location: string) {
   const candidates = [
     location,
     cityFromLocation(location),
-    destinationFromRoute(location)
+    destinationFromRoute(location),
+    ...location.split(",")
   ];
 
   for (const candidate of candidates) {
-    const coordinates = knownCoordinates[asciiKey(candidate)];
+    const key = asciiKey(candidate);
+    const coordinates = knownCoordinates[key];
     if (coordinates) {
+      return coordinates;
+    }
+  }
+
+  const locationKey = asciiKey(location);
+  for (const [key, coordinates] of Object.entries(knownCoordinates)) {
+    if (locationKey.includes(key)) {
       return coordinates;
     }
   }
