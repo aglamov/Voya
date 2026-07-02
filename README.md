@@ -136,7 +136,7 @@ Required Vercel environment variables:
 Optional enrichment environment variables:
 
 - `OPENWEATHER_API_KEY`: enables weather cards through OpenWeather geocoding and One Call APIs.
-- `TICKETMASTER_API_KEY`: enables nearby public event cards through Ticketmaster Discovery API.
+- `TICKETMASTER_API_KEY` or `TICKETMASTER_CONSUMER_KEY`: enables nearby public event cards and Ticketmaster event links through the Discovery API. Use the Consumer Key from Ticketmaster Developer; the Consumer Secret is not needed for Discovery event search.
 
 iOS configuration:
 

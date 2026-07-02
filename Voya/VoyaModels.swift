@@ -1493,6 +1493,7 @@ struct ItemEnrichmentCard: Decodable, Identifiable {
     var title: String
     var value: String
     var detail: String?
+    var actionURL: URL?
     var kind: String
 }
 
@@ -1518,7 +1519,9 @@ struct VercelItemEnricher {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 25
-        request.httpBody = try JSONEncoder().encode(
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        request.httpBody = try encoder.encode(
             ItemEnrichmentRequest(
                 kind: item.kind.rawValue,
                 title: item.title,

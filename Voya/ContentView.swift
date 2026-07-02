@@ -1805,6 +1805,7 @@ private struct ItineraryItemDetailView: View {
 }
 
 private struct ItemInsightPanel: View {
+    @Environment(\.openURL) private var openURL
     let item: ItineraryItem
     let phase: ItineraryPhase
     let enrichment: ItemEnrichment?
@@ -1836,12 +1837,26 @@ private struct ItemInsightPanel: View {
                 InsightTile(title: "Timing", value: timingText, symbol: "clock")
                 if let enrichment {
                     ForEach(enrichment.cards.prefix(4)) { card in
-                        InsightTile(
-                            title: card.title,
-                            value: card.value,
-                            detail: card.detail,
-                            symbol: symbol(for: card.kind)
-                        )
+                        if let actionURL = card.actionURL {
+                            Button {
+                                openURL(actionURL)
+                            } label: {
+                                InsightTile(
+                                    title: card.title,
+                                    value: card.value,
+                                    detail: card.detail,
+                                    symbol: symbol(for: card.kind)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            InsightTile(
+                                title: card.title,
+                                value: card.value,
+                                detail: card.detail,
+                                symbol: symbol(for: card.kind)
+                            )
+                        }
                     }
                 } else {
                     InsightTile(title: "Weather", value: "Connect forecast", symbol: "cloud.sun")

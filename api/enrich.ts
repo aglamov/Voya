@@ -4,6 +4,7 @@ type EnrichmentCard = {
   title: string;
   value: string;
   detail?: string;
+  actionURL?: string;
   kind: "weather" | "flight" | "events" | "maps" | "ai" | "warning";
 };
 
@@ -17,14 +18,31 @@ type EnrichmentRequest = {
   kind?: string;
   title?: string;
   location?: string;
-  startsAt?: string | null;
-  endsAt?: string | null;
+  startsAt?: string | number | null;
+  endsAt?: string | number | null;
   status?: string;
 };
 
 type GeocodeResult =
   | { place: { lat: number; lon: number; name?: string; country?: string } }
   | { error: "missing_input" | "provider_error" | "not_found"; status?: number };
+
+type TicketmasterEvent = {
+  name?: string;
+  url?: string;
+  dates?: {
+    start?: {
+      localDate?: string;
+      localTime?: string;
+    };
+  };
+  _embedded?: {
+    venues?: Array<{
+      name?: string;
+      city?: { name?: string };
+    }>;
+  };
+};
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -36,6 +54,14 @@ function firstFlightNumber(value: string) {
 
 function stripAirportCode(value: string) {
   return value.replace(/\s*\([A-Z]{3}\)\s*/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function cityFromLocation(value: string) {
+  const withoutRoute = destinationFromRoute(value);
+  const withoutCodes = stripAirportCode(withoutRoute);
+  const parts = withoutCodes.split(",").map((part) => part.trim()).filter(Boolean);
+
+  return parts[0] ?? withoutCodes;
 }
 
 function destinationFromRoute(location: string) {
@@ -53,6 +79,70 @@ function placeForExternalLookup(kind: string, location: string) {
     : location;
 
   return stripAirportCode(place);
+}
+
+function ticketmasterApiKey() {
+  return process.env.TICKETMASTER_API_KEY ?? process.env.TICKETMASTER_CONSUMER_KEY;
+}
+
+function parseRequestDate(value: string | number | null | undefined) {
+  if (value == null || value === "") {
+    return undefined;
+  }
+
+  const date = typeof value === "number"
+    ? new Date((value < 1_000_000_000 ? value + 978_307_200 : value) * 1000)
+    : new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function ticketmasterDate(value: Date) {
+  return value.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function eventSearchWindow(startsAt?: string | number | null, endsAt?: string | number | null) {
+  const now = new Date();
+  const start = parseRequestDate(startsAt) ?? now;
+  const end = parseRequestDate(endsAt) ?? new Date(start.getTime() + 1000 * 60 * 60 * 24 * 7);
+  const cappedEnd = end < start ? new Date(start.getTime() + 1000 * 60 * 60 * 24 * 7) : end;
+  const effectiveStart = start < now ? now : start;
+
+  return {
+    start: effectiveStart,
+    end: cappedEnd < effectiveStart ? new Date(effectiveStart.getTime() + 1000 * 60 * 60 * 24 * 7) : cappedEnd
+  };
+}
+
+function formatEventDate(event: TicketmasterEvent) {
+  const date = event.dates?.start?.localDate;
+  const time = event.dates?.start?.localTime;
+  if (!date) {
+    return undefined;
+  }
+
+  const parsed = new Date(`${date}T${time ?? "00:00:00"}`);
+  if (Number.isNaN(parsed.getTime())) {
+    return time ? `${date} ${time.slice(0, 5)}` : date;
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: time ? "numeric" : undefined,
+    minute: time ? "2-digit" : undefined
+  }).format(parsed);
+}
+
+function eventDetail(event: TicketmasterEvent) {
+  const venue = event._embedded?.venues?.[0];
+  const parts = [
+    event.name,
+    venue?.name,
+    venue?.city?.name,
+    formatEventDate(event)
+  ].filter(Boolean);
+
+  return parts.join(" · ");
 }
 
 async function geocode(location: string) {
@@ -148,23 +238,38 @@ async function weatherCard(location: string): Promise<EnrichmentCard> {
   };
 }
 
-async function eventsCard(location: string): Promise<EnrichmentCard> {
-  const apiKey = process.env.TICKETMASTER_API_KEY;
+async function eventsCard(location: string, startsAt?: string | number | null, endsAt?: string | number | null): Promise<EnrichmentCard> {
+  const apiKey = ticketmasterApiKey();
   if (!apiKey) {
     return {
       title: "Nearby events",
       value: "Not connected",
-      detail: "Set TICKETMASTER_API_KEY on Vercel for local event context.",
+      detail: "Set TICKETMASTER_API_KEY or TICKETMASTER_CONSUMER_KEY on Vercel for local event context.",
       kind: "events"
     };
   }
 
   const url = new URL("https://app.ticketmaster.com/discovery/v2/events.json");
+  const window = eventSearchWindow(startsAt, endsAt);
   url.searchParams.set("apikey", apiKey);
-  url.searchParams.set("size", "3");
+  url.searchParams.set("size", "5");
   url.searchParams.set("sort", "date,asc");
+  url.searchParams.set("includeTBA", "no");
+  url.searchParams.set("includeTBD", "no");
+  url.searchParams.set("startDateTime", ticketmasterDate(window.start));
+  url.searchParams.set("endDateTime", ticketmasterDate(window.end));
+
   if (location) {
-    url.searchParams.set("city", location.split(",")[0]);
+    const geocoded = await geocode(location);
+    const place = "place" in geocoded ? geocoded.place : undefined;
+    if (place) {
+      url.searchParams.set("latlong", `${place.lat},${place.lon}`);
+      url.searchParams.set("radius", "35");
+      url.searchParams.set("unit", "km");
+      url.searchParams.set("sort", "distance,date,asc");
+    } else {
+      url.searchParams.set("city", cityFromLocation(location));
+    }
   }
 
   const response = await fetch(url);
@@ -177,12 +282,16 @@ async function eventsCard(location: string): Promise<EnrichmentCard> {
     };
   }
 
-  const data = await response.json() as { page?: { totalElements?: number }; _embedded?: { events?: Array<{ name?: string }> } };
-  const eventNames = data._embedded?.events?.map((event) => event.name).filter(Boolean).slice(0, 2);
+  const data = await response.json() as { page?: { totalElements?: number }; _embedded?: { events?: TicketmasterEvent[] } };
+  const events = data._embedded?.events ?? [];
+  const firstEvent = events[0];
+  const eventNames = events.map((event) => event.name).filter(Boolean).slice(0, 2);
+
   return {
     title: "Nearby events",
     value: `${data.page?.totalElements ?? 0} found`,
-    detail: eventNames?.length ? eventNames.join(" · ") : "No major public events found nearby.",
+    detail: firstEvent ? eventDetail(firstEvent) : eventNames?.length ? eventNames.join(" · ") : "No major public events found nearby.",
+    actionURL: firstEvent?.url,
     kind: "events"
   };
 }
@@ -233,7 +342,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       kind: "maps"
     },
     await weatherCard(lookupPlace),
-    await eventsCard(lookupPlace)
+    await eventsCard(lookupPlace, body.startsAt, body.endsAt)
   ];
 
   if (kind === "flight") {
