@@ -724,15 +724,37 @@ final class VoyaStore: ObservableObject {
         return "Used on-device recognition because AI could not be reached."
     }
 
-    func updatePreviewItem(_ item: ItineraryItem) {
+    func updatePreviewItem(_ item: ItineraryItem, with draft: ItineraryItemDraft) {
         guard let index = extractedPreview?.items.firstIndex(where: { $0.id == item.id }) else { return }
-        item.updatedAt = Date()
+        apply(draft, to: item)
         extractedPreview?.items[index] = item
         refreshPreviewFields()
     }
 
+    func addPreviewItem() {
+        guard extractedPreview != nil else { return }
+        let item = ItineraryItem(
+            kind: .event,
+            title: "",
+            location: "",
+            status: ""
+        )
+        extractedPreview?.items.append(item)
+        refreshPreviewFields()
+    }
+
+    func deletePreviewItem(_ item: ItineraryItem) {
+        guard extractedPreview != nil else { return }
+        extractedPreview?.items.removeAll { $0.id == item.id }
+        refreshPreviewFields()
+    }
+
     func confirmExtraction() {
-        guard let preview = extractedPreview else { return }
+        guard let preview = extractedPreview, !preview.items.isEmpty else {
+            importMessage = "Add at least one trip item before saving."
+            return
+        }
+        normalizePreviewItemsForStorage(preview.items)
         preparePreviewItemsForStorage(preview.items, sourceName: preview.sourceName)
 
         if let matchingTripIndex = tripIndexForMerge(with: preview.items) {
@@ -824,11 +846,55 @@ final class VoyaStore: ObservableObject {
         saveTrips()
     }
 
+    func updateTrip(
+        _ trip: Trip,
+        title: String,
+        destination: String,
+        summary: String,
+        notes: String
+    ) {
+        trip.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        trip.destination = destination.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        trip.summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        trip.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        trip.updatedAt = Date()
+        trip.destinationImageURL = nil
+        trip.destinationImageCredit = nil
+        saveTrips()
+    }
+
+    func addItineraryItem(
+        to trip: Trip,
+        kind: ItineraryKind,
+        title: String,
+        startsAt: Date?,
+        endsAt: Date?,
+        location: String,
+        status: String
+    ) {
+        let item = ItineraryItem(
+            kind: kind,
+            title: normalizedTitle(title),
+            location: normalizedLocation(location),
+            status: normalizedStatus(status),
+            startsAt: startsAt,
+            endsAt: endsAt,
+            sourceName: trip.sourceName
+        )
+        modelContext?.insert(item)
+        trip.items.append(item)
+        trip.items = sortedItinerary(trip.items)
+        trip.summary = summaryText(for: trip)
+        trip.dates = tripDates(for: trip.items, fallback: trip.dates)
+        trip.updatedAt = Date()
+        saveTrips()
+    }
+
     func updateItineraryItem(
         _ item: ItineraryItem,
         kind: ItineraryKind,
         title: String,
-        startsAt: Date,
+        startsAt: Date?,
         endsAt: Date?,
         location: String,
         status: String
@@ -840,11 +906,11 @@ final class VoyaStore: ObservableObject {
         }
 
         item.kind = kind
-        item.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        item.title = normalizedTitle(title)
         item.startsAt = startsAt
         item.endsAt = endsAt
-        item.location = location.trimmingCharacters(in: .whitespacesAndNewlines)
-        item.status = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        item.location = normalizedLocation(location)
+        item.status = normalizedStatus(status)
         item.updatedAt = Date()
 
         trip.items = sortedItinerary(trip.items)
@@ -852,6 +918,37 @@ final class VoyaStore: ObservableObject {
         trip.dates = tripDates(for: trip.items, fallback: trip.dates)
         trip.updatedAt = Date()
         saveTrips()
+    }
+
+    private func apply(_ draft: ItineraryItemDraft, to item: ItineraryItem) {
+        item.kind = draft.kind
+        item.title = draft.title
+        item.startsAt = draft.effectiveStartsAt
+        item.endsAt = draft.effectiveEndsAt
+        item.location = draft.location
+        item.status = draft.status
+        item.updatedAt = Date()
+    }
+
+    private func normalizePreviewItemsForStorage(_ items: [ItineraryItem]) {
+        for item in items {
+            item.title = normalizedTitle(item.title)
+            item.location = normalizedLocation(item.location)
+            item.status = normalizedStatus(item.status)
+            item.endsAt = item.startsAt == nil ? nil : item.endsAt
+        }
+    }
+
+    private func normalizedTitle(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled item"
+    }
+
+    private func normalizedLocation(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Location needed"
+    }
+
+    private func normalizedStatus(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Needs review"
     }
 
     private func preparePreviewItemsForStorage(_ items: [ItineraryItem], sourceName: String) {
@@ -1847,6 +1944,12 @@ enum ConfirmationParser {
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "  ", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

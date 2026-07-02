@@ -6,8 +6,8 @@ import { z } from "zod";
 const itemSchema = z.object({
   kind: z.enum(["flight", "hotel", "event", "transit"]),
   title: z.string().min(1),
-  startsAt: z.string().datetime().nullable().optional().describe("The actual itinerary start date-time, not a booking, payment, issue, print, or cancellation date."),
-  endsAt: z.string().datetime().nullable().optional().describe("The actual itinerary end date-time, not a booking, payment, issue, print, or cancellation date."),
+  startsAt: z.string().datetime({ offset: true }).nullable().optional().describe("The actual itinerary start date-time, not a booking, payment, issue, print, or cancellation date."),
+  endsAt: z.string().datetime({ offset: true }).nullable().optional().describe("The actual itinerary end date-time, not a booking, payment, issue, print, or cancellation date."),
   location: z.string().min(1),
   status: z.string().min(1)
 });

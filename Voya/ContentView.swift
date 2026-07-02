@@ -213,8 +213,8 @@ private struct RecommendationCard: View {
 private struct TripsView: View {
     @EnvironmentObject private var store: VoyaStore
     @State private var itemBeingEdited: ItineraryItem?
-    @State private var itemPendingDeletion: ItineraryItem?
-    @State private var tripPendingDeletion: Trip?
+    @State private var tripBeingEdited: Trip?
+    @State private var tripAddingItem: Trip?
     @State private var tripListMode: TripListMode = .upcoming
 
     private enum TripListMode: String, CaseIterable, Identifiable {
@@ -259,7 +259,7 @@ private struct TripsView: View {
 
                 if let trip = displayedTrip {
                     TripHeroCard(trip: trip) {
-                        tripPendingDeletion = trip
+                        tripBeingEdited = trip
                     }
                     .task(id: trip.id) {
                         await store.loadHeroImageIfNeeded(for: trip)
@@ -281,14 +281,25 @@ private struct TripsView: View {
                     }
 
                     let itinerary = store.itinerary(for: trip)
-                    SectionHeader(title: "Timeline", action: "Add")
+                    HStack {
+                        Text("Timeline")
+                            .font(.title3.bold())
+                            .foregroundStyle(Color.voyaInk)
+                        Spacer()
+                        Button {
+                            tripAddingItem = trip
+                        } label: {
+                            Label("Add", systemImage: "plus")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.voyaTeal)
+                        }
+                        .buttonStyle(.plain)
+                    }
 
                     VStack(spacing: 0) {
                         ForEach(Array(itinerary.enumerated()), id: \.element.id) { index, item in
                             TimelineRow(item: item, isLast: index == itinerary.count - 1) {
                                 itemBeingEdited = item
-                            } onDelete: {
-                                itemPendingDeletion = item
                             }
                         }
                     }
@@ -316,23 +327,31 @@ private struct TripsView: View {
         .onChange(of: store.trips.count) { _, _ in
             selectDisplayedTripIfNeeded()
         }
-        .alert("Delete trip item?", isPresented: deleteConfirmationBinding, presenting: itemPendingDeletion) { item in
-            Button("Delete", role: .destructive) {
-                store.deleteItineraryItem(item)
-            }
-            Button("Cancel", role: .cancel) {
-            }
-        } message: { item in
-            Text("\(item.title) will be removed from this trip.")
-        }
-        .alert("Delete trip?", isPresented: tripDeleteConfirmationBinding, presenting: tripPendingDeletion) { trip in
-            Button("Delete", role: .destructive) {
+        .sheet(item: $tripBeingEdited) { trip in
+            EditTripView(trip: trip) { draft in
+                store.updateTrip(
+                    trip,
+                    title: draft.title,
+                    destination: draft.destination,
+                    summary: draft.summary,
+                    notes: draft.notes
+                )
+            } onDelete: {
                 store.deleteTrip(trip)
             }
-            Button("Cancel", role: .cancel) {
+        }
+        .sheet(item: $tripAddingItem) { trip in
+            EditItineraryItemView(mode: .add, tripTitle: trip.title) { draft in
+                store.addItineraryItem(
+                    to: trip,
+                    kind: draft.kind,
+                    title: draft.title,
+                    startsAt: draft.effectiveStartsAt,
+                    endsAt: draft.effectiveEndsAt,
+                    location: draft.location,
+                    status: draft.status
+                )
             }
-        } message: { trip in
-            Text("\(trip.title) and its timeline will be removed.")
         }
         .sheet(item: $itemBeingEdited) { item in
             EditItineraryItemView(item: item) { draft in
@@ -340,11 +359,13 @@ private struct TripsView: View {
                     item,
                     kind: draft.kind,
                     title: draft.title,
-                    startsAt: draft.startsAt,
+                    startsAt: draft.effectiveStartsAt,
                     endsAt: draft.effectiveEndsAt,
                     location: draft.location,
                     status: draft.status
                 )
+            } onDelete: {
+                store.deleteItineraryItem(item)
             }
         }
     }
@@ -366,27 +387,6 @@ private struct TripsView: View {
         store.selectedTripID = firstTrip.id
     }
 
-    private var deleteConfirmationBinding: Binding<Bool> {
-        Binding(
-            get: { itemPendingDeletion != nil },
-            set: { isPresented in
-                if !isPresented {
-                    itemPendingDeletion = nil
-                }
-            }
-        )
-    }
-
-    private var tripDeleteConfirmationBinding: Binding<Bool> {
-        Binding(
-            get: { tripPendingDeletion != nil },
-            set: { isPresented in
-                if !isPresented {
-                    tripPendingDeletion = nil
-                }
-            }
-        )
-    }
 }
 
 private struct ImportView: View {
@@ -459,8 +459,12 @@ private struct ImportView: View {
                     }
 
                     if let preview = store.extractedPreview {
-                        ExtractionReview(preview: preview) { item in
-                            store.updatePreviewItem(item)
+                        ExtractionReview(preview: preview) { item, draft in
+                            store.updatePreviewItem(item, with: draft)
+                        } onAddItem: {
+                            store.addPreviewItem()
+                        } onDeleteItem: { item in
+                            store.deletePreviewItem(item)
                         } onConfirm: {
                             store.confirmExtraction()
                         }
@@ -949,7 +953,7 @@ private struct MetricPill: View {
 
 private struct TripHeroCard: View {
     let trip: Trip
-    let onDelete: () -> Void
+    let onEdit: () -> Void
 
     private var summary: TripHeroSummary {
         TripHeroSummary(trip: trip)
@@ -974,16 +978,16 @@ private struct TripHeroCard: View {
 
                 Spacer()
 
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash")
+                Button(action: onEdit) {
+                    Image(systemName: "pencil")
                         .font(.title2.weight(.bold))
                         .foregroundStyle(.white)
-                        .frame(width: 54, height: 54)
-                        .background(Color.voyaCoral)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .frame(width: 48, height: 48)
+                        .background(.white.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Delete \(trip.title)")
+                .accessibilityLabel("Edit \(trip.title)")
             }
 
             Spacer(minLength: 0)
@@ -1222,7 +1226,6 @@ private struct TimelineRow: View {
     let item: ItineraryItem
     let isLast: Bool
     let onEdit: () -> Void
-    let onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -1262,10 +1265,6 @@ private struct TimelineRow: View {
                         Button(action: onEdit) {
                             Label("Edit", systemImage: "pencil")
                         }
-
-                        Button(role: .destructive, action: onDelete) {
-                            Label("Delete", systemImage: "trash")
-                        }
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.caption.weight(.black))
@@ -1289,9 +1288,10 @@ private struct TimelineRow: View {
     }
 }
 
-private struct ItineraryItemDraft {
+struct ItineraryItemDraft {
     var kind: ItineraryKind
     var title: String
+    var hasStartDate: Bool
     var startsAt: Date
     var endsAt: Date
     var hasEndDate: Bool
@@ -1301,6 +1301,7 @@ private struct ItineraryItemDraft {
     init(item: ItineraryItem) {
         kind = item.kind
         title = item.title
+        hasStartDate = item.startsAt != nil
         startsAt = item.startsAt ?? Date()
         endsAt = item.endsAt ?? item.startsAt ?? Date()
         hasEndDate = item.endsAt != nil
@@ -1308,23 +1309,61 @@ private struct ItineraryItemDraft {
         status = item.status
     }
 
+    init() {
+        kind = .event
+        title = ""
+        hasStartDate = true
+        startsAt = Date()
+        endsAt = Date()
+        hasEndDate = false
+        location = ""
+        status = ""
+    }
+
+    var effectiveStartsAt: Date? {
+        hasStartDate ? startsAt : nil
+    }
+
     var effectiveEndsAt: Date? {
-        hasEndDate ? max(endsAt, startsAt) : nil
+        hasStartDate && hasEndDate ? max(endsAt, startsAt) : nil
     }
 
     var displayTime: String {
-        ItineraryDateFormatter.displayTime(start: startsAt, end: effectiveEndsAt)
+        effectiveStartsAt.map { ItineraryDateFormatter.displayTime(start: $0, end: effectiveEndsAt) } ?? "Date needed"
     }
+}
+
+private enum ItineraryItemEditorMode {
+    case add
+    case edit
 }
 
 private struct EditItineraryItemView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: ItineraryItemDraft
+    let mode: ItineraryItemEditorMode
+    let tripTitle: String?
     let onSave: (ItineraryItemDraft) -> Void
+    let onDelete: (() -> Void)?
 
-    init(item: ItineraryItem, onSave: @escaping (ItineraryItemDraft) -> Void) {
+    init(
+        item: ItineraryItem,
+        onSave: @escaping (ItineraryItemDraft) -> Void,
+        onDelete: (() -> Void)? = nil
+    ) {
         _draft = State(initialValue: ItineraryItemDraft(item: item))
+        mode = .edit
+        tripTitle = nil
         self.onSave = onSave
+        self.onDelete = onDelete
+    }
+
+    init(mode: ItineraryItemEditorMode, tripTitle: String, onSave: @escaping (ItineraryItemDraft) -> Void) {
+        _draft = State(initialValue: ItineraryItemDraft())
+        self.mode = mode
+        self.tripTitle = tripTitle
+        self.onSave = onSave
+        onDelete = nil
     }
 
     var body: some View {
@@ -1336,10 +1375,10 @@ private struct EditItineraryItemView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Edit item")
+                            Text(mode == .add ? "Add item" : "Edit item")
                                 .font(.system(size: 28, weight: .bold, design: .rounded))
                                 .foregroundStyle(Color.voyaInk)
-                            Text(draft.kind.rawValue)
+                            Text(tripTitle ?? draft.kind.rawValue)
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(Color.voyaMuted)
                         }
@@ -1361,30 +1400,31 @@ private struct EditItineraryItemView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 14) {
-                        Picker("Type", selection: $draft.kind) {
-                            ForEach(ItineraryKind.allCases, id: \.self) { kind in
-                                Label(kind.rawValue, systemImage: kind.symbol)
-                                    .tag(kind)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(Color.voyaInk)
+                        ItineraryKindPicker(selection: $draft.kind)
 
-                        editField("Title", text: $draft.title)
+                        ClearableTextField("Title", text: $draft.title, prompt: "Flight BA2490, hotel stay, dinner reservation")
 
                         VStack(alignment: .leading, spacing: 10) {
-                            DatePicker("Start", selection: $draft.startsAt, displayedComponents: [.date, .hourAndMinute])
+                            Toggle("Date", isOn: $draft.hasStartDate)
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(Color.voyaInk)
+                                .tint(Color.voyaTeal)
 
-                            Toggle("End time", isOn: $draft.hasEndDate)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(Color.voyaInk)
-
-                            if draft.hasEndDate {
-                                DatePicker("End", selection: $draft.endsAt, in: draft.startsAt..., displayedComponents: [.date, .hourAndMinute])
+                            if draft.hasStartDate {
+                                DatePicker("Start", selection: $draft.startsAt, displayedComponents: [.date, .hourAndMinute])
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(Color.voyaInk)
+
+                                Toggle("End time", isOn: $draft.hasEndDate)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Color.voyaInk)
+                                    .tint(Color.voyaTeal)
+
+                                if draft.hasEndDate {
+                                    DatePicker("End", selection: $draft.endsAt, in: draft.startsAt..., displayedComponents: [.date, .hourAndMinute])
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Color.voyaInk)
+                                }
                             }
                         }
                         .padding(12)
@@ -1395,9 +1435,14 @@ private struct EditItineraryItemView: View {
                                 draft.endsAt = startsAt
                             }
                         }
+                        .onChange(of: draft.hasStartDate) { _, hasStartDate in
+                            if !hasStartDate {
+                                draft.hasEndDate = false
+                            }
+                        }
 
-                        editField("Place", text: $draft.location)
-                        editField("Status", text: $draft.status)
+                        ClearableTextField("Place", text: $draft.location, prompt: "Airport, hotel, venue, city")
+                        ClearableTextField("Status", text: $draft.status, prompt: "Confirmed, needs review, ticket saved")
                     }
                     .padding(18)
                     .background(.white)
@@ -1411,19 +1456,36 @@ private struct EditItineraryItemView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            Button {
-                onSave(draft)
-                dismiss()
-            } label: {
-                Label("Save changes", systemImage: "checkmark")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .foregroundStyle(.white)
-                    .background(Color.voyaInk)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            VStack(spacing: 10) {
+                Button {
+                    onSave(draft)
+                    dismiss()
+                } label: {
+                    Label(mode == .add ? "Add to trip" : "Save changes", systemImage: "checkmark")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .foregroundStyle(.white)
+                        .background(isSaveDisabled ? Color.voyaMuted : Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaveDisabled)
+
+                if let onDelete {
+                    Button(role: .destructive) {
+                        onDelete()
+                        dismiss()
+                    } label: {
+                        Label("Delete item", systemImage: "trash")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .foregroundStyle(Color.voyaCoral)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .buttonStyle(.plain)
             .padding(.horizontal, 18)
             .padding(.top, 12)
             .padding(.bottom, 10)
@@ -1433,20 +1495,132 @@ private struct EditItineraryItemView: View {
         .presentationDragIndicator(.visible)
     }
 
-    private func editField(_ label: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(label)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(Color.voyaMuted)
-            TextField(label, text: text, axis: .vertical)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Color.voyaInk)
-                .lineLimit(1...3)
-                .padding(.horizontal, 10)
-                .frame(minHeight: 40)
-                .background(Color.voyaSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+    private var isSaveDisabled: Bool {
+        draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || draft.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+private struct TripDraft {
+    var title: String
+    var destination: String
+    var summary: String
+    var notes: String
+
+    init(trip: Trip) {
+        title = trip.title
+        destination = trip.destination ?? ""
+        summary = trip.summary
+        notes = trip.notes ?? ""
+    }
+}
+
+private struct EditTripView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: TripDraft
+    let onSave: (TripDraft) -> Void
+    let onDelete: () -> Void
+
+    init(
+        trip: Trip,
+        onSave: @escaping (TripDraft) -> Void,
+        onDelete: @escaping () -> Void
+    ) {
+        _draft = State(initialValue: TripDraft(trip: trip))
+        self.onSave = onSave
+        self.onDelete = onDelete
+    }
+
+    var body: some View {
+        ZStack {
+            AppBackground()
+                .ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Edit trip")
+                                .font(.system(size: 28, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.voyaInk)
+                            Text("Trip details")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                                .frame(width: 42, height: 42)
+                                .background(.white)
+                                .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        ClearableTextField("Title", text: $draft.title, prompt: "Trip to Rome")
+                        ClearableTextField("Destination", text: $draft.destination, prompt: "Rome")
+                        ClearableTextField("Summary", text: $draft.summary, prompt: "Confirmed flights and stay")
+                        ClearableTextField("Notes", text: $draft.notes, prompt: "Anything useful for this trip", lineLimit: 3...6)
+                    }
+                    .padding(18)
+                    .background(.white)
+                    .foregroundStyle(Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 96)
+            }
         }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 10) {
+                Button {
+                    onSave(draft)
+                    dismiss()
+                } label: {
+                    Label("Save trip", systemImage: "checkmark")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .foregroundStyle(.white)
+                        .background(isSaveDisabled ? Color.voyaMuted : Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaveDisabled)
+
+                Button(role: .destructive) {
+                    onDelete()
+                    dismiss()
+                } label: {
+                    Label("Delete trip", systemImage: "trash")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .foregroundStyle(Color.voyaCoral)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            .background(.ultraThinMaterial)
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var isSaveDisabled: Bool {
+        draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
@@ -1689,7 +1863,9 @@ private struct ImportSuccessAnimationCard: View {
 
 private struct ExtractionReview: View {
     let preview: ExtractionPreview
-    let onItemChange: (ItineraryItem) -> Void
+    let onItemChange: (ItineraryItem, ItineraryItemDraft) -> Void
+    let onAddItem: () -> Void
+    let onDeleteItem: (ItineraryItem) -> Void
     let onConfirm: () -> Void
 
     var body: some View {
@@ -1743,9 +1919,26 @@ private struct ExtractionReview: View {
 
             VStack(spacing: 12) {
                 ForEach(preview.items) { item in
-                    EditableItineraryItem(item: item, onChange: onItemChange)
+                    EditableItineraryItem(
+                        item: item,
+                        onChange: { draft in onItemChange(item, draft) },
+                        onDelete: { onDeleteItem(item) }
+                    )
                 }
             }
+
+            Button(action: onAddItem) {
+                Label("Add item", systemImage: "plus")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .foregroundStyle(Color.voyaInk)
+                    .background(Color.voyaSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
 
             Button(action: onConfirm) {
                 Label("Save to trip", systemImage: "checkmark")
@@ -1755,10 +1948,11 @@ private struct ExtractionReview: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
                     .foregroundStyle(.white)
-                    .background(Color.voyaInk)
+                    .background(preview.items.isEmpty ? Color.voyaMuted : Color.voyaInk)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
+            .disabled(preview.items.isEmpty)
         }
         .padding(18)
         .background(.white)
@@ -1769,76 +1963,96 @@ private struct ExtractionReview: View {
 }
 
 private struct EditableItineraryItem: View {
-    @State private var draft: ItineraryItem
-    @State private var hasStartDate: Bool
-    @State private var startDate: Date
-    @State private var hasEndDate: Bool
-    @State private var endDate: Date
-    let onChange: (ItineraryItem) -> Void
+    @State private var draft: ItineraryItemDraft
+    let onChange: (ItineraryItemDraft) -> Void
+    let onDelete: () -> Void
 
-    init(item: ItineraryItem, onChange: @escaping (ItineraryItem) -> Void) {
-        _draft = State(initialValue: item)
-        _hasStartDate = State(initialValue: item.startsAt != nil)
-        _startDate = State(initialValue: item.startsAt ?? Date())
-        _hasEndDate = State(initialValue: item.endsAt != nil)
-        _endDate = State(initialValue: item.endsAt ?? item.startsAt ?? Date())
+    init(
+        item: ItineraryItem,
+        onChange: @escaping (ItineraryItemDraft) -> Void,
+        onDelete: @escaping () -> Void
+    ) {
+        _draft = State(initialValue: ItineraryItemDraft(item: item))
         self.onChange = onChange
+        self.onDelete = onDelete
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center) {
                 Label(draft.kind.rawValue, systemImage: draft.kind.symbol)
                     .font(.headline)
                     .foregroundStyle(Color.voyaInk)
                 Spacer()
-                Text(draft.status)
+                Text(draft.displayTime)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.voyaMuted)
+                    .foregroundStyle(draft.hasStartDate ? Color.voyaMuted : Color.voyaCoral)
             }
 
+            ItineraryKindPicker(selection: $draft.kind)
+
             VStack(alignment: .leading, spacing: 10) {
-                Label(displayTime, systemImage: "calendar")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(hasStartDate ? Color.voyaInk : Color.voyaCoral)
+                HStack {
+                    Label("Date", systemImage: "calendar")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.voyaInk)
 
-                if hasStartDate {
-                    dateTimePickerRow("Start", selection: $startDate)
+                    Spacer()
 
-                    if hasEndDate {
-                        dateTimePickerRow("End", selection: $endDate, range: startDate...)
+                    Toggle("", isOn: $draft.hasStartDate)
+                        .labelsHidden()
+                        .tint(Color.voyaTeal)
+                }
+
+                if draft.hasStartDate {
+                    dateTimePickerRow("Start", selection: $draft.startsAt)
+
+                    Toggle("End time", isOn: $draft.hasEndDate)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaInk)
+                        .tint(Color.voyaTeal)
+
+                    if draft.hasEndDate {
+                        dateTimePickerRow("End", selection: $draft.endsAt, range: draft.startsAt...)
                     }
                 }
             }
             .padding(.vertical, 2)
 
-            editableField("Title", text: $draft.title)
-            editableField("Place", text: $draft.location)
+            ClearableTextField("Title", text: $draft.title, prompt: "Flight BA2490, hotel stay, dinner reservation")
+            ClearableTextField("Place", text: $draft.location, prompt: "Airport, hotel, venue, city")
+            ClearableTextField("Status", text: $draft.status, prompt: "Confirmed, needs review, ticket saved")
+
+            Button(role: .destructive, action: onDelete) {
+                Label("Remove from import", systemImage: "minus.circle")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.voyaCoral)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
         }
         .padding(14)
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .onChange(of: draft.title) { _, _ in onChange(draft) }
-        .onChange(of: draft.location) { _, _ in onChange(draft) }
-        .onChange(of: draft.updatedAt) { _, _ in syncDatesFromDraft() }
-        .onChange(of: startDate) { _, value in
-            if endDate < value {
-                endDate = value
+        .onChange(of: draft.kind) { _, _ in commitDraft() }
+        .onChange(of: draft.title) { _, _ in commitDraft() }
+        .onChange(of: draft.location) { _, _ in commitDraft() }
+        .onChange(of: draft.status) { _, _ in commitDraft() }
+        .onChange(of: draft.hasStartDate) { _, value in
+            if !value {
+                draft.hasEndDate = false
             }
-            commitDates()
+            commitDraft()
         }
-        .onChange(of: endDate) { _, _ in commitDates() }
-    }
-
-    private var displayTime: String {
-        guard hasStartDate else {
-            return "Date needed"
+        .onChange(of: draft.hasEndDate) { _, _ in commitDraft() }
+        .onChange(of: draft.startsAt) { _, value in
+            if draft.endsAt < value {
+                draft.endsAt = value
+            }
+            commitDraft()
         }
-
-        return ItineraryDateFormatter.displayTime(
-            start: startDate,
-            end: hasEndDate ? endDate : nil
-        )
+        .onChange(of: draft.endsAt) { _, _ in commitDraft() }
     }
 
     private func dateTimePickerRow(
@@ -1880,32 +2094,74 @@ private struct EditableItineraryItem: View {
         }
     }
 
-    private func syncDatesFromDraft() {
-        hasStartDate = draft.startsAt != nil
-        startDate = draft.startsAt ?? Date()
-        hasEndDate = draft.endsAt != nil
-        endDate = draft.endsAt ?? draft.startsAt ?? Date()
+    private func commitDraft() {
+        onChange(draft)
+    }
+}
+
+private struct ClearableTextField: View {
+    let label: String
+    @Binding var text: String
+    let prompt: String
+    let lineLimit: ClosedRange<Int>
+
+    init(
+        _ label: String,
+        text: Binding<String>,
+        prompt: String,
+        lineLimit: ClosedRange<Int> = 1...3
+    ) {
+        self.label = label
+        _text = text
+        self.prompt = prompt
+        self.lineLimit = lineLimit
     }
 
-    private func editableField(_ label: String, text: Binding<String>) -> some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(label)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(Color.voyaMuted)
-            TextField(label, text: text, axis: .vertical)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Color.voyaInk)
-                .lineLimit(1...3)
-                .padding(.vertical, 4)
-                .frame(minHeight: 38)
+
+            HStack(alignment: .top, spacing: 8) {
+                TextField(label, text: $text, prompt: Text(prompt), axis: .vertical)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.voyaInk)
+                    .lineLimit(lineLimit)
+                    .padding(.vertical, 4)
+                    .frame(minHeight: lineLimit.lowerBound > 1 ? 88 : 38)
+
+                if !text.isEmpty {
+                    Button {
+                        text = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.voyaMuted.opacity(0.72))
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear \(label)")
+                }
+            }
+            .padding(.horizontal, 10)
+            .background(Color.voyaSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
     }
+}
 
-    private func commitDates() {
-        draft.startsAt = hasStartDate ? startDate : nil
-        draft.endsAt = hasStartDate && hasEndDate ? max(endDate, startDate) : nil
-        draft.updatedAt = Date()
-        onChange(draft)
+private struct ItineraryKindPicker: View {
+    @Binding var selection: ItineraryKind
+
+    var body: some View {
+        Picker("Type", selection: $selection) {
+            Text("Flight").tag(ItineraryKind.flight)
+            Text("Hotel").tag(ItineraryKind.hotel)
+            Text("Event").tag(ItineraryKind.event)
+            Text("Transit").tag(ItineraryKind.transit)
+        }
+        .pickerStyle(.segmented)
     }
 }
 
