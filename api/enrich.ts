@@ -22,6 +22,10 @@ type EnrichmentRequest = {
   status?: string;
 };
 
+type GeocodeResult =
+  | { place: { lat: number; lon: number; name?: string; country?: string } }
+  | { error: "missing_input" | "provider_error" | "not_found"; status?: number };
+
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -30,10 +34,31 @@ function firstFlightNumber(value: string) {
   return value.match(/\b[A-Z]{2}\s?\d{2,4}\b/i)?.[0]?.replace(/\s+/g, "").toUpperCase();
 }
 
+function stripAirportCode(value: string) {
+  return value.replace(/\s*\([A-Z]{3}\)\s*/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function destinationFromRoute(location: string) {
+  const routeParts = location.split(/\s+\bto\b\s+/i).map((part) => part.trim()).filter(Boolean);
+  return routeParts.length > 1 ? routeParts[routeParts.length - 1] : location;
+}
+
+function placeForExternalLookup(kind: string, location: string) {
+  if (!location) {
+    return "";
+  }
+
+  const place = kind === "flight" || kind === "transit"
+    ? destinationFromRoute(location)
+    : location;
+
+  return stripAirportCode(place);
+}
+
 async function geocode(location: string) {
   const apiKey = process.env.OPENWEATHER_API_KEY;
   if (!apiKey || !location) {
-    return null;
+    return { error: "missing_input" } satisfies GeocodeResult;
   }
 
   const url = new URL("https://api.openweathermap.org/geo/1.0/direct");
@@ -43,11 +68,13 @@ async function geocode(location: string) {
 
   const response = await fetch(url);
   if (!response.ok) {
-    return null;
+    return { error: "provider_error", status: response.status } satisfies GeocodeResult;
   }
 
   const places = (await response.json()) as Array<{ lat: number; lon: number; name?: string; country?: string }>;
-  return places[0] ?? null;
+  const place = places[0];
+
+  return place ? { place } : { error: "not_found" } satisfies GeocodeResult;
 }
 
 async function weatherCard(location: string): Promise<EnrichmentCard> {
@@ -61,15 +88,28 @@ async function weatherCard(location: string): Promise<EnrichmentCard> {
     };
   }
 
-  const place = await geocode(location);
-  if (!place) {
+  const geocoded = await geocode(location);
+  if ("error" in geocoded) {
+    if (geocoded.error === "provider_error") {
+      return {
+        title: "Weather",
+        value: "Unavailable",
+        detail: `OpenWeather geocoding returned ${geocoded.status}.`,
+        kind: "weather"
+      };
+    }
+
     return {
       title: "Weather",
       value: "Location needed",
-      detail: "Add a clearer city, airport, hotel, or venue address.",
+      detail: location
+        ? `OpenWeather could not find "${location}".`
+        : "Add a clearer city, airport, hotel, or venue address.",
       kind: "weather"
     };
   }
+
+  const place = geocoded.place;
 
   const url = new URL("https://api.openweathermap.org/data/3.0/onecall");
   url.searchParams.set("lat", String(place.lat));
@@ -172,6 +212,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const kind = clean(body.kind).toLowerCase();
   const title = clean(body.title);
   const location = clean(body.location);
+  const lookupPlace = placeForExternalLookup(kind, location);
   const status = clean(body.status);
 
   const cards: EnrichmentCard[] = [
@@ -187,8 +228,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       detail: location || "Add an address, airport, hotel, venue, or city.",
       kind: "maps"
     },
-    await weatherCard(location),
-    await eventsCard(location)
+    await weatherCard(lookupPlace),
+    await eventsCard(lookupPlace)
   ];
 
   if (kind === "flight") {
