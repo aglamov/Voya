@@ -1,4 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { openai } from "@ai-sdk/openai";
+import { generateObject } from "ai";
+import { z } from "zod";
 
 type EnrichmentCard = {
   title: string;
@@ -29,6 +32,12 @@ type GeocodeResult =
 
 type Coordinates = { lat: number; lon: number; name: string; country?: string };
 
+type LocationLookup = {
+  query: string;
+  coordinates?: Coordinates;
+  source: "deterministic" | "ai" | "raw";
+};
+
 type TicketmasterEvent = {
   name?: string;
   url?: string;
@@ -45,6 +54,21 @@ type TicketmasterEvent = {
     }>;
   };
 };
+
+const locationNormalizationSchema = z.object({
+  displayName: z.string().min(1).describe("Short human-readable place or venue name."),
+  city: z.string().min(1).describe("City or locality to use for weather/events provider lookup."),
+  country: z.string().optional().nullable(),
+  weatherQuery: z.string().min(1).describe("Best location query for weather provider lookup."),
+  eventsQuery: z.string().min(1).describe("Best location query for nearby event discovery."),
+  coordinates: z.object({
+    lat: z.number().min(-90).max(90),
+    lon: z.number().min(-180).max(180)
+  }).optional().nullable().describe("Only include coordinates if they are explicit in the input, not guessed."),
+  confidence: z.number().min(0).max(1)
+});
+
+const modelName = () => process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -205,6 +229,100 @@ function placeForExternalLookup(kind: string, location: string) {
   return stripAirportCode(place);
 }
 
+async function deterministicLocationLookup(kind: string, location: string): Promise<LocationLookup | undefined> {
+  const query = placeForExternalLookup(kind, location);
+  if (!query) {
+    return undefined;
+  }
+
+  const googleMapURL = await resolvedGoogleMapURL(query);
+  if (googleMapURL) {
+    const coordinates = coordinatesFromMapURL(googleMapURL);
+    if (coordinates) {
+      return { query, coordinates, source: "deterministic" };
+    }
+
+    const placeName = placeNameFromMapURL(googleMapURL);
+    if (placeName) {
+      const localPlace = localCoordinates(placeName);
+      if (localPlace) {
+        return { query: placeName, coordinates: localPlace, source: "deterministic" };
+      }
+      return { query: placeName, source: "deterministic" };
+    }
+  }
+
+  const coordinates = localCoordinates(query);
+  if (coordinates) {
+    return { query, coordinates, source: "deterministic" };
+  }
+
+  return { query, source: "raw" };
+}
+
+async function aiLocationLookup(kind: string, title: string, location: string): Promise<LocationLookup | undefined> {
+  if (!process.env.OPENAI_API_KEY || !location) {
+    return undefined;
+  }
+
+  try {
+    const { object } = await generateObject({
+      model: openai(modelName()),
+      schema: locationNormalizationSchema,
+      schemaName: "LocationNormalization",
+      schemaDescription: "Normalized provider lookup location for a travel itinerary item.",
+      system: [
+        "You normalize a travel itinerary item's location for weather and nearby event provider lookups.",
+        "Return concise structured JSON only.",
+        "For flight or transit routes, use the destination as the weather/events location, not the origin.",
+        "For hotels and events, prefer the venue city/locality and country.",
+        "If the input is a Google Maps URL or long address, extract the venue, city, and country if visible.",
+        "Do not invent precise coordinates. Include coordinates only if they are explicitly present in the input.",
+        "If coordinates are not explicit, return a weatherQuery and eventsQuery such as 'Bad Ragaz, Switzerland'."
+      ].join(" "),
+      prompt: [
+        `Kind: ${kind || "unknown"}`,
+        `Title: ${title || "unknown"}`,
+        `Location: ${location}`,
+        "",
+        "Normalize this location for weather and nearby public event lookup."
+      ].join("\n")
+    });
+
+    const coordinates = object.coordinates
+      ? { lat: object.coordinates.lat, lon: object.coordinates.lon, name: object.displayName, country: object.country ?? undefined }
+      : undefined;
+    const query = object.weatherQuery || object.eventsQuery || [object.city, object.country].filter(Boolean).join(", ");
+
+    return query ? { query, coordinates, source: "ai" } : undefined;
+  } catch (error) {
+    console.error("Location normalization failed", error);
+    return undefined;
+  }
+}
+
+async function normalizeLocationForProviders(kind: string, title: string, location: string): Promise<LocationLookup | undefined> {
+  const deterministic = await deterministicLocationLookup(kind, location);
+  if (deterministic?.coordinates) {
+    return deterministic;
+  }
+
+  const ai = await aiLocationLookup(kind, title, location);
+  if (ai?.coordinates) {
+    return ai;
+  }
+
+  if (ai?.query) {
+    const localPlace = localCoordinates(ai.query);
+    if (localPlace) {
+      return { ...ai, coordinates: localPlace };
+    }
+    return ai;
+  }
+
+  return deterministic;
+}
+
 const knownCoordinates: Record<string, Coordinates> = {
   bio: { lat: 43.3011, lon: -2.9106, name: "Bilbao Airport", country: "ES" },
   bilbao: { lat: 43.263, lon: -2.935, name: "Bilbao", country: "ES" },
@@ -315,7 +433,12 @@ function eventDetail(event: TicketmasterEvent) {
   return parts.join(" · ");
 }
 
-async function geocode(location: string) {
+async function geocode(locationLookup: string | LocationLookup) {
+  let location = typeof locationLookup === "string" ? locationLookup : locationLookup.query;
+  if (typeof locationLookup !== "string" && locationLookup.coordinates) {
+    return { place: locationLookup.coordinates };
+  }
+
   if (!location) {
     return { error: "missing_input" } satisfies GeocodeResult;
   }
@@ -363,13 +486,22 @@ async function geocode(location: string) {
   return place ? { place } : { error: "not_found" } satisfies GeocodeResult;
 }
 
-async function weatherCard(location: string): Promise<EnrichmentCard> {
+async function weatherCard(location: string | LocationLookup | undefined): Promise<EnrichmentCard> {
   const apiKey = process.env.OPENWEATHER_API_KEY;
   if (!apiKey) {
     return {
       title: "Weather",
       value: "Not connected",
       detail: "Set OPENWEATHER_API_KEY on Vercel to show live weather.",
+      kind: "weather"
+    };
+  }
+
+  if (!location) {
+    return {
+      title: "Weather",
+      value: "Location needed",
+      detail: "Add a clearer city, airport, hotel, venue address, or map link.",
       kind: "weather"
     };
   }
@@ -388,8 +520,8 @@ async function weatherCard(location: string): Promise<EnrichmentCard> {
     return {
       title: "Weather",
       value: "Location needed",
-      detail: location
-        ? `OpenWeather could not find "${location}".`
+      detail: (typeof location === "string" ? location : location.query)
+        ? `OpenWeather could not find "${typeof location === "string" ? location : location.query}".`
         : "Add a clearer city, airport, hotel, or venue address.",
       kind: "weather"
     };
@@ -434,7 +566,7 @@ async function weatherCard(location: string): Promise<EnrichmentCard> {
   };
 }
 
-async function eventsCard(location: string, startsAt?: string | number | null, endsAt?: string | number | null): Promise<EnrichmentCard> {
+async function eventsCard(location: string | LocationLookup | undefined, startsAt?: string | number | null, endsAt?: string | number | null): Promise<EnrichmentCard> {
   const apiKey = ticketmasterApiKey();
   if (!apiKey) {
     return {
@@ -464,7 +596,7 @@ async function eventsCard(location: string, startsAt?: string | number | null, e
       url.searchParams.set("unit", "km");
       url.searchParams.set("sort", "distance,date,asc");
     } else {
-      url.searchParams.set("city", cityFromLocation(location));
+      url.searchParams.set("city", cityFromLocation(typeof location === "string" ? location : location.query));
     }
   }
 
@@ -521,7 +653,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const kind = clean(body.kind).toLowerCase();
   const title = clean(body.title);
   const location = clean(body.location);
-  const lookupPlace = placeForExternalLookup(kind, location);
+  const lookupPlace = await normalizeLocationForProviders(kind, title, location);
   const status = clean(body.status);
 
   const cards: EnrichmentCard[] = [
