@@ -704,7 +704,7 @@ final class VoyaStore: ObservableObject {
             extractedPreview = try await VercelConfirmationExtractor().extract(from: document)
             importMessage = "AI recognized \(document.name)"
         } catch {
-            extractedPreview = nil
+            extractedPreview = ConfirmationParser.extract(from: document)
             importMessage = aiExtractionFailureMessage(for: error)
         }
 
@@ -715,13 +715,13 @@ final class VoyaStore: ObservableObject {
         if let extractionError = error as? VercelExtractionError {
             switch extractionError {
             case .notConfigured:
-                return "AI extraction unavailable: API URL is not configured."
+                return "Used on-device recognition. Add VOYA_API_BASE_URL to enable AI."
             case .badResponse:
-                return "AI extraction unavailable: server returned an error."
+                return "Used on-device recognition because the AI server returned an error."
             }
         }
 
-        return "AI extraction unavailable. Check connection and try again."
+        return "Used on-device recognition because AI could not be reached."
     }
 
     func updatePreviewItem(_ item: ItineraryItem) {
