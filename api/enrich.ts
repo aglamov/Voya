@@ -111,11 +111,11 @@ async function weatherCard(location: string): Promise<EnrichmentCard> {
 
   const place = geocoded.place;
 
-  const url = new URL("https://api.openweathermap.org/data/3.0/onecall");
+  const url = new URL("https://api.openweathermap.org/data/4.0/onecall/current");
   url.searchParams.set("lat", String(place.lat));
   url.searchParams.set("lon", String(place.lon));
-  url.searchParams.set("exclude", "minutely");
   url.searchParams.set("units", "metric");
+  url.searchParams.set("lang", "en");
   url.searchParams.set("appid", apiKey);
 
   const response = await fetch(url);
@@ -129,18 +129,22 @@ async function weatherCard(location: string): Promise<EnrichmentCard> {
   }
 
   const data = await response.json() as {
-    current?: { temp?: number; weather?: Array<{ description?: string }> };
-    alerts?: Array<{ event?: string }>;
+    data?: Array<{
+      temp?: number;
+      weather?: Array<{ description?: string }>;
+      alerts?: string[];
+    }>;
   };
-  const temp = data.current?.temp;
-  const description = data.current?.weather?.[0]?.description;
-  const alert = data.alerts?.[0]?.event;
+  const current = data.data?.[0];
+  const temp = current?.temp;
+  const description = current?.weather?.[0]?.description;
+  const alertCount = current?.alerts?.length ?? 0;
 
   return {
     title: "Weather",
     value: temp == null ? "Forecast ready" : `${Math.round(temp)} C`,
-    detail: [description, alert ? `Alert: ${alert}` : undefined].filter(Boolean).join(" · "),
-    kind: alert ? "warning" : "weather"
+    detail: [description, alertCount > 0 ? `${alertCount} weather alert${alertCount === 1 ? "" : "s"}` : undefined].filter(Boolean).join(" · "),
+    kind: alertCount > 0 ? "warning" : "weather"
   };
 }
 
