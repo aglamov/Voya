@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import PDFKit
 import UniformTypeIdentifiers
+import UIKit
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -212,7 +213,7 @@ private struct RecommendationCard: View {
 
 private struct TripsView: View {
     @EnvironmentObject private var store: VoyaStore
-    @State private var itemBeingEdited: ItineraryItem?
+    @State private var itemBeingViewed: ItineraryItem?
     @State private var tripBeingEdited: Trip?
     @State private var tripAddingItem: Trip?
     @State private var tripListMode: TripListMode = .upcoming
@@ -298,8 +299,12 @@ private struct TripsView: View {
 
                     VStack(spacing: 0) {
                         ForEach(Array(itinerary.enumerated()), id: \.element.id) { index, item in
-                            TimelineRow(item: item, isLast: index == itinerary.count - 1) {
-                                itemBeingEdited = item
+                            TimelineRow(
+                                item: item,
+                                phase: ItineraryPhase(item: item),
+                                isLast: index == itinerary.count - 1
+                            ) {
+                                itemBeingViewed = item
                             }
                         }
                     }
@@ -353,8 +358,8 @@ private struct TripsView: View {
                 )
             }
         }
-        .sheet(item: $itemBeingEdited) { item in
-            EditItineraryItemView(item: item) { draft in
+        .sheet(item: $itemBeingViewed) { item in
+            ItineraryItemDetailView(item: item) { draft in
                 store.updateItineraryItem(
                     item,
                     kind: draft.kind,
@@ -952,6 +957,7 @@ private struct MetricPill: View {
 }
 
 private struct TripHeroCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let trip: Trip
     let onEdit: () -> Void
 
@@ -1023,8 +1029,30 @@ private struct TripHeroCard: View {
         }
         .foregroundStyle(.white)
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(heroBorderGradient, lineWidth: 7)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .inset(by: 10)
+                .stroke(.white.opacity(colorScheme == .dark ? 0.26 : 0.34), lineWidth: 1)
+        }
         .shadow(color: .black.opacity(0.10), radius: 22, y: 14)
+        .shadow(color: Color.voyaGold.opacity(colorScheme == .dark ? 0.30 : 0.18), radius: 22, y: 10)
         .accessibilityElement(children: .combine)
+    }
+
+    private var heroBorderGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 1.0, green: 0.91, blue: 0.55).opacity(colorScheme == .dark ? 0.92 : 0.82),
+                Color.voyaMint.opacity(colorScheme == .dark ? 0.82 : 0.64),
+                Color.voyaGold.opacity(colorScheme == .dark ? 0.84 : 0.70)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 }
 
@@ -1224,67 +1252,177 @@ private struct TripHeroBackground: View {
 
 private struct TimelineRow: View {
     let item: ItineraryItem
+    let phase: ItineraryPhase
     let isLast: Bool
-    let onEdit: () -> Void
+    let onOpen: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(spacing: 0) {
-                Image(systemName: item.kind.symbol)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.voyaTeal)
-                    .clipShape(Circle())
+        Button(action: onOpen) {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(spacing: 0) {
+                    Image(systemName: item.kind.symbol)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(phase.accent)
+                        .clipShape(Circle())
+                        .opacity(phase.iconOpacity)
 
-                if !isLast {
-                    Rectangle()
-                        .fill(Color.voyaLine)
-                        .frame(width: 2, height: 46)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(item.displayTime)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Color.voyaCoral)
-                    Spacer()
-                    Text(item.status)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.voyaMuted)
-                }
-
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(item.title)
-                        .font(.headline)
-                        .foregroundStyle(Color.voyaInk)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Menu {
-                        Button(action: onEdit) {
-                            Label("Edit", systemImage: "pencil")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.caption.weight(.black))
-                            .foregroundStyle(Color.voyaMuted)
-                            .frame(width: 30, height: 30)
-                            .background(Color.voyaSurface)
-                            .clipShape(Circle())
+                    if !isLast {
+                        Rectangle()
+                            .fill(phase.lineColor)
+                            .frame(width: 2, height: 46)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Actions for \(item.title)")
                 }
 
-                Text(item.location)
-                    .font(.subheadline)
-                    .foregroundStyle(Color.voyaMuted)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(item.displayTime)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(phase.timeColor)
+                        Spacer()
+                        Text(phase.label)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(phase.accent)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(phase.badgeBackground)
+                            .clipShape(Capsule())
+                    }
+
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(item.title.isEmpty ? "Untitled item" : item.title)
+                            .font(.headline)
+                            .foregroundStyle(phase.titleColor)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.voyaMuted.opacity(phase.contentOpacity))
+                    }
+
+                    Text(item.location.isEmpty ? "Location needed" : item.location)
+                        .font(.subheadline)
+                        .foregroundStyle(phase.secondaryColor)
+
+                    if !item.status.isEmpty {
+                        Text(item.status)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(phase.secondaryColor)
+                    }
+                }
+                .padding(.vertical, phase == .current ? 12 : 10)
+                .padding(.trailing, 12)
             }
-            .padding(.bottom, isLast ? 0 : 18)
+            .padding(.leading, 16)
+            .padding(.bottom, isLast ? 8 : 0)
+            .background(phase.rowBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .opacity(phase.contentOpacity)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
+        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+    }
+}
+
+private enum ItineraryPhase: Equatable {
+    case past
+    case current
+    case future
+    case undated
+
+    init(item: ItineraryItem, now: Date = Date(), calendar: Calendar = .current) {
+        guard let start = item.startsAt else {
+            self = .undated
+            return
+        }
+
+        let end = item.endsAt ?? start
+        if now >= start && now <= end {
+            self = .current
+            return
+        }
+
+        if calendar.isDateInToday(start) || calendar.isDateInToday(end) {
+            self = .current
+            return
+        }
+
+        self = end < now ? .past : .future
+    }
+
+    var label: String {
+        switch self {
+        case .past: "Done"
+        case .current: "Now"
+        case .future: "Next"
+        case .undated: "Review"
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .past: Color.voyaMuted
+        case .current: Color.voyaTeal
+        case .future: Color.voyaInk
+        case .undated: Color.voyaGold
+        }
+    }
+
+    var timeColor: Color {
+        switch self {
+        case .current: Color.voyaTeal
+        case .undated: Color.voyaGold
+        case .past: Color.voyaMuted
+        case .future: Color.voyaInk
+        }
+    }
+
+    var titleColor: Color {
+        self == .past ? Color.voyaMuted : Color.voyaInk
+    }
+
+    var secondaryColor: Color {
+        self == .past ? Color.voyaMuted.opacity(0.76) : Color.voyaMuted
+    }
+
+    var rowBackground: Color {
+        switch self {
+        case .current: Color.voyaMint.opacity(0.72)
+        case .undated: Color.voyaGold.opacity(0.08)
+        case .past, .future: Color.clear
+        }
+    }
+
+    var badgeBackground: Color {
+        switch self {
+        case .current: Color.voyaTeal.opacity(0.13)
+        case .undated: Color.voyaGold.opacity(0.13)
+        case .past: Color.voyaSurface
+        case .future: Color.voyaSurface
+        }
+    }
+
+    var lineColor: Color {
+        self == .past ? Color.voyaLine.opacity(0.55) : Color.voyaLine
+    }
+
+    var contentOpacity: Double {
+        self == .past ? 0.62 : 1
+    }
+
+    var iconOpacity: Double {
+        self == .past ? 0.72 : 1
+    }
+
+    var insightText: String {
+        switch self {
+        case .past: "Already behind"
+        case .current: "Focus now"
+        case .future: "Coming up"
+        case .undated: "Needs time"
+        }
     }
 }
 
@@ -1336,6 +1474,408 @@ struct ItineraryItemDraft {
 private enum ItineraryItemEditorMode {
     case add
     case edit
+}
+
+private struct ItineraryItemDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var draft: ItineraryItemDraft
+    @State private var isEditing = false
+    @State private var didCopyLocation = false
+    @State private var enrichment: ItemEnrichment?
+    @State private var isLoadingEnrichment = false
+    let item: ItineraryItem
+    let onSave: (ItineraryItemDraft) -> Void
+    let onDelete: () -> Void
+
+    init(
+        item: ItineraryItem,
+        onSave: @escaping (ItineraryItemDraft) -> Void,
+        onDelete: @escaping () -> Void
+    ) {
+        self.item = item
+        _draft = State(initialValue: ItineraryItemDraft(item: item))
+        self.onSave = onSave
+        self.onDelete = onDelete
+    }
+
+    var body: some View {
+        ZStack {
+            AppBackground()
+                .ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    detailHeader
+
+                    itemFormCard
+                    locationActions
+                    ItemInsightPanel(
+                        item: item,
+                        phase: ItineraryPhase(item: item),
+                        enrichment: enrichment,
+                        isLoading: isLoadingEnrichment
+                    )
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, isEditing ? 128 : 30)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if isEditing {
+                editorActions
+            }
+        }
+        .task(id: item.id) {
+            await loadEnrichment()
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var detailHeader: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 7) {
+                Label(draft.kind.rawValue, systemImage: draft.kind.symbol)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.voyaTeal)
+                Text(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled item" : draft.title)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.voyaInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(draft.displayTime)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.voyaMuted)
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                        isEditing.toggle()
+                    }
+                } label: {
+                    Image(systemName: isEditing ? "lock.open.fill" : "lock.fill")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(isEditing ? .white : Color.voyaInk)
+                        .frame(width: 42, height: 42)
+                        .background(isEditing ? Color.voyaTeal : .white)
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isEditing ? "Lock editing" : "Unlock editing")
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                        .frame(width: 42, height: 42)
+                        .background(.white)
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var itemFormCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ItineraryKindPicker(selection: $draft.kind)
+                .disabled(!isEditing)
+            ClearableTextField("Title", text: $draft.title, prompt: "Flight BA2490, hotel stay, dinner reservation")
+                .disabled(!isEditing)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Date", isOn: $draft.hasStartDate)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.voyaInk)
+                    .tint(Color.voyaTeal)
+
+                if draft.hasStartDate {
+                    DatePicker("Start", selection: $draft.startsAt, displayedComponents: [.date, .hourAndMinute])
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaInk)
+
+                    Toggle("End time", isOn: $draft.hasEndDate)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaInk)
+                        .tint(Color.voyaTeal)
+
+                    if draft.hasEndDate {
+                        DatePicker("End", selection: $draft.endsAt, in: draft.startsAt..., displayedComponents: [.date, .hourAndMinute])
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color.voyaInk)
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color.voyaSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .disabled(!isEditing)
+            .onChange(of: draft.startsAt) { _, startsAt in
+                if draft.endsAt < startsAt {
+                    draft.endsAt = startsAt
+                }
+            }
+            .onChange(of: draft.hasStartDate) { _, hasStartDate in
+                if !hasStartDate {
+                    draft.hasEndDate = false
+                }
+            }
+
+            ClearableTextField("Place", text: $draft.location, prompt: "Airport, hotel, venue, city")
+                .disabled(!isEditing)
+            ClearableTextField("Status", text: $draft.status, prompt: "Confirmed, needs review, ticket saved")
+                .disabled(!isEditing)
+
+            HStack(spacing: 8) {
+                Label(item.sourceName ?? "Manual entry", systemImage: "doc.text")
+                Spacer(minLength: 0)
+                Label(isEditing ? "Unlocked" : "Locked", systemImage: isEditing ? "lock.open.fill" : "lock.fill")
+            }
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color.voyaMuted)
+            .padding(.top, 2)
+        }
+        .padding(18)
+        .background(.white)
+        .foregroundStyle(Color.voyaInk)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private var locationActions: some View {
+        HStack(spacing: 10) {
+            Button {
+                openMaps()
+            } label: {
+                Label("Open map", systemImage: "map")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .foregroundStyle(.white)
+                    .background(Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(draft.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .opacity(draft.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.55 : 1)
+
+            Button {
+                copyLocation()
+            } label: {
+                Label(didCopyLocation ? "Copied" : "Copy", systemImage: didCopyLocation ? "checkmark" : "doc.on.doc")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .foregroundStyle(Color.voyaInk)
+                    .background(Color.voyaSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(draft.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
+    private var editorActions: some View {
+        VStack(spacing: 10) {
+            Button {
+                onSave(draft)
+                dismiss()
+            } label: {
+                Label("Save changes", systemImage: "checkmark")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .foregroundStyle(.white)
+                    .background(isSaveDisabled ? Color.voyaMuted : Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isSaveDisabled)
+
+            Button(role: .destructive) {
+                onDelete()
+                dismiss()
+            } label: {
+                Label("Delete item", systemImage: "trash")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .foregroundStyle(Color.voyaCoral)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(.ultraThinMaterial)
+    }
+
+    private var isSaveDisabled: Bool {
+        draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || draft.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func openMaps() {
+        let query = draft.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty,
+              let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://www.google.com/maps/search/?api=1&query=\(encoded)") else {
+            return
+        }
+        openURL(url)
+    }
+
+    private func copyLocation() {
+        let value = draft.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        UIPasteboard.general.string = value
+        withAnimation(.easeInOut(duration: 0.18)) {
+            didCopyLocation = true
+        }
+    }
+
+    private func loadEnrichment() async {
+        isLoadingEnrichment = true
+        defer { isLoadingEnrichment = false }
+
+        do {
+            enrichment = try await VercelItemEnricher().enrich(item: item)
+        } catch {
+            enrichment = nil
+        }
+    }
+}
+
+private struct ItemInsightPanel: View {
+    let item: ItineraryItem
+    let phase: ItineraryPhase
+    let enrichment: ItemEnrichment?
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Trip intelligence")
+                    .font(.headline)
+                    .foregroundStyle(Color.voyaInk)
+                Spacer()
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.82)
+                        .tint(Color.voyaTeal)
+                }
+            }
+
+            if let summary = enrichment?.summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                InsightTile(title: "Focus", value: phase.insightText, symbol: "scope")
+                InsightTile(title: "Timing", value: timingText, symbol: "clock")
+                if let enrichment {
+                    ForEach(enrichment.cards.prefix(4)) { card in
+                        InsightTile(
+                            title: card.title,
+                            value: card.value,
+                            detail: card.detail,
+                            symbol: symbol(for: card.kind)
+                        )
+                    }
+                } else {
+                    InsightTile(title: "Weather", value: "Connect forecast", symbol: "cloud.sun")
+                    InsightTile(title: item.kind == .flight ? "Flight" : "Context", value: kindText, symbol: item.kind.symbol)
+                }
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private var timingText: String {
+        if item.startsAt == nil {
+            return "Add time"
+        }
+        if phase == .current {
+            return "Active now"
+        }
+        if phase == .past {
+            return "Completed"
+        }
+        return "Upcoming"
+    }
+
+    private var kindText: String {
+        switch item.kind {
+        case .flight:
+            return "Status feed next"
+        case .hotel:
+            return "Stay details"
+        case .event:
+            return "Venue context"
+        case .transit:
+            return "Route context"
+        }
+    }
+
+    private func symbol(for kind: String) -> String {
+        switch kind {
+        case "weather": "cloud.sun"
+        case "flight": "airplane"
+        case "events": "ticket"
+        case "maps": "map"
+        case "warning": "exclamationmark.triangle"
+        default: "sparkles"
+        }
+    }
+}
+
+private struct InsightTile: View {
+    let title: String
+    let value: String
+    var detail: String?
+    let symbol: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: symbol)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.voyaTeal)
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaMuted)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.voyaInk)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 128, alignment: .topLeading)
+        .padding(12)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
 }
 
 private struct EditItineraryItemView: View {

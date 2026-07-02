@@ -126,10 +126,17 @@ See [docs/flight-services.md](docs/flight-services.md) for the recommended fligh
 
 The app calls a Vercel Function at `POST /api/extract` to recognize pasted or uploaded travel confirmations. The function calls OpenAI directly and returns normalized itinerary JSON for the review screen.
 
+The trip detail screen can also call `POST /api/enrich` for event context cards such as weather, nearby events, warnings, maps, and flight-provider placeholders. Enrichment degrades gracefully: missing provider keys show "not connected" cards instead of breaking the trip view.
+
 Required Vercel environment variables:
 
 - `OPENAI_API_KEY`: OpenAI API key.
 - `OPENAI_MODEL`: optional model override. Defaults to `gpt-4o-mini`.
+
+Optional enrichment environment variables:
+
+- `OPENWEATHER_API_KEY`: enables weather cards through OpenWeather geocoding and One Call APIs.
+- `TICKETMASTER_API_KEY`: enables nearby public event cards through Ticketmaster Discovery API.
 
 iOS configuration:
 

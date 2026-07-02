@@ -1467,7 +1467,7 @@ private struct VercelConfirmationExtractor {
     }
 }
 
-private enum VoyaAPIConfiguration {
+enum VoyaAPIConfiguration {
     static var baseURL: URL? {
         guard let rawValue = Bundle.main.object(forInfoDictionaryKey: "VOYA_API_BASE_URL") as? String else {
             return nil
@@ -1480,6 +1480,72 @@ private enum VoyaAPIConfiguration {
 
         return URL(string: trimmed)
     }
+}
+
+struct ItemEnrichment: Decodable {
+    var summary: String
+    var cards: [ItemEnrichmentCard]
+    var warnings: [String]
+}
+
+struct ItemEnrichmentCard: Decodable, Identifiable {
+    var id: String { "\(title)-\(value)-\(kind)" }
+    var title: String
+    var value: String
+    var detail: String?
+    var kind: String
+}
+
+struct VercelItemEnricher {
+    private let session: URLSession
+    private let baseURL: URL?
+
+    init(
+        session: URLSession = .shared,
+        baseURL: URL? = VoyaAPIConfiguration.baseURL
+    ) {
+        self.session = session
+        self.baseURL = baseURL
+    }
+
+    @MainActor
+    func enrich(item: ItineraryItem) async throws -> ItemEnrichment {
+        guard let baseURL else {
+            throw VercelExtractionError.notConfigured
+        }
+
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/enrich"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 25
+        request.httpBody = try JSONEncoder().encode(
+            ItemEnrichmentRequest(
+                kind: item.kind.rawValue,
+                title: item.title,
+                location: item.location,
+                startsAt: item.startsAt,
+                endsAt: item.endsAt,
+                status: item.status
+            )
+        )
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw VercelExtractionError.badResponse
+        }
+
+        return try JSONDecoder().decode(ItemEnrichment.self, from: data)
+    }
+}
+
+private struct ItemEnrichmentRequest: Encodable {
+    var kind: String
+    var title: String
+    var location: String
+    var startsAt: Date?
+    var endsAt: Date?
+    var status: String
 }
 
 private struct VercelExtractionRequest: Encodable {
