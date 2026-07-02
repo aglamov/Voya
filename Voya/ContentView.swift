@@ -1526,6 +1526,7 @@ private enum ItineraryItemEditorMode {
 }
 
 private struct ItineraryItemDetailView: View {
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var draft: ItineraryItemDraft
@@ -1797,7 +1798,7 @@ private struct ItineraryItemDetailView: View {
         defer { isLoadingEnrichment = false }
 
         do {
-            enrichment = try await VercelItemEnricher().enrich(item: item)
+            enrichment = try await VercelItemEnricher().enrich(item: item, modelContext: modelContext)
         } catch {
             enrichment = nil
         }

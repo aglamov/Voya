@@ -52,6 +52,10 @@ final class ItineraryItem: Identifiable {
     var providerName: String?
     var rawData: String?
     var normalizedData: String?
+    var enrichmentCacheKey: String?
+    var enrichmentRawData: String?
+    var enrichmentUpdatedAt: Date?
+    var enrichmentExpiresAt: Date?
     var createdAt: Date
     var updatedAt: Date
 
@@ -69,6 +73,10 @@ final class ItineraryItem: Identifiable {
         providerName: String? = nil,
         rawData: String? = nil,
         normalizedData: String? = nil,
+        enrichmentCacheKey: String? = nil,
+        enrichmentRawData: String? = nil,
+        enrichmentUpdatedAt: Date? = nil,
+        enrichmentExpiresAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -85,6 +93,10 @@ final class ItineraryItem: Identifiable {
         self.providerName = providerName
         self.rawData = rawData
         self.normalizedData = normalizedData
+        self.enrichmentCacheKey = enrichmentCacheKey
+        self.enrichmentRawData = enrichmentRawData
+        self.enrichmentUpdatedAt = enrichmentUpdatedAt
+        self.enrichmentExpiresAt = enrichmentExpiresAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -1482,19 +1494,90 @@ enum VoyaAPIConfiguration {
     }
 }
 
-struct ItemEnrichment: Decodable {
+struct ItemEnrichment: Codable {
     var summary: String
     var cards: [ItemEnrichmentCard]
     var warnings: [String]
 }
 
-struct ItemEnrichmentCard: Decodable, Identifiable {
+struct ItemEnrichmentCard: Codable, Identifiable {
     var id: String { "\(title)-\(value)-\(kind)" }
     var title: String
     var value: String
     var detail: String?
     var actionURL: URL?
     var kind: String
+}
+
+enum ItemEnrichmentCache {
+    static func key(for item: ItineraryItem) -> String {
+        let dateFormatter = ISO8601DateFormatter()
+        return [
+            item.kind.rawValue,
+            normalized(item.title),
+            normalized(item.location),
+            normalized(item.status),
+            item.startsAt.map { dateFormatter.string(from: $0) } ?? "",
+            item.endsAt.map { dateFormatter.string(from: $0) } ?? ""
+        ].joined(separator: "|")
+    }
+
+    static func freshCachedEnrichment(for item: ItineraryItem, now: Date = Date()) -> ItemEnrichment? {
+        guard item.enrichmentCacheKey == key(for: item),
+              let expiresAt = item.enrichmentExpiresAt,
+              expiresAt > now else {
+            return nil
+        }
+
+        return cachedEnrichment(for: item)
+    }
+
+    static func cachedEnrichment(for item: ItineraryItem) -> ItemEnrichment? {
+        guard let rawData = item.enrichmentRawData,
+              let data = rawData.data(using: .utf8) else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(ItemEnrichment.self, from: data)
+    }
+
+    static func store(_ enrichment: ItemEnrichment, for item: ItineraryItem, now: Date = Date()) {
+        guard let data = try? JSONEncoder().encode(enrichment),
+              let rawData = String(data: data, encoding: .utf8) else {
+            return
+        }
+
+        item.enrichmentCacheKey = key(for: item)
+        item.enrichmentRawData = rawData
+        item.enrichmentUpdatedAt = now
+        item.enrichmentExpiresAt = expirationDate(for: item, now: now)
+    }
+
+    private static func expirationDate(for item: ItineraryItem, now: Date) -> Date {
+        guard let startsAt = item.startsAt else {
+            return now.addingTimeInterval(60 * 60)
+        }
+
+        if startsAt < now {
+            return now.addingTimeInterval(60 * 60 * 24)
+        }
+
+        let secondsUntilStart = startsAt.timeIntervalSince(now)
+        if secondsUntilStart <= 60 * 60 * 24 {
+            return now.addingTimeInterval(60 * 30)
+        }
+        if secondsUntilStart <= 60 * 60 * 24 * 7 {
+            return now.addingTimeInterval(60 * 60 * 3)
+        }
+
+        return now.addingTimeInterval(60 * 60 * 12)
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .lowercased()
+    }
 }
 
 struct VercelItemEnricher {
@@ -1510,14 +1593,31 @@ struct VercelItemEnricher {
     }
 
     @MainActor
-    func enrich(item: ItineraryItem) async throws -> ItemEnrichment {
+    func enrich(item: ItineraryItem, modelContext: ModelContext? = nil) async throws -> ItemEnrichment {
+        if let cached = ItemEnrichmentCache.freshCachedEnrichment(for: item) {
+            #if DEBUG
+            print("[Voya] Enrichment cache hit item=\(item.id)")
+            #endif
+            return cached
+        }
+
+        #if DEBUG
+        if ItemEnrichmentCache.cachedEnrichment(for: item) != nil {
+            print("[Voya] Enrichment cache stale item=\(item.id)")
+        } else {
+            print("[Voya] Enrichment cache miss item=\(item.id)")
+        }
+        #endif
+
         guard let baseURL else {
             throw VercelExtractionError.notConfigured
         }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("api/enrich"))
         request.httpMethod = "POST"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.timeoutInterval = 25
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -1532,13 +1632,39 @@ struct VercelItemEnricher {
             )
         )
 
+        #if DEBUG
+        if let body = request.httpBody.flatMap({ String(data: $0, encoding: .utf8) }) {
+            print("[Voya] Enrichment request \(request.url?.absoluteString ?? "<nil>") body=\(body)")
+        } else {
+            print("[Voya] Enrichment request \(request.url?.absoluteString ?? "<nil>")")
+        }
+        #endif
+
         let (data, response) = try await session.data(for: request)
+        #if DEBUG
+        if let httpResponse = response as? HTTPURLResponse {
+            print("[Voya] Enrichment response status=\(httpResponse.statusCode)")
+        }
+        if let rawResponse = String(data: data, encoding: .utf8) {
+            print("[Voya] Enrichment response body=\(rawResponse)")
+        }
+        #endif
         guard let httpResponse = response as? HTTPURLResponse,
               (200..<300).contains(httpResponse.statusCode) else {
             throw VercelExtractionError.badResponse
         }
 
-        return try JSONDecoder().decode(ItemEnrichment.self, from: data)
+        do {
+            let enrichment = try JSONDecoder().decode(ItemEnrichment.self, from: data)
+            ItemEnrichmentCache.store(enrichment, for: item)
+            try? modelContext?.save()
+            return enrichment
+        } catch {
+            #if DEBUG
+            print("[Voya] Enrichment decode failed: \(error)")
+            #endif
+            throw error
+        }
     }
 }
 
