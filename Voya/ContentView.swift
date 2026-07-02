@@ -1264,13 +1264,13 @@ private struct TimelineRow: View {
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 36, height: 36)
-                        .background(phase.accent)
+                        .background(kindAccent)
                         .clipShape(Circle())
                         .opacity(phase.iconOpacity)
 
                     if !isLast {
                         Rectangle()
-                            .fill(phase.lineColor)
+                            .fill(kindAccent.opacity(phase.lineOpacity))
                             .frame(width: 2, height: 46)
                     }
                 }
@@ -1279,8 +1279,18 @@ private struct TimelineRow: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(item.displayTime)
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(phase.timeColor)
+                            .foregroundStyle(phase.timeColor(accent: kindAccent))
+
+                        Text(item.kind.rawValue)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(kindAccent)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(kindAccent.opacity(phase.kindBadgeOpacity))
+                            .clipShape(Capsule())
+
                         Spacer()
+
                         Text(phase.label)
                             .font(.caption.weight(.bold))
                             .foregroundStyle(phase.accent)
@@ -1316,13 +1326,17 @@ private struct TimelineRow: View {
             }
             .padding(.leading, 16)
             .padding(.bottom, isLast ? 8 : 0)
-            .background(phase.rowBackground)
+            .background(phase.rowBackground(accent: kindAccent))
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .opacity(phase.contentOpacity)
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 10)
         .padding(.top, 8)
+    }
+
+    private var kindAccent: Color {
+        item.kind.timelineAccent
     }
 }
 
@@ -1370,12 +1384,12 @@ private enum ItineraryPhase: Equatable {
         }
     }
 
-    var timeColor: Color {
+    func timeColor(accent: Color) -> Color {
         switch self {
-        case .current: Color.voyaTeal
+        case .current: accent
         case .undated: Color.voyaGold
         case .past: Color.voyaMuted
-        case .future: Color.voyaInk
+        case .future: accent
         }
     }
 
@@ -1387,11 +1401,12 @@ private enum ItineraryPhase: Equatable {
         self == .past ? Color.voyaMuted.opacity(0.76) : Color.voyaMuted
     }
 
-    var rowBackground: Color {
+    func rowBackground(accent: Color) -> Color {
         switch self {
-        case .current: Color.voyaMint.opacity(0.72)
+        case .current: accent.opacity(0.13)
+        case .future: accent.opacity(0.055)
         case .undated: Color.voyaGold.opacity(0.08)
-        case .past, .future: Color.clear
+        case .past: Color.clear
         }
     }
 
@@ -1404,16 +1419,20 @@ private enum ItineraryPhase: Equatable {
         }
     }
 
-    var lineColor: Color {
-        self == .past ? Color.voyaLine.opacity(0.55) : Color.voyaLine
-    }
-
     var contentOpacity: Double {
         self == .past ? 0.62 : 1
     }
 
     var iconOpacity: Double {
         self == .past ? 0.72 : 1
+    }
+
+    var lineOpacity: Double {
+        self == .past ? 0.18 : 0.42
+    }
+
+    var kindBadgeOpacity: Double {
+        self == .past ? 0.08 : 0.12
     }
 
     var insightText: String {
@@ -1468,6 +1487,36 @@ struct ItineraryItemDraft {
 
     var displayTime: String {
         effectiveStartsAt.map { ItineraryDateFormatter.displayTime(start: $0, end: effectiveEndsAt) } ?? "Date needed"
+    }
+}
+
+private enum LocationLinkResolver {
+    static func mapURL(for value: String) -> URL? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        if let directURL = directURL(from: trimmed) {
+            return directURL
+        }
+
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return nil
+        }
+
+        return URL(string: "https://www.google.com/maps/search/?api=1&query=\(encoded)")
+    }
+
+    static func directURL(from value: String) -> URL? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https", "comgooglemaps", "maps"].contains(scheme) else {
+            return nil
+        }
+
+        return url
     }
 }
 
@@ -1629,7 +1678,7 @@ private struct ItineraryItemDetailView: View {
                 }
             }
 
-            ClearableTextField("Place", text: $draft.location, prompt: "Airport, hotel, venue, city")
+            ClearableTextField("Place / map link", text: $draft.location, prompt: "Hotel name, airport, venue, address, or Google Maps link")
                 .disabled(!isEditing)
             ClearableTextField("Status", text: $draft.status, prompt: "Confirmed, needs review, ticket saved")
                 .disabled(!isEditing)
@@ -1655,7 +1704,7 @@ private struct ItineraryItemDetailView: View {
             Button {
                 openMaps()
             } label: {
-                Label("Open map", systemImage: "map")
+                Label(locationActionTitle, systemImage: "map")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 44)
@@ -1723,11 +1772,12 @@ private struct ItineraryItemDetailView: View {
             || draft.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var locationActionTitle: String {
+        LocationLinkResolver.directURL(from: draft.location) == nil ? "Open map" : "Open link"
+    }
+
     private func openMaps() {
-        let query = draft.location.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty,
-              let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://www.google.com/maps/search/?api=1&query=\(encoded)") else {
+        guard let url = LocationLinkResolver.mapURL(for: draft.location) else {
             return
         }
         openURL(url)
@@ -1981,7 +2031,7 @@ private struct EditItineraryItemView: View {
                             }
                         }
 
-                        ClearableTextField("Place", text: $draft.location, prompt: "Airport, hotel, venue, city")
+                        ClearableTextField("Place / map link", text: $draft.location, prompt: "Hotel name, airport, venue, address, or Google Maps link")
                         ClearableTextField("Status", text: $draft.status, prompt: "Confirmed, needs review, ticket saved")
                     }
                     .padding(18)
@@ -2560,7 +2610,7 @@ private struct EditableItineraryItem: View {
             .padding(.vertical, 2)
 
             ClearableTextField("Title", text: $draft.title, prompt: "Flight BA2490, hotel stay, dinner reservation")
-            ClearableTextField("Place", text: $draft.location, prompt: "Airport, hotel, venue, city")
+            ClearableTextField("Place / map link", text: $draft.location, prompt: "Hotel name, airport, venue, address, or Google Maps link")
             ClearableTextField("Status", text: $draft.status, prompt: "Confirmed, needs review, ticket saved")
 
             Button(role: .destructive, action: onDelete) {
@@ -2787,8 +2837,21 @@ private extension Color {
     static let voyaMint = Color(red: 0.85, green: 0.96, blue: 0.92)
     static let voyaCoral = Color(red: 0.92, green: 0.32, blue: 0.26)
     static let voyaGold = Color(red: 0.76, green: 0.56, blue: 0.12)
+    static let voyaSky = Color(red: 0.16, green: 0.43, blue: 0.88)
+    static let voyaPlum = Color(red: 0.45, green: 0.28, blue: 0.68)
     static let voyaSurface = Color(red: 0.95, green: 0.96, blue: 0.95)
     static let voyaLine = Color(red: 0.86, green: 0.89, blue: 0.88)
+}
+
+private extension ItineraryKind {
+    var timelineAccent: Color {
+        switch self {
+        case .flight: Color.voyaSky
+        case .hotel: Color.voyaPlum
+        case .event: Color.voyaCoral
+        case .transit: Color.voyaTeal
+        }
+    }
 }
 
 struct ContentView_Previews: PreviewProvider {
