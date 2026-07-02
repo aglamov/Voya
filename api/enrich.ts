@@ -27,6 +27,8 @@ type GeocodeResult =
   | { place: { lat: number; lon: number; name?: string; country?: string } }
   | { error: "missing_input" | "provider_error" | "not_found"; status?: number };
 
+type Coordinates = { lat: number; lon: number; name: string; country?: string };
+
 type TicketmasterEvent = {
   name?: string;
   url?: string;
@@ -50,6 +52,15 @@ function clean(value: unknown) {
 
 function firstFlightNumber(value: string) {
   return value.match(/\b[A-Z]{2}\s?\d{2,4}\b/i)?.[0]?.replace(/\s+/g, "").toUpperCase();
+}
+
+function asciiKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function stripAirportCode(value: string) {
@@ -79,6 +90,25 @@ function placeForExternalLookup(kind: string, location: string) {
     : location;
 
   return stripAirportCode(place);
+}
+
+const knownCoordinates: Record<string, Coordinates> = {
+  bio: { lat: 43.3011, lon: -2.9106, name: "Bilbao Airport", country: "ES" },
+  bilbao: { lat: 43.263, lon: -2.935, name: "Bilbao", country: "ES" },
+  zrh: { lat: 47.4581, lon: 8.5555, name: "Zurich Airport", country: "CH" },
+  zurich: { lat: 47.3769, lon: 8.5417, name: "Zurich", country: "CH" },
+  "bad ragaz": { lat: 47.006, lon: 9.5027, name: "Bad Ragaz", country: "CH" },
+  london: { lat: 51.5072, lon: -0.1276, name: "London", country: "GB" }
+};
+
+function localCoordinates(location: string) {
+  const airportCodes = [...location.matchAll(/\(([A-Z]{3})\)/g)].map((match) => match[1].toLowerCase());
+  const lastAirportCode = airportCodes.at(-1);
+  if (lastAirportCode && knownCoordinates[lastAirportCode]) {
+    return knownCoordinates[lastAirportCode];
+  }
+
+  return knownCoordinates[asciiKey(location)];
 }
 
 function ticketmasterApiKey() {
@@ -146,8 +176,17 @@ function eventDetail(event: TicketmasterEvent) {
 }
 
 async function geocode(location: string) {
+  if (!location) {
+    return { error: "missing_input" } satisfies GeocodeResult;
+  }
+
+  const localPlace = localCoordinates(location);
+  if (localPlace) {
+    return { place: localPlace };
+  }
+
   const apiKey = process.env.OPENWEATHER_API_KEY;
-  if (!apiKey || !location) {
+  if (!apiKey) {
     return { error: "missing_input" } satisfies GeocodeResult;
   }
 
