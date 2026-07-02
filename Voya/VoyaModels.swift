@@ -626,11 +626,24 @@ final class VoyaStore: ObservableObject {
             extractedPreview = try await VercelConfirmationExtractor().extract(from: document)
             importMessage = "AI recognized \(document.name)"
         } catch {
-            extractedPreview = ConfirmationParser.extract(from: document)
-            importMessage = "Imported \(document.name) with on-device parser"
+            extractedPreview = nil
+            importMessage = aiExtractionFailureMessage(for: error)
         }
 
         isExtractingConfirmation = false
+    }
+
+    private func aiExtractionFailureMessage(for error: Error) -> String {
+        if let extractionError = error as? VercelExtractionError {
+            switch extractionError {
+            case .notConfigured:
+                return "AI extraction unavailable: API URL is not configured."
+            case .badResponse:
+                return "AI extraction unavailable: server returned an error."
+            }
+        }
+
+        return "AI extraction unavailable. Check connection and try again."
     }
 
     func updatePreviewItem(_ item: ItineraryItem) {

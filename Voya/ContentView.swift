@@ -363,9 +363,7 @@ private struct ImportView: View {
                         }
 
                         if let importMessage = store.importMessage {
-                            Label(importMessage, systemImage: "checkmark.circle.fill")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Color.voyaTeal)
+                            ImportMessageLabel(message: importMessage, isWorking: store.isExtractingConfirmation)
                         }
                     }
                     .padding(18)
@@ -556,9 +554,7 @@ private struct PasteConfirmationView: View {
                         .opacity(store.isExtractingConfirmation ? 0.82 : 1)
 
                         if let importMessage = store.importMessage {
-                            Label(importMessage, systemImage: store.isExtractingConfirmation ? "wand.and.stars" : "checkmark.circle.fill")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Color.voyaTeal)
+                            ImportMessageLabel(message: importMessage, isWorking: store.isExtractingConfirmation)
                         }
                     }
                     .padding(18)
@@ -1387,6 +1383,34 @@ private struct ImportOption: View {
         .padding(14)
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct ImportMessageLabel: View {
+    let message: String
+    let isWorking: Bool
+
+    var body: some View {
+        Label(message, systemImage: symbol)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var isError: Bool {
+        message.hasPrefix("AI extraction unavailable") || message.hasPrefix("Could not")
+    }
+
+    private var symbol: String {
+        if isWorking {
+            return "wand.and.stars"
+        }
+
+        return isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+    }
+
+    private var color: Color {
+        isError ? Color.voyaCoral : Color.voyaTeal
     }
 }
 
