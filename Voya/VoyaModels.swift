@@ -1510,9 +1510,12 @@ struct ItemEnrichmentCard: Codable, Identifiable {
 }
 
 enum ItemEnrichmentCache {
+    private static let schemaVersion = "flight-live-v2"
+
     static func key(for item: ItineraryItem) -> String {
         let dateFormatter = ISO8601DateFormatter()
         return [
+            schemaVersion,
             item.kind.rawValue,
             normalized(item.title),
             normalized(item.location),
@@ -1539,6 +1542,13 @@ enum ItemEnrichmentCache {
         }
 
         return try? JSONDecoder().decode(ItemEnrichment.self, from: data)
+    }
+
+    static func clear(for item: ItineraryItem) {
+        item.enrichmentCacheKey = nil
+        item.enrichmentRawData = nil
+        item.enrichmentUpdatedAt = nil
+        item.enrichmentExpiresAt = nil
     }
 
     static func store(_ enrichment: ItemEnrichment, for item: ItineraryItem, now: Date = Date()) {
@@ -1593,8 +1603,11 @@ struct VercelItemEnricher {
     }
 
     @MainActor
-    func enrich(item: ItineraryItem, modelContext: ModelContext? = nil) async throws -> ItemEnrichment {
-        if let cached = ItemEnrichmentCache.freshCachedEnrichment(for: item) {
+    func enrich(item: ItineraryItem, modelContext: ModelContext? = nil, forceRefresh: Bool = false) async throws -> ItemEnrichment {
+        if forceRefresh {
+            ItemEnrichmentCache.clear(for: item)
+            try? modelContext?.save()
+        } else if let cached = ItemEnrichmentCache.freshCachedEnrichment(for: item) {
             #if DEBUG
             print("[Voya] Enrichment cache hit item=\(item.id)")
             #endif

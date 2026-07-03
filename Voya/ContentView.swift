@@ -1564,7 +1564,12 @@ private struct ItineraryItemDetailView: View {
                         item: item,
                         phase: ItineraryPhase(item: item),
                         enrichment: enrichment,
-                        isLoading: isLoadingEnrichment
+                        isLoading: isLoadingEnrichment,
+                        onRefresh: {
+                            Task {
+                                await loadEnrichment(forceRefresh: true)
+                            }
+                        }
                     )
                 }
                 .padding(.horizontal, 18)
@@ -1793,12 +1798,16 @@ private struct ItineraryItemDetailView: View {
         }
     }
 
-    private func loadEnrichment() async {
+    private func loadEnrichment(forceRefresh: Bool = false) async {
+        guard !isLoadingEnrichment else {
+            return
+        }
+
         isLoadingEnrichment = true
         defer { isLoadingEnrichment = false }
 
         do {
-            enrichment = try await VercelItemEnricher().enrich(item: item, modelContext: modelContext)
+            enrichment = try await VercelItemEnricher().enrich(item: item, modelContext: modelContext, forceRefresh: forceRefresh)
         } catch {
             enrichment = nil
         }
@@ -1811,6 +1820,7 @@ private struct ItemInsightPanel: View {
     let phase: ItineraryPhase
     let enrichment: ItemEnrichment?
     let isLoading: Bool
+    let onRefresh: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1824,6 +1834,17 @@ private struct ItemInsightPanel: View {
                         .scaleEffect(0.82)
                         .tint(Color.voyaTeal)
                 }
+                Button(action: onRefresh) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(isLoading ? Color.voyaMuted : Color.voyaTeal)
+                        .frame(width: 34, height: 34)
+                        .background(Color.voyaSurface)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+                .accessibilityLabel("Refresh trip intelligence")
             }
 
             if let summary = enrichment?.summary, !summary.isEmpty {
