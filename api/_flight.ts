@@ -257,6 +257,8 @@ type AviationstackResponse = {
   error?: {
     code?: string;
     message?: string;
+    type?: string;
+    info?: string;
   };
 };
 
@@ -499,6 +501,22 @@ async function flightAwareFetch(path: string) {
   return { connected: true as const, ok: true as const, data: await response.json() };
 }
 
+async function aviationstackFetchJSON(url: URL, apiKey?: string) {
+  const response = await fetch(url, apiKey ? { headers: { apikey: apiKey } } : undefined);
+  const data = await response.json().catch(() => undefined) as AviationstackResponse | undefined;
+  const providerError = data?.error;
+  const error = providerError
+    ? [providerError.message, providerError.info, providerError.type, providerError.code].filter(Boolean).join(" ")
+    : undefined;
+
+  return {
+    ok: response.ok && !providerError,
+    status: response.status,
+    data,
+    error
+  };
+}
+
 async function aviationstackFetch(lookup: FlightLookup) {
   const apiKey = process.env.AVIATIONSTACK_API_KEY;
   if (!apiKey) {
@@ -519,17 +537,33 @@ async function aviationstackFetch(lookup: FlightLookup) {
     url.searchParams.set("arr_iata", lookup.destinationAirport.toUpperCase());
   }
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    return { connected: true as const, ok: false as const, status: response.status };
+  const accessKeyResult = await aviationstackFetchJSON(url);
+  if (accessKeyResult.ok) {
+    return { connected: true as const, ok: true as const, data: accessKeyResult.data };
   }
 
-  const data = await response.json() as AviationstackResponse;
-  if (data.error) {
-    return { connected: true as const, ok: false as const, status: 200, error: data.error.message ?? data.error.code };
+  if (accessKeyResult.status === 401 || accessKeyResult.status === 403) {
+    const headerURL = new URL(url);
+    headerURL.searchParams.delete("access_key");
+    const headerResult = await aviationstackFetchJSON(headerURL, apiKey);
+    if (headerResult.ok) {
+      return { connected: true as const, ok: true as const, data: headerResult.data };
+    }
+
+    return {
+      connected: true as const,
+      ok: false as const,
+      status: headerResult.status,
+      error: headerResult.error ?? accessKeyResult.error
+    };
   }
 
-  return { connected: true as const, ok: true as const, data };
+  return {
+    connected: true as const,
+    ok: false as const,
+    status: accessKeyResult.status,
+    error: accessKeyResult.error
+  };
 }
 
 async function fetchTrack(snapshot: FlightSnapshot) {
