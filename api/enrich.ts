@@ -775,6 +775,14 @@ function cleanMarkdownLine(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function cleanBriefText(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/([a-z0-9)])([A-Z][A-Za-z /-]{1,24}:)/g, "$1\n$2")
+    .replace(/([.!?])([A-Z])/g, "$1\n$2")
+    .trim();
+}
+
 function mapsSearchURL(query: string) {
   if (!query) {
     return undefined;
@@ -966,7 +974,7 @@ function deterministicSections(kind: string, title: string, location: string, ca
 function markdownFromSections(summary: string, sections: TravelBriefSection[], actions: TravelAction[], routeLegs: TravelRouteLeg[]) {
   const sectionLines = sections.map((section) => [
     `### ${section.title}`,
-    section.body
+    cleanBriefText(section.body)
   ].join("\n")).join("\n\n");
   const routeLines = routeLegs.length
     ? [
@@ -999,7 +1007,9 @@ async function aiBrief(kind: string, title: string, location: string, status: st
         "You are Voya, a practical travel assistant.",
         "Use only the provided facts. Do not invent performers, seating, gates, routes, prices, opening hours, or precise transit times.",
         "Be human and decision-oriented: translate facts into what the traveler should know or do.",
-        "Prefer short Markdown sections, concrete next actions, route guidance, weather decisions, and visible risks.",
+        "Prefer short sections, concrete next actions, route guidance, weather decisions, and visible risks.",
+        "Do not pack labeled fields into one run-on paragraph. Use natural sentences with spaces between every idea.",
+        "Keep each section body to 1-3 readable sentences. Put dense labels into separate sections instead of inline.",
         "If a fact is missing, say what would unlock it instead of pretending.",
         "Return structured JSON only."
       ].join(" "),
@@ -1050,15 +1060,20 @@ async function buildTravelBrief(kind: string, title: string, location: string, s
     ...leg,
     origin: leg.origin ?? undefined,
     destination: leg.destination ?? undefined,
+    guidance: cleanBriefText(leg.guidance),
     bufferMinutes: leg.bufferMinutes ?? undefined,
     mapURL: leg.mapURL ?? undefined
   }));
 
   return {
-    summary: generated.summary || fallback.summary,
-    briefMarkdown: generated.briefMarkdown || fallback.briefMarkdown,
-    sections: generated.sections.length ? generated.sections : fallback.sections,
-    actions: generatedActions.length ? generatedActions : fallback.actions,
+    summary: generated.summary ? cleanBriefText(generated.summary) : fallback.summary,
+    briefMarkdown: generated.briefMarkdown ? cleanBriefText(generated.briefMarkdown) : fallback.briefMarkdown,
+    sections: generated.sections.length
+      ? generated.sections.map((section) => ({ ...section, body: cleanBriefText(section.body) }))
+      : fallback.sections,
+    actions: generatedActions.length
+      ? generatedActions.map((action) => ({ ...action, detail: cleanBriefText(action.detail) }))
+      : fallback.actions,
     routeLegs: generatedRouteLegs.length ? generatedRouteLegs : fallback.routeLegs,
     imageURLs: generated.imageURLs.length ? generated.imageURLs : fallback.imageURLs
   };

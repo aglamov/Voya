@@ -1889,8 +1889,10 @@ private struct ItemCompanionCard: View {
             }
 
             HStack(spacing: 10) {
-                AssistantCue(title: "Focus", value: phase.insightText, symbol: "scope")
-                AssistantCue(title: "When", value: timingCue, symbol: "clock")
+                let focusCue = primaryCue
+                AssistantCue(title: focusCue.title, value: focusCue.value, symbol: focusCue.symbol)
+                let timingCue = secondaryCue
+                AssistantCue(title: timingCue.title, value: timingCue.value, symbol: timingCue.symbol)
             }
         }
         .padding(18)
@@ -1943,18 +1945,84 @@ private struct ItemCompanionCard: View {
         }
     }
 
-    private var timingCue: String {
-        if item.startsAt == nil {
-            return "Add time"
+    private var primaryCue: CompanionCue {
+        if let warning = enrichment?.warnings.first, !warning.isEmpty {
+            return CompanionCue(title: "Watch", value: trimmedCue(warning), symbol: "exclamationmark.triangle")
         }
-        if phase == .current {
-            return "Now"
+
+        if item.kind == .flight {
+            if let gate = card(titled: "Gate") {
+                return CompanionCue(title: "Gate", value: trimmedCue(gate.value), symbol: "rectangle.connected.to.line.below")
+            }
+            if let delay = card(titled: "Delay") {
+                return CompanionCue(title: "Delay", value: trimmedCue(delay.value), symbol: "clock.badge.exclamationmark")
+            }
         }
-        if phase == .past {
-            return "Done"
+
+        if let action = enrichment?.actions.first {
+            return CompanionCue(title: action.priority == "now" ? "Do now" : "Next", value: trimmedCue(action.title), symbol: "checkmark.circle")
         }
-        return "Upcoming"
+
+        if !item.status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return CompanionCue(title: "Status", value: trimmedCue(item.status), symbol: "checkmark.seal")
+        }
+
+        return CompanionCue(title: "Focus", value: phase.insightText, symbol: "scope")
     }
+
+    private var secondaryCue: CompanionCue {
+        if let duration = itemDurationText {
+            return CompanionCue(title: "Duration", value: duration, symbol: "timer")
+        }
+
+        if let routeLeg = enrichment?.routeLegs.first, let bufferMinutes = routeLeg.bufferMinutes {
+            return CompanionCue(title: "Buffer", value: "\(bufferMinutes) min", symbol: "figure.walk")
+        }
+
+        if item.startsAt != nil {
+            return CompanionCue(title: "Time", value: item.displayTime, symbol: "clock")
+        }
+
+        return CompanionCue(title: "Time", value: "Add time", symbol: "clock.badge.questionmark")
+    }
+
+    private var itemDurationText: String? {
+        guard let startsAt = item.startsAt, let endsAt = item.endsAt else {
+            return nil
+        }
+
+        let minutes = max(0, Int(endsAt.timeIntervalSince(startsAt) / 60))
+        guard minutes > 0 else {
+            return nil
+        }
+
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        if hours > 0 && remainder > 0 {
+            return "\(hours)h \(remainder)m"
+        }
+        if hours > 0 {
+            return "\(hours)h"
+        }
+        return "\(remainder)m"
+    }
+
+    private func card(titled title: String) -> ItemEnrichmentCard? {
+        enrichment?.cards.first { $0.title.localizedCaseInsensitiveContains(title) }
+    }
+
+    private func trimmedCue(_ value: String) -> String {
+        let trimmed = value
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count > 24 ? "\(trimmed.prefix(21))..." : trimmed
+    }
+}
+
+private struct CompanionCue {
+    let title: String
+    let value: String
+    let symbol: String
 }
 
 private struct TravelBriefCard: View {
@@ -1970,14 +2038,14 @@ private struct TravelBriefCard: View {
                 Spacer()
             }
 
-            if !enrichment.briefMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                MarkdownBriefText(markdown: enrichment.briefMarkdown)
-            } else if !enrichment.sections.isEmpty {
+            if !enrichment.sections.isEmpty {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(enrichment.sections) { section in
                         TravelBriefSectionView(section: section)
                     }
                 }
+            } else if !enrichment.briefMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                MarkdownBriefText(markdown: enrichment.briefMarkdown)
             }
 
             if !enrichment.imageURLs.isEmpty {
@@ -2042,11 +2110,32 @@ private struct TravelBriefSectionView: View {
             Label(section.title, systemImage: symbol)
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(tint)
-            Text(section.body)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Color.voyaInk)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(displayLines, id: \.self) { line in
+                    Text(line)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
+    }
+
+    private var displayLines: [String] {
+        let normalized = section.body
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let protected = normalized
+            .replacingOccurrences(of: ". ", with: ".\n")
+            .replacingOccurrences(of: "; ", with: ";\n")
+
+        let lines = protected
+            .split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return lines.isEmpty ? [normalized] : lines
     }
 
     private var symbol: String {
