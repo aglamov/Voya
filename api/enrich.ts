@@ -681,6 +681,10 @@ function compactRoute(origin?: string, destination?: string) {
   return [origin, destination].filter(Boolean).join(" -> ");
 }
 
+function compactPercent(value?: number) {
+  return value == null ? undefined : `${Math.round(value * 100)}%`;
+}
+
 async function flightCards(title: string, location: string, startsAt?: string | number | null): Promise<EnrichmentCard[]> {
   const flightNumbers = allFlightNumbers(`${title} ${location}`);
   if (flightNumbers.length === 0) {
@@ -729,10 +733,15 @@ async function flightCards(title: string, location: string, startsAt?: string | 
     snapshot.aircraftType,
     snapshot.position ? `${snapshot.position.lat.toFixed(2)}, ${snapshot.position.lon.toFixed(2)}` : undefined
   ].filter(Boolean);
+  const disruption = response.intelligence.disruptions[0];
+  const history = response.intelligence.history;
+  const originWeather = response.intelligence.weather.origin;
+  const destinationWeather = response.intelligence.weather.destination;
+  const route = response.intelligence.route;
 
   return [{
     title: "Flight",
-    value: `${flightNumber} · ${snapshot.providerStatus ?? snapshot.status}`,
+    value: `${flightNumber} · ${snapshot.dataMode === "published_schedule" ? "Schedule" : snapshot.providerStatus ?? snapshot.status}`,
     detail: [
       compactRoute(snapshot.originAirport, snapshot.destinationAirport),
       compactTime(snapshot.estimatedDepartureAt ?? snapshot.scheduledDepartureAt)
@@ -758,8 +767,46 @@ async function flightCards(title: string, location: string, startsAt?: string | 
     ].filter(Boolean).join(" -> ") || "Not available",
     detail: response.schedule.actualDepartureAt
       ? `Departed ${compactTime(response.schedule.actualDepartureAt)}`
-      : "Uses FlightAware scheduled, estimated, and actual gate times.",
+      : snapshot.dataMode === "published_schedule"
+        ? "Published airline schedule. Live gate times open closer to departure."
+        : "Uses FlightAware scheduled, estimated, and actual gate times.",
     kind: "flight"
+  }, {
+    title: "Reliability",
+    value: history?.sampleSize
+      ? `${compactPercent(history.delayed15Rate) ?? "0%"} delayed`
+      : "Collecting",
+    detail: history?.averageArrivalDelayMinutes == null
+      ? "History may require the enabled FlightAware tier."
+      : `${history.sampleSize} recent flights · avg arrival delay ${Math.round(history.averageArrivalDelayMinutes)} min`,
+    kind: (history?.delayed15Rate ?? 0) >= 0.3 ? "warning" : "flight"
+  }, {
+    title: "Disruptions",
+    value: disruption?.total
+      ? `${compactPercent(disruption.delayRate) ?? "0%"} delayed`
+      : "No signal",
+    detail: disruption
+      ? `${disruption.entityName ?? disruption.entityId ?? disruption.entityType} · ${disruption.delays ?? 0} delayed · ${disruption.cancellations ?? 0} cancelled`
+      : "No FlightAware disruption count returned.",
+    kind: (disruption?.delayRate ?? 0) >= 0.25 ? "warning" : "flight"
+  }, {
+    title: "Route",
+    value: route?.routeDistance ?? "Not filed",
+    detail: route?.route
+      ? `${route.route.slice(0, 80)}${route.route.length > 80 ? "..." : ""}`
+      : response.intelligence.mode === "published_schedule"
+        ? "Typical filed routes appear closer to operations or when route history is available."
+        : undefined,
+    kind: "flight"
+  }, {
+    title: "Airport weather",
+    value: originWeather?.temperatureC == null ? "Forecast" : `${originWeather.temperatureC} C`,
+    detail: [
+      originWeather?.airport,
+      originWeather?.summary ?? originWeather?.forecastSummary,
+      destinationWeather?.airport ? `Arrive ${destinationWeather.airport}` : undefined
+    ].filter(Boolean).join(" · "),
+    kind: "weather"
   }, {
     title: "Alerts",
     value: response.alerting.supported ? "Ready" : "Unavailable",
