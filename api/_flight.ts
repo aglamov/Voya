@@ -695,9 +695,19 @@ function isTooFarForLiveFlightStatus(date?: string) {
   return hours != null && hours > 48;
 }
 
+function isTooOldForLiveFlightStatus(date?: string) {
+  const hours = hoursUntil(date);
+  return hours != null && hours < -240;
+}
+
 function isFlightAwareFutureWindowError(error?: string) {
   const normalized = error?.toLowerCase() ?? "";
   return normalized.includes("too far in the future") || normalized.includes("invalid start bound");
+}
+
+function isFlightAwarePastWindowError(error?: string) {
+  const normalized = error?.toLowerCase() ?? "";
+  return normalized.includes("too far in the past") || normalized.includes("invalid start bound");
 }
 
 function futureWindowReason() {
@@ -755,6 +765,50 @@ async function flightAwareFlights(ident: string, window: { start: string; end: s
   url.searchParams.set("end", window.end);
 
   return flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
+}
+
+async function flightAwareHistoricalFlights(ident: string, window: { start: string; end: string }) {
+  const url = new URL(`/aeroapi/history/flights/${encodeURIComponent(ident)}`, "https://aeroapi.flightaware.com");
+  url.searchParams.set("ident_type", "designator");
+  url.searchParams.set("start", window.start);
+  url.searchParams.set("end", window.end);
+  url.searchParams.set("max_pages", "1");
+
+  return flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
+}
+
+async function flightAwareHistoricalSnapshot(lookup: FlightLookup, window: { start: string; end: string }) {
+  let lastError: string | undefined;
+
+  for (const ident of identCandidates(lookup.flightNumber)) {
+    const result = await flightAwareHistoricalFlights(ident, window);
+    if (!result.connected) {
+      return { connected: false as const, snapshot: undefined };
+    }
+    if (!result.ok) {
+      lastError = `FlightAware historical lookup returned HTTP ${result.status}${result.error ? `: ${result.error}` : ""}.`;
+      continue;
+    }
+
+    const data = result.data as FlightAwareFlightsResponse;
+    const snapshots = (data.flights ?? []).map((flight) => ({
+      ...normalizeFlightAwareFlight(flight, lookup.flightNumber),
+      dataMode: "history" as const
+    }));
+    const snapshot = verifiedSnapshot(snapshots, lookup);
+    if (snapshot) {
+      return {
+        connected: true as const,
+        snapshot
+      };
+    }
+  }
+
+  return {
+    connected: true as const,
+    snapshot: undefined,
+    error: lastError
+  };
 }
 
 async function flightAwareScheduledDepartures(lookup: FlightLookup, window: { start: string; end: string }) {
@@ -1239,6 +1293,22 @@ export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatu
     ]);
   }
 
+  if (isTooOldForLiveFlightStatus(normalizedLookup.date)) {
+    const historyLookup = await flightAwareHistoricalSnapshot(normalizedLookup, window);
+    if (!historyLookup.connected) {
+      return flightStatusError(normalizedLookup, "provider_not_connected", ["Set FLIGHTAWARE_AEROAPI_KEY to enable FlightAware historical flight data."]);
+    }
+    if (historyLookup.snapshot) {
+      return flightStatusSuccess(normalizedLookup, historyLookup.snapshot, [
+        "FlightAware validated this past flight from historical flight data."
+      ]);
+    }
+
+    return flightStatusError(normalizedLookup, "not_found", [
+      historyLookup.error ?? "FlightAware historical data did not return a route/date match for this past flight."
+    ]);
+  }
+
   let result = await flightAwareFlights(normalizedLookup.flightNumber, window);
   if (!result.connected) {
     return flightStatusError(normalizedLookup, "provider_not_connected", ["Set FLIGHTAWARE_AEROAPI_KEY to enable FlightAware AeroAPI status, schedule, gate, and alert data."]);
@@ -1265,6 +1335,15 @@ export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatu
   }
 
   if (!result.ok && result.status === 400 && normalizedLookup.date && normalizedLookup.originAirport) {
+    if (isFlightAwarePastWindowError(result.error)) {
+      const historyLookup = await flightAwareHistoricalSnapshot(normalizedLookup, window);
+      if (historyLookup.snapshot) {
+        return flightStatusSuccess(normalizedLookup, historyLookup.snapshot, [
+          "Live FlightAware status was unavailable, so Voya used historical flight data for this route/date match."
+        ]);
+      }
+    }
+
     const scheduleLookup = await flightAwarePublishedScheduleSnapshot(normalizedLookup);
     if (scheduleLookup.snapshot) {
       return flightStatusSuccess(normalizedLookup, scheduleLookup.snapshot, [
