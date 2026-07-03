@@ -12,6 +12,7 @@
 		1A2B3C4D5E6F700000000013 /* VoyaModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700000000003 /* VoyaModels.swift */; };
 		1A2B3C4D5E6F700000000014 /* SampleData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700000000004 /* SampleData.swift */; };
 		1A2B3C4D5E6F700000000015 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700000000007 /* Assets.xcassets */; };
+		1A2B3C4D5E6F700000000016 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700000000008 /* Localizable.xcstrings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +23,7 @@
 		1A2B3C4D5E6F700000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700000000006 /* Voya.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Voya.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700000000007 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1A2B3C4D5E6F700000000008 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -51,6 +53,7 @@
 				1A2B3C4D5E6F700000000003 /* VoyaModels.swift */,
 				1A2B3C4D5E6F700000000004 /* SampleData.swift */,
 				1A2B3C4D5E6F700000000005 /* Info.plist */,
+				1A2B3C4D5E6F700000000008 /* Localizable.xcstrings */,
 				1A2B3C4D5E6F700000000007 /* Assets.xcassets */,
 			);
 			path = Voya;
@@ -104,6 +107,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				ru,
 				Base,
 			);
 			mainGroup = 1A2B3C4D5E6F700000000201;
@@ -124,6 +128,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A2B3C4D5E6F700000000015 /* Assets.xcassets in Resources */,
+				1A2B3C4D5E6F700000000016 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

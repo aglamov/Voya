@@ -49,6 +49,15 @@ private enum VoyaTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var displayName: String {
+        switch self {
+        case .inspire: String(localized: "Inspire")
+        case .trips: String(localized: "Trips")
+        case .import: String(localized: "Import")
+        case .assistant: String(localized: "Assistant")
+        }
+    }
+
     var symbol: String {
         switch self {
         case .inspire: "sparkles"
@@ -223,6 +232,13 @@ private struct TripsView: View {
         case archive = "Archive"
 
         var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .upcoming: String(localized: "Upcoming")
+            case .archive: String(localized: "Archive")
+            }
+        }
     }
 
     private var displayedTrips: [Trip] {
@@ -253,7 +269,7 @@ private struct TripsView: View {
 
                 Picker("Trips", selection: $tripListMode) {
                     ForEach(TripListMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
+                        Text(mode.displayName).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -376,7 +392,7 @@ private struct TripsView: View {
     }
 
     private var emptySubtitle: String {
-        tripListMode == .archive ? "No archived trips" : "No upcoming trips"
+        tripListMode == .archive ? String(localized: "No archived trips") : String(localized: "No upcoming trips")
     }
 
     private func selectDisplayedTripIfNeeded() {
@@ -771,7 +787,7 @@ private struct VoyaTabBar: View {
                     VStack(spacing: 5) {
                         Image(systemName: tab.symbol)
                             .font(.system(size: 18, weight: .bold))
-                        Text(tab.rawValue)
+                        Text(tab.displayName)
                             .font(.caption2.weight(.semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -801,7 +817,7 @@ private struct MoodChip: View {
 
     var body: some View {
         Button(action: action) {
-            Text(mood.rawValue)
+            Text(mood.displayName)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(isSelected ? .white : Color.voyaInk)
                 .padding(.horizontal, 14)
@@ -1068,34 +1084,34 @@ private struct TripHeroSummary {
         let daysUntilStart = range.map { calendar.startOfDay(for: now).distanceInDays(to: calendar.startOfDay(for: $0.start), calendar: calendar) }
 
         if let range, calendar.isDate(now, inSameDayAs: range.start) {
-            statusText = "Starts today"
-            phaseText = "Today"
+            statusText = String(localized: "Starts today")
+            phaseText = String(localized: "Today")
         } else if let range, now >= range.start && now <= range.end {
-            statusText = "In progress"
-            phaseText = "Live"
+            statusText = String(localized: "In progress")
+            phaseText = String(localized: "Live")
         } else if let daysUntilStart, daysUntilStart > 0 {
-            statusText = "Starts in \(daysUntilStart) \(daysUntilStart == 1 ? "day" : "days")"
-            phaseText = "Ready"
+            statusText = String(localized: "Starts in \(daysUntilStart) \(daysUntilStart == 1 ? "day" : "days")")
+            phaseText = String(localized: "Ready")
         } else if range != nil {
-            statusText = "Trip ended"
-            phaseText = "Done"
+            statusText = String(localized: "Trip ended")
+            phaseText = String(localized: "Done")
         } else {
-            statusText = "Ready when you are"
-            phaseText = "Ready"
+            statusText = String(localized: "Ready when you are")
+            phaseText = String(localized: "Ready")
         }
 
         if let nights = range?.nights, nights > 0 {
-            durationText = "\(nights) \(nights == 1 ? "night" : "nights")"
+            durationText = String(localized: "\(nights) \(nights == 1 ? "night" : "nights")")
         } else if let days = range?.days, days > 0 {
-            durationText = "\(days) \(days == 1 ? "day" : "days")"
+            durationText = String(localized: "\(days) \(days == 1 ? "day" : "days")")
         } else {
             durationText = trip.dates
         }
 
-        itemCountText = "\(trip.items.count) \(trip.items.count == 1 ? "item" : "items")"
+        itemCountText = String(localized: "\(trip.items.count) \(trip.items.count == 1 ? "item" : "items")")
 
         if let firstItem = trip.items.first {
-            firstUpText = "First up: \(firstItem.title)"
+            firstUpText = String(localized: "First up: \(firstItem.title)")
         } else {
             firstUpText = trip.summary
         }
@@ -1281,7 +1297,7 @@ private struct TimelineRow: View {
                             .font(.caption.weight(.bold))
                             .foregroundStyle(phase.timeColor(accent: kindAccent))
 
-                        Text(item.kind.rawValue)
+                        Text(item.kind.displayName)
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(kindAccent)
                             .padding(.horizontal, 7)
@@ -1301,7 +1317,7 @@ private struct TimelineRow: View {
                     }
 
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text(item.title.isEmpty ? "Untitled item" : item.title)
+                        Text(item.title.isEmpty ? String(localized: "Untitled item") : item.title)
                             .font(.headline)
                             .foregroundStyle(phase.titleColor)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1311,7 +1327,7 @@ private struct TimelineRow: View {
                             .foregroundStyle(Color.voyaMuted.opacity(phase.contentOpacity))
                     }
 
-                    Text(item.location.isEmpty ? "Location needed" : item.location)
+                    Text(item.location.isEmpty ? String(localized: "Location needed") : item.location)
                         .font(.subheadline)
                         .foregroundStyle(phase.secondaryColor)
 
@@ -1368,10 +1384,10 @@ private enum ItineraryPhase: Equatable {
 
     var label: String {
         switch self {
-        case .past: "Done"
-        case .current: "Now"
-        case .future: "Next"
-        case .undated: "Review"
+        case .past: String(localized: "Done")
+        case .current: String(localized: "Now")
+        case .future: String(localized: "Next")
+        case .undated: String(localized: "Review")
         }
     }
 
@@ -1437,10 +1453,10 @@ private enum ItineraryPhase: Equatable {
 
     var insightText: String {
         switch self {
-        case .past: "Already behind"
-        case .current: "Focus now"
-        case .future: "Coming up"
-        case .undated: "Needs time"
+        case .past: String(localized: "Already behind")
+        case .current: String(localized: "Focus now")
+        case .future: String(localized: "Coming up")
+        case .undated: String(localized: "Needs time")
         }
     }
 }
@@ -1486,7 +1502,7 @@ struct ItineraryItemDraft {
     }
 
     var displayTime: String {
-        effectiveStartsAt.map { ItineraryDateFormatter.displayTime(start: $0, end: effectiveEndsAt) } ?? "Date needed"
+        effectiveStartsAt.map { ItineraryDateFormatter.displayTime(start: $0, end: effectiveEndsAt) } ?? String(localized: "Date needed")
     }
 }
 
@@ -1624,10 +1640,10 @@ private struct ItineraryItemDetailView: View {
     private var detailHeader: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 7) {
-                Label(draft.kind.rawValue, systemImage: draft.kind.symbol)
+                Label(draft.kind.displayName, systemImage: draft.kind.symbol)
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(Color.voyaTeal)
-                Text(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled item" : draft.title)
+                Text(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? String(localized: "Untitled item") : draft.title)
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.voyaInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1722,9 +1738,9 @@ private struct ItineraryItemDetailView: View {
                 .disabled(!isEditing)
 
             HStack(spacing: 8) {
-                Label(item.sourceName ?? "Manual entry", systemImage: "doc.text")
+                Label(item.sourceName ?? String(localized: "Manual entry"), systemImage: "doc.text")
                 Spacer(minLength: 0)
-                Label(isEditing ? "Unlocked" : "Locked", systemImage: isEditing ? "lock.open.fill" : "lock.fill")
+                Label(isEditing ? String(localized: "Unlocked") : String(localized: "Locked"), systemImage: isEditing ? "lock.open.fill" : "lock.fill")
             }
             .font(.caption.weight(.bold))
             .foregroundStyle(Color.voyaMuted)
@@ -1811,7 +1827,7 @@ private struct ItineraryItemDetailView: View {
     }
 
     private var locationActionTitle: String {
-        LocationLinkResolver.directURL(from: draft.location) == nil ? "Open map" : "Open link"
+        LocationLinkResolver.directURL(from: draft.location) == nil ? String(localized: "Open map") : String(localized: "Open link")
     }
 
     private func openMaps() {
@@ -1914,13 +1930,13 @@ private struct ItemCompanionCard: View {
     private var momentTitle: String {
         switch item.kind {
         case .flight:
-            return "Make this flight feel calm."
+            return String(localized: "Make this flight feel calm.")
         case .hotel:
-            return "Arrive and settle in."
+            return String(localized: "Arrive and settle in.")
         case .event:
-            return "Make the most of this event."
+            return String(localized: "Make the most of this event.")
         case .transit:
-            return "Move between places smoothly."
+            return String(localized: "Move between places smoothly.")
         }
     }
 
@@ -1935,55 +1951,55 @@ private struct ItemCompanionCard: View {
     private var defaultBrief: String {
         switch item.kind {
         case .flight:
-            return "Voya can track status, timing, gate context, weather, and the route around this flight once enrichment is available."
+            return String(localized: "Voya can track status, timing, gate context, weather, and the route around this flight once enrichment is available.")
         case .hotel:
-            return "Use this as the base for check-in timing, the arrival route, nearby essentials, and weather-aware plans."
+            return String(localized: "Use this as the base for check-in timing, the arrival route, nearby essentials, and weather-aware plans.")
         case .event:
-            return "Voya will turn venue context, timing, weather, and nearby options into a practical plan for getting there and enjoying it."
+            return String(localized: "Voya will turn venue context, timing, weather, and nearby options into a practical plan for getting there and enjoying it.")
         case .transit:
-            return "This leg should become guidance: when to leave, how much buffer to keep, and what fallback route makes sense."
+            return String(localized: "This leg should become guidance: when to leave, how much buffer to keep, and what fallback route makes sense.")
         }
     }
 
     private var primaryCue: CompanionCue {
         if let warning = enrichment?.warnings.first, !warning.isEmpty {
-            return CompanionCue(title: "Watch", value: trimmedCue(warning), symbol: "exclamationmark.triangle")
+            return CompanionCue(title: String(localized: "Watch"), value: trimmedCue(warning), symbol: "exclamationmark.triangle")
         }
 
         if item.kind == .flight {
             if let gate = card(titled: "Gate") {
-                return CompanionCue(title: "Gate", value: trimmedCue(gate.value), symbol: "rectangle.connected.to.line.below")
+                return CompanionCue(title: String(localized: "Gate"), value: trimmedCue(gate.value), symbol: "rectangle.connected.to.line.below")
             }
             if let delay = card(titled: "Delay") {
-                return CompanionCue(title: "Delay", value: trimmedCue(delay.value), symbol: "clock.badge.exclamationmark")
+                return CompanionCue(title: String(localized: "Delay"), value: trimmedCue(delay.value), symbol: "clock.badge.exclamationmark")
             }
         }
 
         if let action = enrichment?.actions.first {
-            return CompanionCue(title: action.priority == "now" ? "Do now" : "Next", value: trimmedCue(action.title), symbol: "checkmark.circle")
+            return CompanionCue(title: action.priority == "now" ? String(localized: "Do now") : String(localized: "Next"), value: trimmedCue(action.title), symbol: "checkmark.circle")
         }
 
         if !item.status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return CompanionCue(title: "Status", value: trimmedCue(item.status), symbol: "checkmark.seal")
+            return CompanionCue(title: String(localized: "Status"), value: trimmedCue(item.status), symbol: "checkmark.seal")
         }
 
-        return CompanionCue(title: "Focus", value: phase.insightText, symbol: "scope")
+        return CompanionCue(title: String(localized: "Focus"), value: phase.insightText, symbol: "scope")
     }
 
     private var secondaryCue: CompanionCue {
         if let duration = itemDurationText {
-            return CompanionCue(title: "Duration", value: duration, symbol: "timer")
+            return CompanionCue(title: String(localized: "Duration"), value: duration, symbol: "timer")
         }
 
         if let routeLeg = enrichment?.routeLegs.first, let bufferMinutes = routeLeg.bufferMinutes {
-            return CompanionCue(title: "Buffer", value: "\(bufferMinutes) min", symbol: "figure.walk")
+            return CompanionCue(title: String(localized: "Buffer"), value: String(localized: "\(bufferMinutes) min"), symbol: "figure.walk")
         }
 
         if item.startsAt != nil {
-            return CompanionCue(title: "Time", value: item.displayTime, symbol: "clock")
+            return CompanionCue(title: String(localized: "Time"), value: item.displayTime, symbol: "clock")
         }
 
-        return CompanionCue(title: "Time", value: "Add time", symbol: "clock.badge.questionmark")
+        return CompanionCue(title: String(localized: "Time"), value: String(localized: "Add time"), symbol: "clock.badge.questionmark")
     }
 
     private var itemDurationText: String? {
@@ -2252,7 +2268,7 @@ private struct ItemInsightPanel: View {
     private var guidanceRows: [AssistantGuidance] {
         var rows = [
             AssistantGuidance(
-                title: "Next move",
+                title: String(localized: "Next move"),
                 value: primaryNextMove,
                 detail: primaryNextMoveDetail,
                 symbol: "figure.walk.motion",
@@ -2305,9 +2321,9 @@ private struct ItemInsightPanel: View {
         if let firstWarning = enrichment?.warnings.first, !firstWarning.isEmpty {
             rows.insert(
                 AssistantGuidance(
-                    title: "Watch this",
+                    title: String(localized: "Watch this"),
                     value: firstWarning,
-                    detail: "Voya will keep this visible because it may affect the plan.",
+                    detail: String(localized: "Voya will keep this visible because it may affect the plan."),
                     symbol: "exclamationmark.triangle.fill",
                     tint: Color.voyaCoral,
                     actionURL: nil
@@ -2325,62 +2341,62 @@ private struct ItemInsightPanel: View {
             return endpoints.joined(separator: " -> ")
         }
         if let bufferMinutes = leg.bufferMinutes {
-            return "Keep about \(bufferMinutes) min buffer"
+            return String(localized: "Keep about \(bufferMinutes) min buffer")
         }
-        return "Route guidance"
+        return String(localized: "Route guidance")
     }
 
     private func actionTitle(for action: TravelAction) -> String {
         switch action.priority {
-        case "now": "Do now"
-        case "soon": "Do soon"
-        default: "Keep in mind"
+        case "now": String(localized: "Do now")
+        case "soon": String(localized: "Do soon")
+        default: String(localized: "Keep in mind")
         }
     }
 
     private var primaryNextMove: String {
         if item.startsAt == nil {
-            return "Add the time so Voya can reason about routes, buffers, and weather."
+            return String(localized: "Add the time so Voya can reason about routes, buffers, and weather.")
         }
         switch phase {
         case .current:
-            return "Focus on this moment now."
+            return String(localized: "Focus on this moment now.")
         case .past:
-            return "This moment is complete."
+            return String(localized: "This moment is complete.")
         case .future:
-            return item.location.isEmpty ? "Confirm the place before this gets close." : "Keep the route and timing ready."
+            return item.location.isEmpty ? String(localized: "Confirm the place before this gets close.") : String(localized: "Keep the route and timing ready.")
         case .undated:
-            return "Add timing to unlock better assistance."
+            return String(localized: "Add timing to unlock better assistance.")
         }
     }
 
     private var primaryNextMoveDetail: String {
         switch item.kind {
         case .flight:
-            return "Status, airport timing, route to the airport, and arrival transfer should all collapse into one calm plan."
+            return String(localized: "Status, airport timing, route to the airport, and arrival transfer should all collapse into one calm plan.")
         case .hotel:
-            return "Check-in timing, arrival route, and nearby essentials are the most useful signals here."
+            return String(localized: "Check-in timing, arrival route, and nearby essentials are the most useful signals here.")
         case .event:
-            return "Venue context, when to leave, weather, and nearby options matter more than raw booking fields."
+            return String(localized: "Venue context, when to leave, weather, and nearby options matter more than raw booking fields.")
         case .transit:
-            return "This should behave like a travel leg with buffer, route choice, and fallback guidance."
+            return String(localized: "This should behave like a travel leg with buffer, route choice, and fallback guidance.")
         }
     }
 
     private var fallbackRows: [AssistantGuidance] {
         [
             AssistantGuidance(
-                title: "Weather",
-                value: "Connect forecast",
-                detail: "Weather should become advice like what to bring, when to leave, and whether delays are likely.",
+                title: String(localized: "Weather"),
+                value: String(localized: "Connect forecast"),
+                detail: String(localized: "Weather should become advice like what to bring, when to leave, and whether delays are likely."),
                 symbol: "cloud.sun",
                 tint: Color.voyaSky,
                 actionURL: nil
             ),
             AssistantGuidance(
-                title: item.kind == .flight ? "Live status" : "Place context",
+                title: item.kind == .flight ? String(localized: "Live status") : String(localized: "Place context"),
                 value: kindFallbackText,
-                detail: "Provider data will appear here as guidance instead of small dashboard tiles.",
+                detail: String(localized: "Provider data will appear here as guidance instead of small dashboard tiles."),
                 symbol: item.kind.symbol,
                 tint: item.kind.timelineAccent,
                 actionURL: nil
@@ -2391,28 +2407,28 @@ private struct ItemInsightPanel: View {
     private var kindFallbackText: String {
         switch item.kind {
         case .flight:
-            return "FlightAware can power gate, delay, baggage, and airport timing guidance."
+            return String(localized: "FlightAware can power gate, delay, baggage, and airport timing guidance.")
         case .hotel:
-            return "Hotel context can power arrival, check-in, and nearby essentials."
+            return String(localized: "Hotel context can power arrival, check-in, and nearby essentials.")
         case .event:
-            return "Event data can power performer, venue, seating, and what-to-expect notes."
+            return String(localized: "Event data can power performer, venue, seating, and what-to-expect notes.")
         case .transit:
-            return "Maps data can power route, buffer, and fallback decisions."
+            return String(localized: "Maps data can power route, buffer, and fallback decisions.")
         }
     }
 
     private func guidanceTitle(for card: ItemEnrichmentCard) -> String {
         switch card.kind {
         case "weather":
-            return "Weather decision"
+            return String(localized: "Weather decision")
         case "flight":
-            return "Flight status"
+            return String(localized: "Flight status")
         case "events":
-            return "Nearby opportunity"
+            return String(localized: "Nearby opportunity")
         case "maps":
-            return "Getting there"
+            return String(localized: "Getting there")
         case "warning":
-            return "Watch this"
+            return String(localized: "Watch this")
         default:
             return card.title
         }
@@ -2574,10 +2590,10 @@ private struct EditItineraryItemView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(mode == .add ? "Add item" : "Edit item")
+                            Text(mode == .add ? String(localized: "Add item") : String(localized: "Edit item"))
                                 .font(.system(size: 28, weight: .bold, design: .rounded))
                                 .foregroundStyle(Color.voyaInk)
-                            Text(tripTitle ?? draft.kind.rawValue)
+                            Text(tripTitle ?? draft.kind.displayName)
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(Color.voyaMuted)
                         }
@@ -2664,7 +2680,7 @@ private struct EditItineraryItemView: View {
                     onSave(draft)
                     dismiss()
                 } label: {
-                    Label(mode == .add ? "Add to trip" : "Save changes", systemImage: "checkmark")
+                    Label(mode == .add ? String(localized: "Add to trip") : String(localized: "Save changes"), systemImage: "checkmark")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)
@@ -2794,11 +2810,11 @@ private struct EditItineraryItemView: View {
             let response = try await VercelFlightLookupService().lookup(flightNumber: flightNumber, date: draft.startsAt)
             flightLookupResult = response
             if response.candidate == nil {
-                flightLookupMessage = response.warnings.first ?? response.validation.reasons.first ?? "No matching flight found for this date."
+                flightLookupMessage = response.warnings.first ?? response.validation.reasons.first ?? String(localized: "No matching flight found for this date.")
             }
         } catch {
             flightLookupResult = nil
-            flightLookupMessage = "Flight lookup is unavailable right now."
+            flightLookupMessage = String(localized: "Flight lookup is unavailable right now.")
         }
     }
 
@@ -2820,7 +2836,7 @@ private struct EditItineraryItemView: View {
             draft.endsAt = arrival
         }
 
-        flightLookupMessage = "Flight details applied."
+        flightLookupMessage = String(localized: "Flight details applied.")
     }
 
     private func flightCandidateSummary(_ candidate: FlightLookupCandidate) -> String {
@@ -3054,7 +3070,12 @@ private struct ImportMessageLabel: View {
 private struct RecognitionAnimationCard: View {
     let message: String
 
-    private let tags = ["Dates", "Flights", "Hotels", "Places"]
+    private let tags = [
+        String(localized: "Dates"),
+        String(localized: "Flights"),
+        String(localized: "Hotels"),
+        String(localized: "Places")
+    ]
 
     var body: some View {
         TimelineView(.animation) { timeline in
@@ -3139,7 +3160,7 @@ private struct ImportSuccessAnimationCard: View {
     @State private var isCheckVisible = false
 
     private var itemLabel: String {
-        "\(success.itemCount) trip item\(success.itemCount == 1 ? "" : "s")"
+        String(localized: "\(success.itemCount) trip item\(success.itemCount == 1 ? "" : "s")")
     }
 
     var body: some View {
@@ -3167,7 +3188,7 @@ private struct ImportSuccessAnimationCard: View {
                 .frame(width: 94, height: 94)
 
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(success.didCreateTrip ? "Trip created" : "Added to trip")
+                    Text(success.didCreateTrip ? String(localized: "Trip created") : String(localized: "Added to trip"))
                         .font(.title3.bold())
                         .foregroundStyle(Color.voyaInk)
                     Text("\(itemLabel) from \(success.sourceName) is now in \(success.tripTitle).")
@@ -3340,7 +3361,7 @@ private struct EditableItineraryItem: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
-                Label(draft.kind.rawValue, systemImage: draft.kind.symbol)
+                Label(draft.kind.displayName, systemImage: draft.kind.symbol)
                     .font(.headline)
                     .foregroundStyle(Color.voyaInk)
                 Spacer()

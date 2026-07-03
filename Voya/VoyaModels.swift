@@ -9,6 +9,15 @@ enum TripMood: String, CaseIterable, Identifiable {
     case events = "Events"
 
     var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .warm: String(localized: "Warm")
+        case .food: String(localized: "Food")
+        case .culture: String(localized: "Culture")
+        case .events: String(localized: "Events")
+        }
+    }
 }
 
 struct TripRecommendation: Identifiable {
@@ -26,6 +35,15 @@ enum ItineraryKind: String, CaseIterable, Codable {
     case hotel = "Hotel"
     case event = "Event"
     case transit = "Transit"
+
+    var displayName: String {
+        switch self {
+        case .flight: String(localized: "Flight")
+        case .hotel: String(localized: "Hotel")
+        case .event: String(localized: "Event")
+        case .transit: String(localized: "Transit")
+        }
+    }
 
     var symbol: String {
         switch self {
@@ -102,7 +120,7 @@ final class ItineraryItem: Identifiable {
     }
 
     var displayTime: String {
-        startsAt.map { ItineraryDateFormatter.displayTime(start: $0, end: endsAt) } ?? "Time needed"
+        startsAt.map { ItineraryDateFormatter.displayTime(start: $0, end: endsAt) } ?? String(localized: "Time needed")
     }
 }
 
@@ -251,9 +269,9 @@ enum ImportErrorMessage: Identifiable {
     var message: String {
         switch self {
         case .emptyInput:
-            "Paste or choose a confirmation first."
+            String(localized: "Paste or choose a confirmation first.")
         case .unreadableFile(let name):
-            "Could not read text from \(name). Try a text-based PDF or paste the confirmation."
+            String(localized: "Could not read text from \(name). Try a text-based PDF or paste the confirmation.")
         }
     }
 }
@@ -295,17 +313,31 @@ enum ItineraryDateFormatter {
 
     private static let displayFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.locale = .autoupdatingCurrent
         formatter.dateFormat = "MMM d, HH:mm"
         return formatter
     }()
 
     private static let timeOnlyFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.locale = .autoupdatingCurrent
         formatter.dateFormat = "HH:mm"
         return formatter
     }()
+}
+
+enum DateIntervalFormatter {
+    static func localizedDateRange(month: String, day: Int) -> String {
+        String(localized: "\(month) \(day)")
+    }
+
+    static func localizedDateRange(month: String, startDay: Int, endDay: Int) -> String {
+        String(localized: "\(month) \(startDay)-\(endDay)")
+    }
+
+    static func localizedDateRange(startMonth: String, startDay: Int, endMonth: String, endDay: Int) -> String {
+        String(localized: "\(startMonth) \(startDay)-\(endMonth) \(endDay)")
+    }
 }
 
 enum ItineraryDateParser {
@@ -478,11 +510,11 @@ enum ItineraryDateParser {
 
 @MainActor
 final class VoyaStore: ObservableObject {
-    static let pastedConfirmationSourceName = "Pasted confirmation"
+    static let pastedConfirmationSourceName = String(localized: "Pasted confirmation")
 
     private var modelContext: ModelContext?
 
-    @Published var inspirationText = "Warm 4-day trip under $700 with easy transit"
+    @Published var inspirationText = String(localized: "Warm 4-day trip under $700 with easy transit")
     @Published var selectedMood: TripMood = .warm
     @Published var importText = ""
     @Published var extractedPreview: ExtractionPreview?
@@ -557,7 +589,7 @@ final class VoyaStore: ObservableObject {
                 selectedTripID = trips.first?.id
             }
         } catch {
-            importMessage = "Could not load saved trips"
+            importMessage = String(localized: "Could not load saved trips")
             trips = []
         }
     }
@@ -621,7 +653,7 @@ final class VoyaStore: ObservableObject {
             try modelContext.save()
             fetchTrips()
         } catch {
-            importMessage = "Could not save trip changes"
+            importMessage = String(localized: "Could not save trip changes")
         }
     }
 
@@ -634,7 +666,7 @@ final class VoyaStore: ObservableObject {
             guard !deduplicated.duplicates.isEmpty else { continue }
 
             trip.items = sortedItinerary(deduplicated.unique)
-            trip.summary = "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain"
+            trip.summary = summaryText(for: trip)
             trip.updatedAt = Date()
             removedItems.append(contentsOf: deduplicated.duplicates)
         }
@@ -648,7 +680,7 @@ final class VoyaStore: ObservableObject {
         do {
             try modelContext.save()
         } catch {
-            importMessage = "Could not clean up duplicate trip items"
+            importMessage = String(localized: "Could not clean up duplicate trip items")
         }
     }
 
@@ -710,11 +742,11 @@ final class VoyaStore: ObservableObject {
 
     private func extract(document: ImportedDocument) async {
         isExtractingConfirmation = true
-        importMessage = "Recognizing \(document.name)..."
+        importMessage = String(localized: "Recognizing \(document.name)...")
 
         do {
             extractedPreview = try await VercelConfirmationExtractor().extract(from: document)
-            importMessage = "AI recognized \(document.name)"
+            importMessage = String(localized: "AI recognized \(document.name)")
         } catch {
             extractedPreview = ConfirmationParser.extract(from: document)
             importMessage = aiExtractionFailureMessage(for: error)
@@ -727,13 +759,13 @@ final class VoyaStore: ObservableObject {
         if let extractionError = error as? VercelExtractionError {
             switch extractionError {
             case .notConfigured:
-                return "Used on-device recognition. Add VOYA_API_BASE_URL to enable AI."
+                return String(localized: "Used on-device recognition. Add VOYA_API_BASE_URL to enable AI.")
             case .badResponse:
-                return "Used on-device recognition because the AI server returned an error."
+                return String(localized: "Used on-device recognition because the AI server returned an error.")
             }
         }
 
-        return "Used on-device recognition because AI could not be reached."
+        return String(localized: "Used on-device recognition because AI could not be reached.")
     }
 
     func updatePreviewItem(_ item: ItineraryItem, with draft: ItineraryItemDraft) {
@@ -763,7 +795,7 @@ final class VoyaStore: ObservableObject {
 
     func confirmExtraction() {
         guard let preview = extractedPreview, !preview.items.isEmpty else {
-            importMessage = "Add at least one trip item before saving."
+            importMessage = String(localized: "Add at least one trip item before saving.")
             return
         }
         normalizePreviewItemsForStorage(preview.items)
@@ -775,7 +807,7 @@ final class VoyaStore: ObservableObject {
             let deduplicated = deduplicatedItems(from: trip.items + preview.items)
             trip.items = sortedItinerary(deduplicated.unique)
             trip.dates = tripDates(for: trip.items, fallback: trip.dates)
-            trip.summary = "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain"
+            trip.summary = summaryText(for: trip)
             trip.sourceName = combinedSourceName(trip.sourceName, preview.sourceName)
             trip.destination = tripTitle(for: trip.items, fallback: trip.title, preferredDestination: preview.normalizedDestination)
             trip.destinationImageURL = nil
@@ -784,7 +816,7 @@ final class VoyaStore: ObservableObject {
             deleteItems(deduplicated.duplicates)
             selectedTripID = trip.id
             let addedItemCount = max(0, trip.items.count - previousItemCount)
-            importMessage = addedItemCount == 0 ? "Already in trip: \(trip.title)" : "Added to trip: \(trip.title)"
+            importMessage = addedItemCount == 0 ? String(localized: "Already in trip: \(trip.title)") : String(localized: "Added to trip: \(trip.title)")
             importSuccess = ImportSuccess(
                 tripTitle: trip.title,
                 itemCount: addedItemCount,
@@ -801,7 +833,7 @@ final class VoyaStore: ObservableObject {
                     preferredDestination: preview.normalizedDestination
                 ),
                 dates: tripDates(for: items, fallback: preview.primaryTime),
-                summary: "\(items.count) confirmed item\(items.count == 1 ? "" : "s") from \(preview.sourceName)",
+                summary: summaryText(itemCount: items.count, sourceName: preview.sourceName),
                 destination: preview.normalizedDestination,
                 items: items,
                 sourceName: preview.sourceName
@@ -810,7 +842,7 @@ final class VoyaStore: ObservableObject {
             deleteItems(deduplicated.duplicates)
             trips.insert(trip, at: 0)
             selectedTripID = trip.id
-            importMessage = "Trip created: \(trip.title)"
+            importMessage = String(localized: "Trip created: \(trip.title)")
             importSuccess = ImportSuccess(
                 tripTitle: trip.title,
                 itemCount: items.count,
@@ -854,7 +886,7 @@ final class VoyaStore: ObservableObject {
             selectedTripID = trips.first?.id
         }
 
-        importMessage = "Trip deleted: \(deletedTripTitle)"
+        importMessage = String(localized: "Trip deleted: \(deletedTripTitle)")
         saveTrips()
     }
 
@@ -952,15 +984,15 @@ final class VoyaStore: ObservableObject {
     }
 
     private func normalizedTitle(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Untitled item"
+        value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? String(localized: "Untitled item")
     }
 
     private func normalizedLocation(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Location needed"
+        value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? String(localized: "Location needed")
     }
 
     private func normalizedStatus(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Needs review"
+        value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? String(localized: "Needs review")
     }
 
     private func preparePreviewItemsForStorage(_ items: [ItineraryItem], sourceName: String) {
@@ -1300,18 +1332,18 @@ final class VoyaStore: ObservableObject {
         let endDay = endComponents.day ?? startDay
 
         guard startComponents.month != endComponents.month || startDay != endDay else {
-            return "\(startMonth) \(startDay)"
+            return DateIntervalFormatter.localizedDateRange(month: startMonth, day: startDay)
         }
 
         if startComponents.month == endComponents.month {
-            return "\(startMonth) \(startDay)-\(endDay)"
+            return DateIntervalFormatter.localizedDateRange(month: startMonth, startDay: startDay, endDay: endDay)
         }
 
-        return "\(startMonth) \(startDay)-\(endMonth) \(endDay)"
+        return DateIntervalFormatter.localizedDateRange(startMonth: startMonth, startDay: startDay, endMonth: endMonth, endDay: endDay)
     }
 
     private func monthAbbreviation(for month: Int?) -> String {
-        let monthSymbols = Self.englishMonthSymbols
+        let monthSymbols = Self.localizedMonthSymbols
         guard let month, monthSymbols.indices.contains(month - 1) else {
             return ""
         }
@@ -1319,18 +1351,22 @@ final class VoyaStore: ObservableObject {
         return monthSymbols[month - 1]
     }
 
-    private static let englishMonthSymbols: [String] = {
+    private static let localizedMonthSymbols: [String] = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.locale = .autoupdatingCurrent
         return formatter.shortMonthSymbols
     }()
 
     private func summaryText(for trip: Trip) -> String {
         guard !trip.items.isEmpty else {
-            return "No confirmed items yet"
+            return String(localized: "No confirmed items yet")
         }
 
-        return "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain"
+        return String(localized: "\(trip.items.count) confirmed item\(trip.items.count == 1 ? "" : "s") in one travel chain")
+    }
+
+    private func summaryText(itemCount: Int, sourceName: String) -> String {
+        String(localized: "\(itemCount) confirmed item\(itemCount == 1 ? "" : "s") from \(sourceName)")
     }
 
     private func combinedSourceName(_ existing: String, _ incoming: String) -> String {
@@ -1940,13 +1976,13 @@ enum ConfirmationParser {
         }
 
         if items.isEmpty {
-            warnings.append("No clear flight, hotel, or event was detected. Review the text and edit the draft.")
+            warnings.append(String(localized: "No clear flight, hotel, or event was detected. Review the text and edit the draft."))
             items.append(
                 ItineraryItem(
                     kind: .event,
-                    title: firstUsefulLine(in: text) ?? "Imported confirmation",
-                    location: "Location needed",
-                    status: "Needs review",
+                    title: firstUsefulLine(in: text) ?? String(localized: "Imported confirmation"),
+                    location: String(localized: "Location needed"),
+                    status: String(localized: "Needs review"),
                     startsAt: ItineraryDateParser.startDate(from: firstDateTime(in: text))
                 )
             )
@@ -1960,7 +1996,7 @@ enum ConfirmationParser {
             type: typeLabel(for: items),
             title: title,
             normalizedDestination: normalizedDestination(from: items),
-            primaryTime: items.first?.displayTime ?? "Date needed",
+            primaryTime: items.first?.displayTime ?? String(localized: "Date needed"),
             confidence: confidence,
             fields: fields(for: items, sourceName: document.name),
             items: items,
@@ -1969,11 +2005,11 @@ enum ConfirmationParser {
     }
 
     static func fields(for items: [ItineraryItem], sourceName: String) -> [ExtractedField] {
-        var fields = [ExtractedField(label: "Source", value: sourceName)]
+        var fields = [ExtractedField(label: String(localized: "Source"), value: sourceName)]
         for item in items {
-            fields.append(ExtractedField(label: item.kind.rawValue, value: item.title))
-            fields.append(ExtractedField(label: "Time", value: item.displayTime))
-            fields.append(ExtractedField(label: "Place", value: item.location))
+            fields.append(ExtractedField(label: item.kind.displayName, value: item.title))
+            fields.append(ExtractedField(label: String(localized: "Time"), value: item.displayTime))
+            fields.append(ExtractedField(label: String(localized: "Place"), value: item.location))
         }
         return fields
     }
@@ -1990,9 +2026,9 @@ enum ConfirmationParser {
 
         return flightNumbers.prefix(segmentCount).enumerated().map { index, flightNumber in
             let route = routeForFlight(at: index, flightCount: flightNumbers.count, routes: routes)
-            let destination = route?.to ?? "destination"
+            let destination = route?.to ?? String(localized: "destination")
             let title = "\(flightNumber) to \(destination)"
-            let location = route.map { "\($0.from) to \($0.to)" } ?? "Airport details needed"
+            let location = route.map { "\($0.from) to \($0.to)" } ?? String(localized: "Airport details needed")
             let departure = departures[safe: index] ?? firstDateTime(in: text)
             let arrival = arrivals[safe: index]
             let startsAt = ItineraryDateParser.startDate(from: departure)
@@ -2002,7 +2038,7 @@ enum ConfirmationParser {
                 kind: .flight,
                 title: title,
                 location: location,
-                status: "Needs terminal check",
+                status: String(localized: "Needs terminal check"),
                 startsAt: startsAt,
                 endsAt: endsAt
             )
@@ -2030,13 +2066,13 @@ enum ConfirmationParser {
         guard let rawHotel = patterns.compactMap({ firstMatch(in: text, pattern: $0) }).first else { return nil }
         let hotel = cleanedPhrase(rawHotel)
         let stayRange = hotelStayRange(in: text)
-        let destination = routeParts(in: text)?.to ?? fallbackLocation ?? "Address needed"
+        let destination = routeParts(in: text)?.to ?? fallbackLocation ?? String(localized: "Address needed")
 
         return ItineraryItem(
             kind: .hotel,
             title: hotel,
             location: destination,
-            status: "Confirmed",
+            status: String(localized: "Confirmed"),
             startsAt: stayRange?.startsAt,
             endsAt: stayRange?.endsAt
         )
@@ -2050,9 +2086,9 @@ enum ConfirmationParser {
         let event = firstMatch(in: text, pattern: #"(?i)(ticket|reservation)\s*[:#-]?\s*[A-Za-z0-9 '&.-]{3,50}"#)
         return ItineraryItem(
             kind: .event,
-            title: cleanedPhrase(event ?? "Event reservation"),
-            location: routeParts(in: text)?.to ?? "Venue needed",
-            status: "Ticket saved",
+            title: cleanedPhrase(event ?? String(localized: "Event reservation")),
+            location: routeParts(in: text)?.to ?? String(localized: "Venue needed"),
+            status: String(localized: "Ticket saved"),
             startsAt: ItineraryDateParser.startDate(from: firstDateTime(in: text))
         )
     }
@@ -2060,14 +2096,14 @@ enum ConfirmationParser {
     private static func tripTitle(from items: [ItineraryItem]) -> String {
         if let flight = items.first(where: { $0.kind == .flight }),
            let destination = flight.location.components(separatedBy: " to ").last {
-            return "Trip to \(destination)"
+            return String(localized: "Trip to \(destination)")
         }
 
         if let hotel = items.first(where: { $0.kind == .hotel }) {
-            return "Stay at \(hotel.title)"
+            return String(localized: "Stay at \(hotel.title)")
         }
 
-        return items.first?.title ?? "Imported trip"
+        return items.first?.title ?? String(localized: "Imported trip")
     }
 
     private static func normalizedDestination(from items: [ItineraryItem]) -> String? {
@@ -2084,7 +2120,7 @@ enum ConfirmationParser {
     }
 
     private static func typeLabel(for items: [ItineraryItem]) -> String {
-        let uniqueKinds = Array(Set(items.map(\.kind.rawValue))).sorted()
+        let uniqueKinds = Array(Set(items.map(\.kind.displayName))).sorted()
         return uniqueKinds.joined(separator: " + ")
     }
 
