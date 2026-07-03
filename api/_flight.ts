@@ -196,6 +196,11 @@ type FlightAwareFlightsResponse = {
   flights?: FlightAwareFlight[];
 };
 
+type FlightAwareScheduledDeparturesResponse = {
+  scheduled_departures?: FlightAwareFlight[];
+  flights?: FlightAwareFlight[];
+};
+
 type FlightAwareCanonicalResponse = {
   ident?: string;
 };
@@ -213,8 +218,42 @@ type FlightAwareTrackResponse = {
   positions?: FlightAwareTrackPoint[];
 };
 
+type FlightAwareErrorBody = {
+  message?: string;
+  error?: string;
+  title?: string;
+  detail?: string;
+  reason?: string;
+};
+
 function cleanFlightNumber(value: string) {
   return value.replace(/\s+/g, "").toUpperCase();
+}
+
+function identCandidates(value: string) {
+  const clean = cleanFlightNumber(value);
+  const airlineIataToIcao: Record<string, string> = {
+    BA: "BAW",
+    LH: "DLH",
+    LX: "SWR",
+    OS: "AUA",
+    SN: "BEL",
+    AF: "AFR",
+    KL: "KLM",
+    IB: "IBE",
+    VY: "VLG",
+    U2: "EZY",
+    FR: "RYR",
+    W6: "WZZ",
+    AA: "AAL",
+    DL: "DAL",
+    UA: "UAL",
+    AC: "ACA"
+  };
+  const match = clean.match(/^([A-Z0-9]{2})(\d{1,4}[A-Z]?)$/);
+  const icaoIdent = match ? `${airlineIataToIcao[match[1]] ?? ""}${match[2]}` : "";
+
+  return [...new Set([clean, icaoIdent].filter(Boolean))];
 }
 
 function airportCode(value?: FlightAwareAirport) {
@@ -373,6 +412,23 @@ function verifiedSnapshot(snapshots: FlightSnapshot[], lookup: FlightLookup) {
   return snapshots.find((candidate) => routeMatches(candidate, lookup) && dateMatches(candidate, lookup));
 }
 
+function flightNumberMatches(snapshot: FlightSnapshot, lookup: FlightLookup) {
+  const candidates = identCandidates(lookup.flightNumber);
+  const snapshotValues = [
+    snapshot.flightNumber,
+    snapshot.flightIata,
+    snapshot.flightIcao,
+    ...(snapshot.codeshares ?? [])
+  ].filter((value): value is string => typeof value === "string" && value.length > 0)
+    .map((value) => cleanFlightNumber(value));
+
+  return snapshotValues.some((value) => candidates.includes(value));
+}
+
+function verifiedScheduleSnapshot(snapshots: FlightSnapshot[], lookup: FlightLookup) {
+  return snapshots.find((candidate) => flightNumberMatches(candidate, lookup) && routeMatches(candidate, lookup) && dateMatches(candidate, lookup));
+}
+
 function lookupWindow(date?: string) {
   const center = date ? new Date(date) : new Date();
   if (Number.isNaN(center.getTime())) {
@@ -402,11 +458,20 @@ async function flightAwareFetch(path: string) {
   const data = await response.json().catch(() => undefined);
 
   if (!response.ok) {
+    const errorBody = data as FlightAwareErrorBody | undefined;
+    const error = [
+      errorBody?.message,
+      errorBody?.error,
+      errorBody?.title,
+      errorBody?.detail,
+      errorBody?.reason
+    ].filter(Boolean).join(" ");
+
     return {
       connected: true as const,
       ok: false as const,
       status: response.status,
-      error: typeof data === "object" && data && "message" in data ? String(data.message) : undefined
+      error: error || undefined
     };
   }
 
@@ -425,6 +490,18 @@ async function flightAwareCanonicalIdent(ident: string) {
 
 async function flightAwareFlights(ident: string, window: { start: string; end: string }) {
   const url = new URL(`/aeroapi/flights/${encodeURIComponent(ident)}`, "https://aeroapi.flightaware.com");
+  url.searchParams.set("start", window.start);
+  url.searchParams.set("end", window.end);
+
+  return flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
+}
+
+async function flightAwareScheduledDepartures(lookup: FlightLookup, window: { start: string; end: string }) {
+  if (!lookup.originAirport) {
+    return undefined;
+  }
+
+  const url = new URL(`/aeroapi/airports/${encodeURIComponent(lookup.originAirport)}/flights/scheduled_departures`, "https://aeroapi.flightaware.com");
   url.searchParams.set("start", window.start);
   url.searchParams.set("end", window.end);
 
@@ -553,9 +630,36 @@ export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatu
   }
 
   if (!result.ok && (result.status === 400 || result.status === 404)) {
-    const canonicalIdent = await flightAwareCanonicalIdent(normalizedLookup.flightNumber);
-    if (canonicalIdent && canonicalIdent !== normalizedLookup.flightNumber) {
-      result = await flightAwareFlights(canonicalIdent, window);
+    for (const ident of identCandidates(normalizedLookup.flightNumber)) {
+      if (ident === normalizedLookup.flightNumber) {
+        continue;
+      }
+      const candidateResult = await flightAwareFlights(ident, window);
+      if (candidateResult.ok) {
+        result = candidateResult;
+        break;
+      }
+    }
+
+    if (!result.ok) {
+      const canonicalIdent = await flightAwareCanonicalIdent(normalizedLookup.flightNumber);
+      if (canonicalIdent && canonicalIdent !== normalizedLookup.flightNumber) {
+        result = await flightAwareFlights(canonicalIdent, window);
+      }
+    }
+  }
+
+  if (!result.ok && result.status === 400 && normalizedLookup.date && normalizedLookup.originAirport) {
+    const scheduleResult = await flightAwareScheduledDepartures(normalizedLookup, window);
+    if (scheduleResult?.connected && scheduleResult.ok) {
+      const scheduleData = scheduleResult.data as FlightAwareScheduledDeparturesResponse;
+      const scheduleFlights = scheduleData.scheduled_departures ?? scheduleData.flights ?? [];
+      const scheduleSnapshots = scheduleFlights.map((flight) => normalizeFlightAwareFlight(flight, normalizedLookup.flightNumber));
+      const scheduleSnapshot = verifiedScheduleSnapshot(scheduleSnapshots, normalizedLookup);
+
+      if (scheduleSnapshot) {
+        return flightStatusSuccess(normalizedLookup, scheduleSnapshot);
+      }
     }
   }
 
