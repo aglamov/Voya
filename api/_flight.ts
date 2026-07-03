@@ -126,6 +126,7 @@ export type FlightStatusResponse = {
     source: "flightaware-alerts";
     events: string[];
     webhookEndpoint: string;
+    managementEndpoint: string;
   };
   nextActions: string[];
   provider: {
@@ -506,7 +507,8 @@ function alerting(webhookBaseURL?: string): FlightStatusResponse["alerting"] {
       "gate_change",
       "holding"
     ],
-    webhookEndpoint: `${baseURL}/api/flightaware-alerts`
+    webhookEndpoint: `${baseURL}/api/flightaware-alerts`,
+    managementEndpoint: `${baseURL}/api/flightaware-alert-subscriptions`
   };
 }
 

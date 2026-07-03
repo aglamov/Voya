@@ -145,7 +145,8 @@ Flight support endpoints:
 - `GET /api/flight-status?flightNumber=BA2490&date=2026-08-12&originAirport=LHR&destinationAirport=FCO`
 - `POST /api/flight-status` with `{ "flightNumber": "BA2490", "date": "2026-08-12", "originAirport": "LHR", "destinationAirport": "FCO" }`
 - `POST /api/booking-validation` combines imported-confirmation evidence, user review, and provider flight existence validation. It does not claim true PNR or ticket validation unless Voya later integrates directly with the airline, OTA, NDC, GDS, or booking provider.
-- `POST /api/flightaware-alerts` receives FlightAware alert callbacks and normalizes them for Voya alert generation.
+- `GET/POST/DELETE /api/flightaware-alert-subscriptions` proxies FlightAware AeroAPI `/alerts` management calls while keeping the AeroAPI key server-side. Use the exact alert payload shape from FlightAware's `/alerts` documentation.
+- `POST /api/flightaware-alerts` receives FlightAware alert callbacks after a FlightAware alert subscription points to this callback URL, then normalizes them for Voya alert generation.
 
 iOS configuration:
 

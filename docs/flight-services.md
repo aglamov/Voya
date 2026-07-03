@@ -276,7 +276,7 @@ The adapter requests FlightAware flight status data by flight ident and service-
 - departure and arrival terminal/gate, baggage claim, and delay fields
 - cancellation, diversion, progress, inbound aircraft id, filed route, route distance, altitude, airspeed, and filed ETE
 - track/position data when available
-- FlightAware alert support metadata and `POST /api/flightaware-alerts` callback target
+- FlightAware alert support metadata, `GET/POST/DELETE /api/flightaware-alert-subscriptions` for AeroAPI `/alerts` management, and `POST /api/flightaware-alerts` as Voya's callback receiver
 
 Without `FLIGHTAWARE_AEROAPI_KEY`, both status endpoints return a graceful `provider_not_connected` state.
 
