@@ -718,9 +718,24 @@ async function flightCards(title: string, location: string, startsAt?: string | 
     detail: response.gate.baggageClaim ? `Baggage ${response.gate.baggageClaim}` : response.gate.guidance[1],
     kind: "flight"
   }, {
+    title: "Times",
+    value: [
+      compactTime(response.schedule.estimatedDepartureAt ?? response.schedule.scheduledDepartureAt),
+      compactTime(response.schedule.estimatedArrivalAt ?? response.schedule.scheduledArrivalAt)
+    ].filter(Boolean).join(" -> ") || "Not available",
+    detail: response.schedule.actualDepartureAt
+      ? `Departed ${compactTime(response.schedule.actualDepartureAt)}`
+      : "Uses FlightAware scheduled, estimated, and actual gate times.",
+    kind: "flight"
+  }, {
+    title: "Alerts",
+    value: response.alerting.supported ? "Ready" : "Unavailable",
+    detail: response.alerting.supported ? "FlightAware alerts can feed gate, delay, cancellation, diversion, departure, and arrival updates." : undefined,
+    kind: "flight"
+  }, {
     title: "Aircraft",
     value: aircraftParts.length ? aircraftParts.join(" · ") : "Not available",
-    detail: snapshot.position?.updatedAt ? `Live position updated ${compactTime(snapshot.position.updatedAt)}` : snapshot.airlineName,
+    detail: snapshot.position?.updatedAt ? `Live position updated ${compactTime(snapshot.position.updatedAt)}` : snapshot.airlineCode,
     kind: "flight"
   }];
 }

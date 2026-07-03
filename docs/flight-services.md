@@ -266,17 +266,19 @@ It returns a provider-neutral response with:
 
 `/api/booking-validation` combines the imported confirmation evidence, extraction confidence, user review, and the live provider response. It intentionally returns `canValidatePnr: false` because public flight-status feeds do not prove that the passenger's PNR or ticket is active.
 
-Set `AVIATIONSTACK_API_KEY` in Vercel to enable the free aviationstack provider. The adapter requests the `/v1/flights` endpoint and normalizes as much of the response as the plan returns:
+Set `FLIGHTAWARE_AEROAPI_KEY` in Vercel to enable the FlightAware AeroAPI provider. Voya no longer uses aviationstack for flight status because weak plan boundaries made it too easy to show an unrelated flight.
 
-- `flight_date` and `flight_status`
-- airline name, IATA, and ICAO
-- flight number, IATA, ICAO, and codeshare data
-- departure airport name, IATA, ICAO, timezone, terminal, gate, delay, scheduled, estimated, actual, estimated runway, and actual runway
-- arrival airport name, IATA, ICAO, timezone, terminal, gate, baggage, delay, scheduled, estimated, actual, estimated runway, and actual runway
-- aircraft registration, IATA, ICAO, and ICAO24
-- live latitude, longitude, altitude, direction, horizontal speed, vertical speed, ground state, and update time
+The adapter requests FlightAware flight status data by flight ident and service-date window, then accepts a result only when the provider flight matches the imported route and date. It normalizes:
 
-`FLIGHTAWARE_AEROAPI_KEY` remains an optional paid fallback. Without either key, both endpoints return a graceful `provider_not_connected` state.
+- FlightAware flight id, IATA/ICAO ident, operator, codeshares, and aircraft registration/type
+- origin and destination airport codes
+- scheduled, estimated, and actual gate-out, takeoff, landing, and gate-in times
+- departure and arrival terminal/gate, baggage claim, and delay fields
+- cancellation, diversion, progress, inbound aircraft id, filed route, route distance, altitude, airspeed, and filed ETE
+- track/position data when available
+- FlightAware alert support metadata and `POST /api/flightaware-alerts` callback target
+
+Without `FLIGHTAWARE_AEROAPI_KEY`, both status endpoints return a graceful `provider_not_connected` state.
 
 ## Source Links
 
@@ -285,4 +287,3 @@ Set `AVIATIONSTACK_API_KEY` in Vercel to enable the free aviationstack provider.
 - OAG flight status and on-time performance data: https://www.oag.com/flight-status-data
 - Amadeus Flight Order Management API: https://developers.amadeus.com/self-service/category/flights/api-doc/flight-order-management/api-reference
 - Flightradar24 how it works: https://www.flightradar24.com/how-it-works
-- aviationstack API documentation: https://aviationstack.com/documentation

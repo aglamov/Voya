@@ -20,41 +20,31 @@ export type FlightSnapshotStatus =
   | "unknown";
 
 export type FlightSnapshot = {
-  provider: "aviationstack" | "flightaware";
+  provider: "flightaware";
   providerFlightId?: string;
   providerStatus?: string;
-  airlineName?: string;
   airlineCode?: string;
   flightNumber: string;
   flightIata?: string;
   flightIcao?: string;
   operatingAirlineCode?: string;
-  codeshare?: {
-    airlineName?: string;
-    airlineCode?: string;
-    flightNumber?: string;
-    flightIata?: string;
-    flightIcao?: string;
-  };
-  flightDate?: string;
+  codeshares?: string[];
   originAirport?: string;
   originAirportIcao?: string;
-  originAirportName?: string;
-  originTimezone?: string;
   destinationAirport?: string;
   destinationAirportIcao?: string;
-  destinationAirportName?: string;
-  destinationTimezone?: string;
   scheduledDepartureAt?: string;
+  scheduledTakeoffAt?: string;
+  scheduledLandingAt?: string;
   scheduledArrivalAt?: string;
   estimatedDepartureAt?: string;
+  estimatedTakeoffAt?: string;
+  estimatedLandingAt?: string;
   estimatedArrivalAt?: string;
   actualDepartureAt?: string;
+  actualTakeoffAt?: string;
+  actualLandingAt?: string;
   actualArrivalAt?: string;
-  estimatedDepartureRunwayAt?: string;
-  actualDepartureRunwayAt?: string;
-  estimatedArrivalRunwayAt?: string;
-  actualArrivalRunwayAt?: string;
   departureTerminal?: string;
   departureGate?: string;
   departureDelayMinutes?: number;
@@ -64,22 +54,23 @@ export type FlightSnapshot = {
   baggageClaim?: string;
   aircraftType?: string;
   aircraftRegistration?: string;
-  aircraftIata?: string;
-  aircraftIcao?: string;
-  aircraftIcao24?: string;
   status: FlightSnapshotStatus;
   delayMinutes?: number;
   cancellationReason?: string;
   diversionAirport?: string;
+  inboundProviderFlightId?: string;
+  progressPercent?: number;
+  routeDistanceNm?: number;
+  filedAirspeedKnots?: number;
+  filedAltitudeFeet?: number;
+  filedRoute?: string;
+  filedEte?: number;
   position?: {
     lat: number;
     lon: number;
     altitudeFeet?: number;
     groundspeedKnots?: number;
-    groundspeedKmh?: number;
-    verticalSpeed?: number;
     headingDegrees?: number;
-    isGround?: boolean;
     updatedAt?: string;
   };
   onTimeProbability?: number;
@@ -116,39 +107,61 @@ export type FlightStatusResponse = {
     registration?: string;
     position?: FlightSnapshot["position"];
   };
+  schedule: {
+    scheduledDepartureAt?: string;
+    scheduledTakeoffAt?: string;
+    scheduledLandingAt?: string;
+    scheduledArrivalAt?: string;
+    estimatedDepartureAt?: string;
+    estimatedTakeoffAt?: string;
+    estimatedLandingAt?: string;
+    estimatedArrivalAt?: string;
+    actualDepartureAt?: string;
+    actualTakeoffAt?: string;
+    actualLandingAt?: string;
+    actualArrivalAt?: string;
+  };
+  alerting: {
+    supported: boolean;
+    source: "flightaware-alerts";
+    events: string[];
+    webhookEndpoint: string;
+  };
   nextActions: string[];
   provider: {
-    name: "aviationstack" | "FlightAware AeroAPI";
+    name: "FlightAware AeroAPI";
     connected: boolean;
     attribution: string;
   };
   warnings: string[];
 };
 
-type ProviderErrorCode = "missing_access_key" | "function_access_restricted" | "rate_limit" | "provider_error";
-
 type FlightAwareAirport = {
   code?: string;
   code_iata?: string;
   code_icao?: string;
-  terminal?: string;
-  gate?: string;
-  baggage_claim?: string;
-  delay?: number;
+  code_lid?: string;
 };
 
 type FlightAwareFlight = {
   fa_flight_id?: string;
   ident?: string;
   ident_iata?: string;
+  ident_icao?: string;
   operator?: string;
   operator_iata?: string;
+  operator_icao?: string;
   flight_number?: string;
   registration?: string;
   aircraft_type?: string;
   status?: string;
+  progress_percent?: number;
   cancelled?: boolean;
   diverted?: boolean;
+  blocked?: boolean;
+  inbound_fa_flight_id?: string;
+  codeshares?: string[];
+  codeshares_iata?: string[];
   origin?: FlightAwareAirport;
   destination?: FlightAwareAirport;
   scheduled_out?: string;
@@ -163,10 +176,19 @@ type FlightAwareFlight = {
   actual_off?: string;
   actual_on?: string;
   actual_in?: string;
-  predicted_out?: string;
-  predicted_off?: string;
-  predicted_on?: string;
-  predicted_in?: string;
+  departure_delay?: number;
+  arrival_delay?: number;
+  terminal_origin?: string;
+  gate_origin?: string;
+  terminal_destination?: string;
+  gate_destination?: string;
+  baggage_claim?: string;
+  route_distance?: number;
+  filed_airspeed?: number;
+  filed_altitude?: number;
+  filed_route?: string;
+  route?: string;
+  filed_ete?: number;
 };
 
 type FlightAwareFlightsResponse = {
@@ -186,90 +208,16 @@ type FlightAwareTrackResponse = {
   positions?: FlightAwareTrackPoint[];
 };
 
-type AviationstackFlight = {
-  flight_date?: string;
-  flight_status?: string;
-  departure?: {
-    airport?: string;
-    timezone?: string;
-    iata?: string;
-    icao?: string;
-    terminal?: string;
-    gate?: string;
-    delay?: number;
-    scheduled?: string;
-    estimated?: string;
-    actual?: string;
-    estimated_runway?: string;
-    actual_runway?: string;
-  };
-  arrival?: {
-    airport?: string;
-    timezone?: string;
-    iata?: string;
-    icao?: string;
-    terminal?: string;
-    gate?: string;
-    baggage?: string;
-    delay?: number;
-    scheduled?: string;
-    estimated?: string;
-    actual?: string;
-    estimated_runway?: string;
-    actual_runway?: string;
-  };
-  airline?: {
-    name?: string;
-    iata?: string;
-    icao?: string;
-  };
-  flight?: {
-    number?: string;
-    iata?: string;
-    icao?: string;
-    codeshared?: {
-      airline_name?: string;
-      airline_iata?: string;
-      airline_icao?: string;
-      flight_number?: string;
-      flight_iata?: string;
-      flight_icao?: string;
-    };
-  };
-  aircraft?: {
-    registration?: string;
-    iata?: string;
-    icao?: string;
-    icao24?: string;
-  };
-  live?: {
-    updated?: string;
-    latitude?: number;
-    longitude?: number;
-    altitude?: number;
-    direction?: number;
-    speed_horizontal?: number;
-    speed_vertical?: number;
-    is_ground?: boolean;
-  };
-};
-
-type AviationstackResponse = {
-  data?: AviationstackFlight[];
-  error?: {
-    code?: string;
-    message?: string;
-    type?: string;
-    info?: string;
-  };
-};
-
 function cleanFlightNumber(value: string) {
   return value.replace(/\s+/g, "").toUpperCase();
 }
 
 function airportCode(value?: FlightAwareAirport) {
-  return value?.code_iata ?? value?.code ?? value?.code_icao;
+  return value?.code_iata ?? value?.code ?? value?.code_icao ?? value?.code_lid;
+}
+
+function secondsToMinutes(value?: number) {
+  return value == null ? undefined : Math.round(value / 60);
 }
 
 function minutesBetween(later?: string, earlier?: string) {
@@ -294,10 +242,10 @@ function statusFromFlightAware(flight: FlightAwareFlight): FlightSnapshotStatus 
   if (flight.diverted || status.includes("divert")) {
     return "diverted";
   }
-  if (flight.actual_in || flight.actual_on || status.includes("arriv")) {
+  if (flight.actual_in || flight.actual_on || status.includes("arriv") || status.includes("landed")) {
     return "arrived";
   }
-  if (flight.actual_off || flight.actual_out || status.includes("depart")) {
+  if (flight.actual_off || flight.actual_out || status.includes("depart") || status.includes("en route")) {
     return "departed";
   }
   if (status.includes("delay")) {
@@ -311,25 +259,6 @@ function statusFromFlightAware(flight: FlightAwareFlight): FlightSnapshotStatus 
   }
 
   return "unknown";
-}
-
-function statusFromAviationstack(status?: string): FlightSnapshotStatus {
-  switch (status?.toLowerCase()) {
-    case "scheduled":
-      return "scheduled";
-    case "active":
-      return "departed";
-    case "landed":
-      return "arrived";
-    case "cancelled":
-      return "cancelled";
-    case "incident":
-      return "unknown";
-    case "diverted":
-      return "diverted";
-    default:
-      return "unknown";
-  }
 }
 
 function onTimeProbability(status: FlightSnapshotStatus, delayMinutes?: number) {
@@ -351,112 +280,61 @@ function onTimeProbability(status: FlightSnapshotStatus, delayMinutes?: number) 
   return 0.2;
 }
 
-function normalizeAviationstackFlight(flight: AviationstackFlight, fallbackFlightNumber: string): FlightSnapshot {
-  const status = statusFromAviationstack(flight.flight_status);
-  const delayMinutes = flight.departure?.delay ?? flight.arrival?.delay;
-
-  return {
-    provider: "aviationstack",
-    providerFlightId: flight.flight?.iata ?? flight.flight?.icao ?? fallbackFlightNumber,
-    providerStatus: flight.flight_status,
-    airlineName: flight.airline?.name,
-    airlineCode: flight.airline?.iata ?? flight.airline?.icao,
-    flightNumber: flight.flight?.iata ?? flight.flight?.icao ?? flight.flight?.number ?? fallbackFlightNumber,
-    flightIata: flight.flight?.iata,
-    flightIcao: flight.flight?.icao,
-    operatingAirlineCode: flight.airline?.iata ?? flight.airline?.icao,
-    codeshare: flight.flight?.codeshared
-      ? {
-          airlineName: flight.flight.codeshared.airline_name,
-          airlineCode: flight.flight.codeshared.airline_iata ?? flight.flight.codeshared.airline_icao,
-          flightNumber: flight.flight.codeshared.flight_number,
-          flightIata: flight.flight.codeshared.flight_iata,
-          flightIcao: flight.flight.codeshared.flight_icao
-        }
-      : undefined,
-    flightDate: flight.flight_date,
-    originAirport: flight.departure?.iata,
-    originAirportIcao: flight.departure?.icao,
-    originAirportName: flight.departure?.airport,
-    originTimezone: flight.departure?.timezone,
-    destinationAirport: flight.arrival?.iata,
-    destinationAirportIcao: flight.arrival?.icao,
-    destinationAirportName: flight.arrival?.airport,
-    destinationTimezone: flight.arrival?.timezone,
-    scheduledDepartureAt: flight.departure?.scheduled,
-    scheduledArrivalAt: flight.arrival?.scheduled,
-    estimatedDepartureAt: flight.departure?.estimated,
-    estimatedArrivalAt: flight.arrival?.estimated,
-    actualDepartureAt: flight.departure?.actual,
-    actualArrivalAt: flight.arrival?.actual,
-    estimatedDepartureRunwayAt: flight.departure?.estimated_runway,
-    actualDepartureRunwayAt: flight.departure?.actual_runway,
-    estimatedArrivalRunwayAt: flight.arrival?.estimated_runway,
-    actualArrivalRunwayAt: flight.arrival?.actual_runway,
-    departureTerminal: flight.departure?.terminal,
-    departureGate: flight.departure?.gate,
-    departureDelayMinutes: flight.departure?.delay,
-    arrivalTerminal: flight.arrival?.terminal,
-    arrivalGate: flight.arrival?.gate,
-    arrivalDelayMinutes: flight.arrival?.delay,
-    baggageClaim: flight.arrival?.baggage,
-    aircraftType: flight.aircraft?.iata ?? flight.aircraft?.icao,
-    aircraftRegistration: flight.aircraft?.registration,
-    aircraftIata: flight.aircraft?.iata,
-    aircraftIcao: flight.aircraft?.icao,
-    aircraftIcao24: flight.aircraft?.icao24,
-    status,
-    delayMinutes,
-    position: flight.live?.latitude != null && flight.live.longitude != null
-      ? {
-          lat: flight.live.latitude,
-          lon: flight.live.longitude,
-          altitudeFeet: flight.live.altitude,
-          groundspeedKmh: flight.live.speed_horizontal,
-          verticalSpeed: flight.live.speed_vertical,
-          headingDegrees: flight.live.direction,
-          isGround: flight.live.is_ground,
-          updatedAt: flight.live.updated
-        }
-      : undefined,
-    onTimeProbability: onTimeProbability(status, delayMinutes),
-    confidence: 0.84,
-    sourceUpdatedAt: flight.live?.updated ?? flight.departure?.actual ?? flight.departure?.estimated ?? flight.departure?.scheduled,
-    fetchedAt: new Date().toISOString()
-  };
-}
-
 function normalizeFlightAwareFlight(flight: FlightAwareFlight, fallbackFlightNumber: string): FlightSnapshot {
   const status = statusFromFlightAware(flight);
-  const scheduledDepartureAt = flight.scheduled_out ?? flight.scheduled_off;
-  const estimatedDepartureAt = flight.estimated_out ?? flight.predicted_out ?? flight.estimated_off ?? flight.predicted_off;
-  const delayMinutes = minutesBetween(estimatedDepartureAt, scheduledDepartureAt) ?? flight.origin?.delay;
+  const departureDelayMinutes = secondsToMinutes(flight.departure_delay)
+    ?? minutesBetween(flight.estimated_out, flight.scheduled_out);
+  const arrivalDelayMinutes = secondsToMinutes(flight.arrival_delay)
+    ?? minutesBetween(flight.estimated_in, flight.scheduled_in);
+  const delayMinutes = departureDelayMinutes ?? arrivalDelayMinutes;
 
   return {
     provider: "flightaware",
     providerFlightId: flight.fa_flight_id,
-    airlineCode: flight.operator_iata ?? flight.operator,
-    flightNumber: flight.ident_iata ?? flight.ident ?? fallbackFlightNumber,
-    operatingAirlineCode: flight.operator_iata ?? flight.operator,
+    providerStatus: flight.status,
+    airlineCode: flight.operator_iata ?? flight.operator_icao ?? flight.operator,
+    flightNumber: flight.ident_iata ?? flight.ident_icao ?? flight.ident ?? fallbackFlightNumber,
+    flightIata: flight.ident_iata,
+    flightIcao: flight.ident_icao,
+    operatingAirlineCode: flight.operator_iata ?? flight.operator_icao ?? flight.operator,
+    codeshares: flight.codeshares_iata ?? flight.codeshares,
     originAirport: airportCode(flight.origin),
+    originAirportIcao: flight.origin?.code_icao,
     destinationAirport: airportCode(flight.destination),
-    scheduledDepartureAt,
-    scheduledArrivalAt: flight.scheduled_in ?? flight.scheduled_on,
-    estimatedDepartureAt,
-    estimatedArrivalAt: flight.estimated_in ?? flight.predicted_in ?? flight.estimated_on ?? flight.predicted_on,
-    actualDepartureAt: flight.actual_out ?? flight.actual_off,
-    actualArrivalAt: flight.actual_in ?? flight.actual_on,
-    departureTerminal: flight.origin?.terminal,
-    departureGate: flight.origin?.gate,
-    arrivalTerminal: flight.destination?.terminal,
-    arrivalGate: flight.destination?.gate,
-    baggageClaim: flight.destination?.baggage_claim,
+    destinationAirportIcao: flight.destination?.code_icao,
+    scheduledDepartureAt: flight.scheduled_out,
+    scheduledTakeoffAt: flight.scheduled_off,
+    scheduledLandingAt: flight.scheduled_on,
+    scheduledArrivalAt: flight.scheduled_in,
+    estimatedDepartureAt: flight.estimated_out,
+    estimatedTakeoffAt: flight.estimated_off,
+    estimatedLandingAt: flight.estimated_on,
+    estimatedArrivalAt: flight.estimated_in,
+    actualDepartureAt: flight.actual_out,
+    actualTakeoffAt: flight.actual_off,
+    actualLandingAt: flight.actual_on,
+    actualArrivalAt: flight.actual_in,
+    departureTerminal: flight.terminal_origin,
+    departureGate: flight.gate_origin,
+    departureDelayMinutes,
+    arrivalTerminal: flight.terminal_destination,
+    arrivalGate: flight.gate_destination,
+    arrivalDelayMinutes,
+    baggageClaim: flight.baggage_claim,
     aircraftType: flight.aircraft_type,
     aircraftRegistration: flight.registration,
     status,
     delayMinutes,
+    diversionAirport: flight.diverted ? airportCode(flight.destination) : undefined,
+    inboundProviderFlightId: flight.inbound_fa_flight_id,
+    progressPercent: flight.progress_percent,
+    routeDistanceNm: flight.route_distance,
+    filedAirspeedKnots: flight.filed_airspeed,
+    filedAltitudeFeet: flight.filed_altitude,
+    filedRoute: flight.filed_route ?? flight.route,
+    filedEte: flight.filed_ete,
     onTimeProbability: onTimeProbability(status, delayMinutes),
-    confidence: 0.9,
+    confidence: 0.94,
     sourceUpdatedAt: flight.actual_out ?? flight.estimated_out ?? flight.scheduled_out,
     fetchedAt: new Date().toISOString()
   };
@@ -467,6 +345,27 @@ function routeMatches(snapshot: FlightSnapshot, lookup: FlightLookup) {
   const destinationMatches = !lookup.destinationAirport || snapshot.destinationAirport === lookup.destinationAirport.toUpperCase();
 
   return originMatches && destinationMatches;
+}
+
+function dateMatches(snapshot: FlightSnapshot, lookup: FlightLookup) {
+  if (!lookup.date) {
+    return true;
+  }
+
+  const lookupDate = lookup.date.slice(0, 10);
+  const snapshotDates = [
+    snapshot.scheduledDepartureAt,
+    snapshot.estimatedDepartureAt,
+    snapshot.actualDepartureAt
+  ]
+    .filter(Boolean)
+    .map((value) => value?.slice(0, 10));
+
+  return snapshotDates.length === 0 ? false : snapshotDates.includes(lookupDate);
+}
+
+function verifiedSnapshot(snapshots: FlightSnapshot[], lookup: FlightLookup) {
+  return snapshots.find((candidate) => routeMatches(candidate, lookup) && dateMatches(candidate, lookup));
 }
 
 function lookupWindow(date?: string) {
@@ -484,7 +383,7 @@ function lookupWindow(date?: string) {
 }
 
 async function flightAwareFetch(path: string) {
-  const apiKey = process.env.FLIGHTAWARE_AEROAPI_KEY;
+  const apiKey = process.env.FLIGHTAWARE_AEROAPI_KEY?.trim();
   if (!apiKey) {
     return { connected: false as const };
   }
@@ -495,122 +394,18 @@ async function flightAwareFetch(path: string) {
       "x-apikey": apiKey
     }
   });
+  const data = await response.json().catch(() => undefined);
 
   if (!response.ok) {
-    return { connected: true as const, ok: false as const, status: response.status };
-  }
-
-  return { connected: true as const, ok: true as const, data: await response.json() };
-}
-
-async function aviationstackFetchJSON(url: URL, apiKey?: string) {
-  const response = await fetch(url, apiKey ? { headers: { apikey: apiKey } } : undefined);
-  const data = await response.json().catch(() => undefined) as AviationstackResponse | undefined;
-  const providerError = data?.error;
-  const providerErrorCode = providerError?.code ?? providerError?.type;
-  const error = providerError
-    ? [providerError.message, providerError.info, providerError.type, providerError.code].filter(Boolean).join(" ")
-    : undefined;
-
-  return {
-    ok: response.ok && !providerError,
-    status: response.status,
-    data,
-    error,
-    errorCode: providerErrorCode
-  };
-}
-
-function aviationstackURL(lookup: FlightLookup, mode: "full" | "minimal") {
-  const url = new URL("http://api.aviationstack.com/v1/flights");
-  url.searchParams.set("limit", "10");
-  url.searchParams.set("flight_iata", cleanFlightNumber(lookup.flightNumber));
-
-  if (mode === "full") {
-    if (lookup.date) {
-      url.searchParams.set("flight_date", lookup.date.slice(0, 10));
-    }
-    if (lookup.originAirport) {
-      url.searchParams.set("dep_iata", lookup.originAirport.toUpperCase());
-    }
-    if (lookup.destinationAirport) {
-      url.searchParams.set("arr_iata", lookup.destinationAirport.toUpperCase());
-    }
-  }
-
-  return url;
-}
-
-async function aviationstackFetchAttempt(lookup: FlightLookup, apiKey: string, mode: "full" | "minimal") {
-  const url = aviationstackURL(lookup, mode);
-  url.searchParams.set("access_key", apiKey);
-
-  const accessKeyResult = await aviationstackFetchJSON(url);
-  if (accessKeyResult.ok) {
-    return { connected: true as const, ok: true as const, data: accessKeyResult.data, mode };
-  }
-
-  if (accessKeyResult.status === 401 || accessKeyResult.status === 403) {
-    const headerURL = new URL(url);
-    headerURL.searchParams.delete("access_key");
-    const headerResult = await aviationstackFetchJSON(headerURL, apiKey);
-    if (headerResult.ok) {
-      return { connected: true as const, ok: true as const, data: headerResult.data };
-    }
-
-    const headerOnlyMissingAccessKey = headerResult.error?.includes("missing_access_key")
-      || headerResult.error?.includes("not supplied an API Access Key");
-
     return {
       connected: true as const,
       ok: false as const,
-      status: headerOnlyMissingAccessKey ? accessKeyResult.status : headerResult.status,
-      error: headerOnlyMissingAccessKey
-        ? accessKeyResult.error ?? headerResult.error
-        : headerResult.error ?? accessKeyResult.error,
-      errorCode: (headerOnlyMissingAccessKey ? accessKeyResult.errorCode : headerResult.errorCode) as ProviderErrorCode | undefined,
-      mode
+      status: response.status,
+      error: typeof data === "object" && data && "message" in data ? String(data.message) : undefined
     };
   }
 
-  return {
-    connected: true as const,
-    ok: false as const,
-    status: accessKeyResult.status,
-    error: accessKeyResult.error,
-    errorCode: accessKeyResult.errorCode as ProviderErrorCode | undefined,
-    mode
-  };
-}
-
-function restrictedScheduleMessage(lookup: FlightLookup) {
-  const dateText = lookup.date ? ` for ${lookup.date.slice(0, 10)}` : "";
-  return `aviationstack free plan could not access scheduled flight lookup${dateText}. Live data may only appear close to departure; future schedules/status usually require a paid aviationstack plan.`;
-}
-
-async function aviationstackFetch(lookup: FlightLookup) {
-  const apiKey = process.env.AVIATIONSTACK_API_KEY?.trim();
-  if (!apiKey) {
-    return { connected: false as const };
-  }
-
-  const fullResult = await aviationstackFetchAttempt(lookup, apiKey, "full");
-  if (fullResult.ok || fullResult.errorCode !== "function_access_restricted") {
-    return fullResult;
-  }
-
-  const minimalResult = await aviationstackFetchAttempt(lookup, apiKey, "minimal");
-  if (minimalResult.ok) {
-    return minimalResult;
-  }
-
-  return {
-    ...minimalResult,
-    error: minimalResult.errorCode === "function_access_restricted"
-      ? restrictedScheduleMessage(lookup)
-      : fullResult.error ?? minimalResult.error,
-    errorCode: fullResult.errorCode
-  };
+  return { connected: true as const, ok: true as const, data };
 }
 
 async function fetchTrack(snapshot: FlightSnapshot) {
@@ -644,22 +439,20 @@ function gateGuidance(snapshot?: FlightSnapshot) {
     return ["Validate the flight first, then refresh gate and terminal guidance closer to departure."];
   }
 
-  const guidance = [
+  return [
     snapshot.departureTerminal
       ? `Go to terminal ${snapshot.departureTerminal} and follow airport signs after security.`
       : "Terminal is not available yet; check the airport displays and refresh closer to departure.",
     snapshot.departureGate
       ? `Departure gate is ${snapshot.departureGate}.`
       : "Gate is often posted 1-3 hours before departure and can change.",
-    "Indoor turn-by-turn airport navigation needs an airport map or indoor maps provider, not a flight-status feed alone."
+    "Airport displays and airline notifications remain the final authority at the airport."
   ];
-
-  return guidance;
 }
 
 function nextActions(snapshot?: FlightSnapshot) {
   if (!snapshot) {
-    return ["Connect a live flight-status provider or retry when the provider is available."];
+    return ["Refresh after FlightAware has flight data for this service date."];
   }
 
   if (snapshot.status === "cancelled") {
@@ -698,6 +491,25 @@ function delayHeadline(snapshot?: FlightSnapshot) {
   return `Estimated delay is about ${delay} minutes.`;
 }
 
+function alerting(webhookBaseURL?: string): FlightStatusResponse["alerting"] {
+  const baseURL = webhookBaseURL?.replace(/\/$/, "") || "https://your-voya-backend.example";
+
+  return {
+    supported: true,
+    source: "flightaware-alerts",
+    events: [
+      "departure",
+      "arrival",
+      "cancellation",
+      "diversion",
+      "schedule_change",
+      "gate_change",
+      "holding"
+    ],
+    webhookEndpoint: `${baseURL}/api/flightaware-alerts`
+  };
+}
+
 export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatusResponse> {
   const normalizedLookup = {
     ...lookup,
@@ -711,74 +523,44 @@ export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatu
     return flightStatusError(normalizedLookup, "provider_error", ["Date is not a valid ISO date."]);
   }
 
-  const aviationstackResult = await aviationstackFetch(normalizedLookup);
-  if (aviationstackResult.connected && aviationstackResult.ok) {
-    const data = aviationstackResult.data as AviationstackResponse;
-    const snapshots = (data.data ?? []).map((flight) => normalizeAviationstackFlight(flight, normalizedLookup.flightNumber));
-    const snapshot = snapshots.find((candidate) => routeMatches(candidate, normalizedLookup)) ?? snapshots[0];
-
-    if (!snapshot) {
-      return flightStatusError(
-        normalizedLookup,
-        "not_found",
-        ["aviationstack did not return a matching flight for this number, date, and route."],
-        "aviationstack"
-      );
-    }
-
-    return flightStatusSuccess(normalizedLookup, snapshot, "aviationstack");
-  }
-
-  if (aviationstackResult.connected && !aviationstackResult.ok && !process.env.FLIGHTAWARE_AEROAPI_KEY) {
-    return flightStatusError(
-      normalizedLookup,
-      "provider_error",
-      [`aviationstack returned ${aviationstackResult.error ?? `HTTP ${aviationstackResult.status}`}.`],
-      "aviationstack"
-    );
-  }
-
   const url = new URL(`/aeroapi/flights/${encodeURIComponent(normalizedLookup.flightNumber)}`, "https://aeroapi.flightaware.com");
   url.searchParams.set("start", window.start);
   url.searchParams.set("end", window.end);
 
   const result = await flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
   if (!result.connected) {
-    return flightStatusError(normalizedLookup, "provider_not_connected", ["Set AVIATIONSTACK_API_KEY to enable free live flight validation, or FLIGHTAWARE_AEROAPI_KEY for the paid FlightAware fallback."]);
+    return flightStatusError(normalizedLookup, "provider_not_connected", ["Set FLIGHTAWARE_AEROAPI_KEY to enable FlightAware AeroAPI status, schedule, gate, and alert data."]);
   }
 
   if (!result.ok) {
-    return flightStatusError(normalizedLookup, "provider_error", [`FlightAware AeroAPI returned HTTP ${result.status}.`]);
+    return flightStatusError(normalizedLookup, "provider_error", [`FlightAware AeroAPI returned HTTP ${result.status}${result.error ? `: ${result.error}` : ""}.`]);
   }
 
   const data = result.data as FlightAwareFlightsResponse;
   const snapshots = (data.flights ?? []).map((flight) => normalizeFlightAwareFlight(flight, normalizedLookup.flightNumber));
-  const snapshot = snapshots.find((candidate) => routeMatches(candidate, normalizedLookup)) ?? snapshots[0];
+  const snapshot = verifiedSnapshot(snapshots, normalizedLookup);
 
   if (!snapshot) {
-    return flightStatusError(normalizedLookup, "not_found", ["Provider did not return a matching flight for this number and date."]);
+    return flightStatusError(normalizedLookup, "not_found", ["FlightAware returned data, but none matched the imported flight date and route closely enough to trust."]);
   }
 
   snapshot.position = await fetchTrack(snapshot);
 
-  return flightStatusSuccess(normalizedLookup, snapshot, "FlightAware AeroAPI");
+  return flightStatusSuccess(normalizedLookup, snapshot);
 }
 
 function flightStatusSuccess(
   normalizedLookup: FlightLookup,
-  snapshot: FlightSnapshot,
-  providerName: FlightStatusResponse["provider"]["name"]
+  snapshot: FlightSnapshot
 ): FlightStatusResponse {
   return {
     query: normalizedLookup,
     validation: {
       state: "validated",
-      confidence: routeMatches(snapshot, normalizedLookup) ? 0.92 : 0.78,
+      confidence: routeMatches(snapshot, normalizedLookup) && dateMatches(snapshot, normalizedLookup) ? 0.96 : 0,
       reasons: [
-        "Flight number and service date were found by the live provider.",
-        routeMatches(snapshot, normalizedLookup)
-          ? "Route matches the requested airports."
-          : "Provider returned the flight, but route matching could not be fully confirmed from the request."
+        "FlightAware found this flight number for the imported service date.",
+        "Route and date match the imported itinerary item."
       ]
     },
     snapshot,
@@ -787,8 +569,8 @@ function flightStatusSuccess(
       delayMinutes: snapshot.delayMinutes,
       onTimeProbability: snapshot.onTimeProbability,
       reasons: [
-        "Score is a cautious Voya estimate from provider status and current delay.",
-        "Use a paid predictive feed such as FlightAware Foresight, Cirium, or OAG for stronger historical OTP statistics."
+        "Score is a cautious Voya estimate from FlightAware status and current delay.",
+        "FlightAware Foresight can be added later for stronger predictive ETAs."
       ]
     },
     gate: {
@@ -805,13 +587,26 @@ function flightStatusSuccess(
       registration: snapshot.aircraftRegistration,
       position: snapshot.position
     },
+    schedule: {
+      scheduledDepartureAt: snapshot.scheduledDepartureAt,
+      scheduledTakeoffAt: snapshot.scheduledTakeoffAt,
+      scheduledLandingAt: snapshot.scheduledLandingAt,
+      scheduledArrivalAt: snapshot.scheduledArrivalAt,
+      estimatedDepartureAt: snapshot.estimatedDepartureAt,
+      estimatedTakeoffAt: snapshot.estimatedTakeoffAt,
+      estimatedLandingAt: snapshot.estimatedLandingAt,
+      estimatedArrivalAt: snapshot.estimatedArrivalAt,
+      actualDepartureAt: snapshot.actualDepartureAt,
+      actualTakeoffAt: snapshot.actualTakeoffAt,
+      actualLandingAt: snapshot.actualLandingAt,
+      actualArrivalAt: snapshot.actualArrivalAt
+    },
+    alerting: alerting(process.env.VOYA_API_PUBLIC_BASE_URL),
     nextActions: nextActions(snapshot),
     provider: {
-      name: providerName,
+      name: "FlightAware AeroAPI",
       connected: true,
-      attribution: providerName === "aviationstack"
-        ? "Flight status data from aviationstack when configured."
-        : "Flight status and tracking data from FlightAware AeroAPI when configured."
+      attribution: "Flight status, schedules, gate assignments, and alert capability from FlightAware AeroAPI."
     },
     warnings: []
   };
@@ -820,8 +615,7 @@ function flightStatusSuccess(
 function flightStatusError(
   lookup: FlightLookup,
   state: FlightStatusResponse["validation"]["state"],
-  reasons: string[],
-  providerName: FlightStatusResponse["provider"]["name"] = process.env.AVIATIONSTACK_API_KEY ? "aviationstack" : "FlightAware AeroAPI"
+  reasons: string[]
 ): FlightStatusResponse {
   return {
     query: lookup,
@@ -839,13 +633,13 @@ function flightStatusError(
       guidance: gateGuidance()
     },
     aircraft: {},
+    schedule: {},
+    alerting: alerting(process.env.VOYA_API_PUBLIC_BASE_URL),
     nextActions: nextActions(),
     provider: {
-      name: providerName,
+      name: "FlightAware AeroAPI",
       connected: state !== "provider_not_connected",
-      attribution: providerName === "aviationstack"
-        ? "Flight status data from aviationstack when configured."
-        : "Flight status and tracking data from FlightAware AeroAPI when configured."
+      attribution: "Flight status, schedules, gate assignments, and alert capability from FlightAware AeroAPI."
     },
     warnings: reasons
   };

@@ -137,14 +137,15 @@ Optional enrichment environment variables:
 
 - `OPENWEATHER_API_KEY`: enables weather cards through OpenWeather geocoding and One Call APIs.
 - `TICKETMASTER_API_KEY` or `TICKETMASTER_CONSUMER_KEY`: enables nearby public event cards and Ticketmaster event links through the Discovery API. Use the Consumer Key from Ticketmaster Developer; the Consumer Secret is not needed for Discovery event search.
-- `AVIATIONSTACK_API_KEY`: enables `GET/POST /api/flight-status` and `POST /api/booking-validation` through aviationstack for flight existence checks, status, departure/arrival airport fields, terminal/gate, baggage claim, delay fields, aircraft details, and live position when available.
-- `FLIGHTAWARE_AEROAPI_KEY`: optional paid fallback for FlightAware AeroAPI. Keep it unset if Voya should only use aviationstack for now.
+- `FLIGHTAWARE_AEROAPI_KEY`: enables `GET/POST /api/flight-status` and `POST /api/booking-validation` through FlightAware AeroAPI for flight existence checks, airline schedules, gate assignments, gate times, baggage claim, delay fields, aircraft details, tracking data, and alert capability.
+- `VOYA_API_PUBLIC_BASE_URL`: optional public backend URL used to describe the FlightAware alert callback endpoint, for example `https://voya-lime.vercel.app`.
 
 Flight support endpoints:
 
 - `GET /api/flight-status?flightNumber=BA2490&date=2026-08-12&originAirport=LHR&destinationAirport=FCO`
 - `POST /api/flight-status` with `{ "flightNumber": "BA2490", "date": "2026-08-12", "originAirport": "LHR", "destinationAirport": "FCO" }`
 - `POST /api/booking-validation` combines imported-confirmation evidence, user review, and provider flight existence validation. It does not claim true PNR or ticket validation unless Voya later integrates directly with the airline, OTA, NDC, GDS, or booking provider.
+- `POST /api/flightaware-alerts` receives FlightAware alert callbacks and normalizes them for Voya alert generation.
 
 iOS configuration:
 
