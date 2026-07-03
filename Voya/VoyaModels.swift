@@ -1510,7 +1510,7 @@ struct ItemEnrichmentCard: Codable, Identifiable {
 }
 
 enum ItemEnrichmentCache {
-    private static let schemaVersion = "flight-live-v2"
+    private static let schemaVersion = "flight-live-events-v3"
 
     static func key(for item: ItineraryItem) -> String {
         let dateFormatter = ISO8601DateFormatter()

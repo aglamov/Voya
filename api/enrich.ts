@@ -79,6 +79,13 @@ function firstFlightNumber(value: string) {
   return value.match(/\b[A-Z]{2}\s?\d{2,4}\b/i)?.[0]?.replace(/\s+/g, "").toUpperCase();
 }
 
+function allFlightNumbers(value: string) {
+  return [...new Set(
+    [...value.matchAll(/\b[A-Z]{2}\s?\d{2,4}\b/gi)]
+      .map((match) => match[0].replace(/\s+/g, "").toUpperCase())
+  )];
+}
+
 function airportCodesFromText(value: string) {
   return [...value.matchAll(/\b[A-Z]{3}\b/g)].map((match) => match[0].toUpperCase());
 }
@@ -211,7 +218,10 @@ async function resolvedGoogleMapURL(value: string) {
 
 function cityFromLocation(value: string) {
   const withoutRoute = destinationFromRoute(value);
-  const withoutCodes = stripAirportCode(withoutRoute);
+  const withoutCodes = stripAirportCode(withoutRoute)
+    .replace(/\b(?:airport|aeroport|flughafen|terminal\s+\d+|main station|station)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   const parts = withoutCodes.split(",").map((part) => part.trim()).filter(Boolean);
 
   return parts[0] ?? withoutCodes;
@@ -393,16 +403,31 @@ function ticketmasterDate(value: Date) {
   return value.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-function eventSearchWindow(startsAt?: string | number | null, endsAt?: string | number | null) {
+function eventSearchWindow(kind: string, startsAt?: string | number | null, endsAt?: string | number | null) {
+  const oneDay = 1000 * 60 * 60 * 24;
   const now = new Date();
-  const start = parseRequestDate(startsAt) ?? now;
-  const end = parseRequestDate(endsAt) ?? new Date(start.getTime() + 1000 * 60 * 60 * 24 * 7);
-  const cappedEnd = end < start ? new Date(start.getTime() + 1000 * 60 * 60 * 24 * 7) : end;
+  const parsedStart = parseRequestDate(startsAt);
+  const parsedEnd = parseRequestDate(endsAt);
+  const lowerKind = kind.toLowerCase();
+
+  if (lowerKind === "flight" || lowerKind === "transit") {
+    const arrival = parsedEnd ?? parsedStart ?? now;
+    const start = arrival < now ? now : arrival;
+    return {
+      start,
+      end: new Date(start.getTime() + oneDay * 7)
+    };
+  }
+
+  const start = parsedStart ?? now;
+  const minimumDays = lowerKind === "event" ? 2 : 7;
+  const fallbackEnd = new Date(start.getTime() + oneDay * minimumDays);
+  const requestedEnd = parsedEnd && parsedEnd > start ? parsedEnd : fallbackEnd;
   const effectiveStart = start < now ? now : start;
 
   return {
     start: effectiveStart,
-    end: cappedEnd < effectiveStart ? new Date(effectiveStart.getTime() + 1000 * 60 * 60 * 24 * 7) : cappedEnd
+    end: requestedEnd < effectiveStart ? new Date(effectiveStart.getTime() + oneDay * minimumDays) : requestedEnd
   };
 }
 
@@ -571,7 +596,7 @@ async function weatherCard(location: string | LocationLookup | undefined): Promi
   };
 }
 
-async function eventsCard(location: string | LocationLookup | undefined, startsAt?: string | number | null, endsAt?: string | number | null): Promise<EnrichmentCard> {
+async function eventsCard(location: string | LocationLookup | undefined, kind: string, startsAt?: string | number | null, endsAt?: string | number | null): Promise<EnrichmentCard> {
   const apiKey = ticketmasterApiKey();
   if (!apiKey) {
     return {
@@ -583,7 +608,7 @@ async function eventsCard(location: string | LocationLookup | undefined, startsA
   }
 
   const url = new URL("https://app.ticketmaster.com/discovery/v2/events.json");
-  const window = eventSearchWindow(startsAt, endsAt);
+  const window = eventSearchWindow(kind, startsAt, endsAt);
   url.searchParams.set("apikey", apiKey);
   url.searchParams.set("size", "5");
   url.searchParams.set("sort", "date,asc");
@@ -657,8 +682,8 @@ function compactRoute(origin?: string, destination?: string) {
 }
 
 async function flightCards(title: string, location: string, startsAt?: string | number | null): Promise<EnrichmentCard[]> {
-  const flightNumber = firstFlightNumber(`${title} ${location}`);
-  if (!flightNumber) {
+  const flightNumbers = allFlightNumbers(`${title} ${location}`);
+  if (flightNumbers.length === 0) {
     return [{
       title: "Flight",
       value: "No flight number",
@@ -670,18 +695,26 @@ async function flightCards(title: string, location: string, startsAt?: string | 
   const airportCodes = airportCodesFromText(location);
   const originAirport = airportCodes[0];
   const destinationAirport = airportCodes.length > 1 ? airportCodes.at(-1) : undefined;
-  const response = await getFlightStatus({
+  const attempts = await Promise.all(flightNumbers.map(async (flightNumber) => ({
     flightNumber,
-    date: compactDate(startsAt),
-    originAirport,
-    destinationAirport
-  });
+    response: await getFlightStatus({
+      flightNumber,
+      date: compactDate(startsAt),
+      originAirport,
+      destinationAirport
+    })
+  })));
+  const selected = attempts.find((attempt) => attempt.response.snapshot) ?? attempts[0];
+  const { flightNumber, response } = selected;
 
   if (!response.snapshot) {
     return [{
       title: "Flight",
       value: flightNumber,
-      detail: response.validation.reasons[0] ?? "Live flight status is unavailable.",
+      detail: [
+        response.validation.reasons[0] ?? "Live flight status is unavailable.",
+        flightNumbers.length > 1 ? `Tried ${flightNumbers.join(", ")}.` : undefined
+      ].filter(Boolean).join(" "),
       kind: "flight"
     }];
   }
@@ -767,7 +800,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       kind: "maps"
     },
     await weatherCard(lookupPlace),
-    await eventsCard(lookupPlace, body.startsAt, body.endsAt)
+    await eventsCard(lookupPlace, kind, body.startsAt, body.endsAt)
   ];
 
   if (kind === "flight") {

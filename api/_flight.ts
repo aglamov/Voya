@@ -196,6 +196,10 @@ type FlightAwareFlightsResponse = {
   flights?: FlightAwareFlight[];
 };
 
+type FlightAwareCanonicalResponse = {
+  ident?: string;
+};
+
 type FlightAwareTrackPoint = {
   timestamp?: string;
   latitude?: number;
@@ -409,6 +413,24 @@ async function flightAwareFetch(path: string) {
   return { connected: true as const, ok: true as const, data };
 }
 
+async function flightAwareCanonicalIdent(ident: string) {
+  const result = await flightAwareFetch(`/flights/${encodeURIComponent(ident)}/canonical`);
+  if (!result.connected || !result.ok) {
+    return undefined;
+  }
+
+  const data = result.data as FlightAwareCanonicalResponse;
+  return typeof data.ident === "string" && data.ident.trim() ? data.ident.trim().toUpperCase() : undefined;
+}
+
+async function flightAwareFlights(ident: string, window: { start: string; end: string }) {
+  const url = new URL(`/aeroapi/flights/${encodeURIComponent(ident)}`, "https://aeroapi.flightaware.com");
+  url.searchParams.set("start", window.start);
+  url.searchParams.set("end", window.end);
+
+  return flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
+}
+
 async function fetchTrack(snapshot: FlightSnapshot) {
   if (!snapshot.providerFlightId) {
     return undefined;
@@ -525,13 +547,16 @@ export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatu
     return flightStatusError(normalizedLookup, "provider_error", ["Date is not a valid ISO date."]);
   }
 
-  const url = new URL(`/aeroapi/flights/${encodeURIComponent(normalizedLookup.flightNumber)}`, "https://aeroapi.flightaware.com");
-  url.searchParams.set("start", window.start);
-  url.searchParams.set("end", window.end);
-
-  const result = await flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
+  let result = await flightAwareFlights(normalizedLookup.flightNumber, window);
   if (!result.connected) {
     return flightStatusError(normalizedLookup, "provider_not_connected", ["Set FLIGHTAWARE_AEROAPI_KEY to enable FlightAware AeroAPI status, schedule, gate, and alert data."]);
+  }
+
+  if (!result.ok && (result.status === 400 || result.status === 404)) {
+    const canonicalIdent = await flightAwareCanonicalIdent(normalizedLookup.flightNumber);
+    if (canonicalIdent && canonicalIdent !== normalizedLookup.flightNumber) {
+      result = await flightAwareFlights(canonicalIdent, window);
+    }
   }
 
   if (!result.ok) {
