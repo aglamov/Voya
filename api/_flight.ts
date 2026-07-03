@@ -518,7 +518,7 @@ async function aviationstackFetchJSON(url: URL, apiKey?: string) {
 }
 
 async function aviationstackFetch(lookup: FlightLookup) {
-  const apiKey = process.env.AVIATIONSTACK_API_KEY;
+  const apiKey = process.env.AVIATIONSTACK_API_KEY?.trim();
   if (!apiKey) {
     return { connected: false as const };
   }
@@ -550,11 +550,16 @@ async function aviationstackFetch(lookup: FlightLookup) {
       return { connected: true as const, ok: true as const, data: headerResult.data };
     }
 
+    const headerOnlyMissingAccessKey = headerResult.error?.includes("missing_access_key")
+      || headerResult.error?.includes("not supplied an API Access Key");
+
     return {
       connected: true as const,
       ok: false as const,
-      status: headerResult.status,
-      error: headerResult.error ?? accessKeyResult.error
+      status: headerOnlyMissingAccessKey ? accessKeyResult.status : headerResult.status,
+      error: headerOnlyMissingAccessKey
+        ? accessKeyResult.error ?? headerResult.error
+        : headerResult.error ?? accessKeyResult.error
     };
   }
 
