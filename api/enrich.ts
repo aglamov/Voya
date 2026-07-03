@@ -677,12 +677,152 @@ function compactTime(value?: string) {
   }).format(date);
 }
 
+function minutesBetweenIso(later?: string, earlier?: string) {
+  if (!later || !earlier) {
+    return undefined;
+  }
+
+  const laterDate = new Date(later);
+  const earlierDate = new Date(earlier);
+  if (Number.isNaN(laterDate.getTime()) || Number.isNaN(earlierDate.getTime())) {
+    return undefined;
+  }
+
+  return Math.round((laterDate.getTime() - earlierDate.getTime()) / 60000);
+}
+
+function compactDuration(minutes?: number) {
+  if (minutes == null) {
+    return undefined;
+  }
+
+  const abs = Math.abs(minutes);
+  const hours = Math.floor(abs / 60);
+  const mins = abs % 60;
+  const value = [
+    hours ? `${hours}h` : undefined,
+    mins ? `${mins}m` : undefined
+  ].filter(Boolean).join(" ") || "0m";
+
+  return minutes < 0 ? `-${value}` : value;
+}
+
 function compactRoute(origin?: string, destination?: string) {
   return [origin, destination].filter(Boolean).join(" -> ");
 }
 
 function compactPercent(value?: number) {
   return value == null ? undefined : `${Math.round(value * 100)}%`;
+}
+
+function flightLegLookup(
+  flightNumber: string,
+  index: number,
+  total: number,
+  date: string | undefined,
+  originAirport: string | undefined,
+  destinationAirport: string | undefined
+) {
+  if (total <= 1) {
+    return {
+      flightNumber,
+      date,
+      originAirport,
+      destinationAirport
+    };
+  }
+
+  return {
+    flightNumber,
+    date,
+    originAirport: index === 0 ? originAirport : undefined,
+    destinationAirport: index === total - 1 ? destinationAirport : undefined
+  };
+}
+
+type FlightAttempt = Awaited<ReturnType<typeof getFlightStatus>> extends infer Response
+  ? { flightNumber: string; response: Response }
+  : never;
+
+function departureTime(attempt: FlightAttempt) {
+  return attempt.response.snapshot?.estimatedDepartureAt
+    ?? attempt.response.snapshot?.scheduledDepartureAt
+    ?? attempt.response.schedule.estimatedDepartureAt
+    ?? attempt.response.schedule.scheduledDepartureAt;
+}
+
+function arrivalTime(attempt: FlightAttempt) {
+  return attempt.response.snapshot?.estimatedArrivalAt
+    ?? attempt.response.snapshot?.scheduledArrivalAt
+    ?? attempt.response.schedule.estimatedArrivalAt
+    ?? attempt.response.schedule.scheduledArrivalAt;
+}
+
+function flightDuration(attempt: FlightAttempt) {
+  return compactDuration(minutesBetweenIso(arrivalTime(attempt), departureTime(attempt)));
+}
+
+function flightLegCards(attempts: FlightAttempt[]) {
+  const cards: EnrichmentCard[] = [];
+
+  attempts.forEach((attempt, index) => {
+    const snapshot = attempt.response.snapshot;
+    if (!snapshot) {
+      cards.push({
+        title: `Flight ${attempt.flightNumber}`,
+        value: "Not validated",
+        detail: attempt.response.validation.reasons[0] ?? "FlightAware did not return a trustworthy match for this segment.",
+        kind: "warning"
+      });
+      return;
+    }
+
+    const depart = departureTime(attempt);
+    const arrive = arrivalTime(attempt);
+    cards.push({
+      title: attempts.length > 1 ? `Flight ${index + 1}` : "Flight",
+      value: `${attempt.flightNumber} · ${compactRoute(snapshot.originAirport, snapshot.destinationAirport) || "Route pending"}`,
+      detail: [
+        [compactTime(depart), compactTime(arrive)].filter(Boolean).join(" -> "),
+        flightDuration(attempt),
+        snapshot.dataMode === "published_schedule" ? "Schedule" : snapshot.providerStatus ?? snapshot.status
+      ].filter(Boolean).join(" · "),
+      kind: "flight"
+    });
+  });
+
+  return cards;
+}
+
+function connectionCards(attempts: FlightAttempt[]) {
+  if (attempts.length < 2) {
+    return [];
+  }
+
+  const validated = attempts.filter((attempt) => attempt.response.snapshot);
+  const ordered = [...validated].sort((a, b) => {
+    const left = departureTime(a);
+    const right = departureTime(b);
+    return (left ? new Date(left).getTime() : 0) - (right ? new Date(right).getTime() : 0);
+  });
+  const connectionDetails: string[] = [];
+
+  for (let index = 0; index < ordered.length - 1; index += 1) {
+    const current = ordered[index];
+    const next = ordered[index + 1];
+    const layover = compactDuration(minutesBetweenIso(departureTime(next), arrivalTime(current)));
+    const airport = current.response.snapshot?.destinationAirport ?? next.response.snapshot?.originAirport;
+    if (layover) {
+      connectionDetails.push([airport, layover].filter(Boolean).join(" · "));
+    }
+  }
+
+  return [{
+    title: "Connection",
+    value: `${validated.length}/${attempts.length} legs`,
+    detail: connectionDetails.length ? connectionDetails.join(" · ") : `Tried ${attempts.map((attempt) => attempt.flightNumber).join(", ")}.`,
+    kind: validated.length === attempts.length ? "flight" : "warning"
+  } satisfies EnrichmentCard];
 }
 
 async function flightCards(title: string, location: string, startsAt?: string | number | null): Promise<EnrichmentCard[]> {
@@ -699,14 +839,17 @@ async function flightCards(title: string, location: string, startsAt?: string | 
   const airportCodes = airportCodesFromText(location);
   const originAirport = airportCodes[0];
   const destinationAirport = airportCodes.length > 1 ? airportCodes.at(-1) : undefined;
-  const attempts = await Promise.all(flightNumbers.map(async (flightNumber) => ({
+  const date = compactDate(startsAt);
+  const attempts = await Promise.all(flightNumbers.map(async (flightNumber, index) => ({
     flightNumber,
-    response: await getFlightStatus({
+    response: await getFlightStatus(flightLegLookup(
       flightNumber,
-      date: compactDate(startsAt),
+      index,
+      flightNumbers.length,
+      date,
       originAirport,
       destinationAirport
-    })
+    ))
   })));
   const selected = attempts.find((attempt) => attempt.response.snapshot) ?? attempts[0];
   const { flightNumber, response } = selected;
@@ -738,23 +881,16 @@ async function flightCards(title: string, location: string, startsAt?: string | 
   const originWeather = response.intelligence.weather.origin;
   const destinationWeather = response.intelligence.weather.destination;
   const route = response.intelligence.route;
-
-  return [{
-    title: "Flight",
-    value: `${flightNumber} · ${snapshot.dataMode === "published_schedule" ? "Schedule" : snapshot.providerStatus ?? snapshot.status}`,
-    detail: [
-      compactRoute(snapshot.originAirport, snapshot.destinationAirport),
-      compactTime(snapshot.estimatedDepartureAt ?? snapshot.scheduledDepartureAt)
-    ].filter(Boolean).join(" · "),
-    kind: "flight"
-  }, {
+  const delayCard: EnrichmentCard = {
     title: "Delay",
     value: response.delayStats.headline,
     detail: response.delayStats.onTimeProbability == null
       ? undefined
       : `${Math.round(response.delayStats.onTimeProbability * 100)}% Voya on-time estimate`,
     kind: (snapshot.delayMinutes ?? 0) >= 15 ? "warning" : "flight"
-  }, {
+  };
+
+  return [...flightLegCards(attempts), ...connectionCards(attempts), delayCard, {
     title: "Gate",
     value: gateParts.length ? gateParts.join(" · ") : "Not posted",
     detail: response.gate.baggageClaim ? `Baggage ${response.gate.baggageClaim}` : response.gate.guidance[1],
