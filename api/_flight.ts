@@ -769,9 +769,9 @@ async function flightAwareScheduledDepartures(lookup: FlightLookup, window: { st
   return flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
 }
 
-async function flightAwarePublishedSchedules(lookup: FlightLookup) {
+async function flightAwarePublishedSchedulesForIdent(lookup: FlightLookup, ident: string) {
   const range = dateRangeForDay(lookup.date);
-  const parts = flightNumberParts(lookup.flightNumber);
+  const parts = flightNumberParts(ident);
   if (!range || !parts) {
     return undefined;
   }
@@ -793,27 +793,36 @@ async function flightAwarePublishedSchedules(lookup: FlightLookup) {
 }
 
 async function flightAwarePublishedScheduleSnapshot(lookup: FlightLookup) {
-  const result = await flightAwarePublishedSchedules(lookup);
-  if (!result) {
-    return { connected: true as const, snapshot: undefined };
-  }
-  if (!result.connected) {
-    return { connected: false as const, snapshot: undefined };
-  }
-  if (!result.ok) {
-    return {
-      connected: true as const,
-      snapshot: undefined,
-      error: `FlightAware published schedule lookup returned HTTP ${result.status}${result.error ? `: ${result.error}` : ""}.`
-    };
-  }
+  let lastError: string | undefined;
 
-  const data = result.data as FlightAwareSchedulesResponse;
-  const snapshots = (data.scheduled ?? []).map((schedule) => normalizeFlightAwarePublishedSchedule(schedule, lookup.flightNumber));
+  for (const ident of identCandidates(lookup.flightNumber)) {
+    const result = await flightAwarePublishedSchedulesForIdent(lookup, ident);
+    if (!result) {
+      continue;
+    }
+    if (!result.connected) {
+      return { connected: false as const, snapshot: undefined };
+    }
+    if (!result.ok) {
+      lastError = `FlightAware published schedule lookup returned HTTP ${result.status}${result.error ? `: ${result.error}` : ""}.`;
+      continue;
+    }
+
+    const data = result.data as FlightAwareSchedulesResponse;
+    const snapshots = (data.scheduled ?? []).map((schedule) => normalizeFlightAwarePublishedSchedule(schedule, lookup.flightNumber));
+    const snapshot = verifiedScheduleSnapshot(snapshots, lookup);
+    if (snapshot) {
+      return {
+        connected: true as const,
+        snapshot
+      };
+    }
+  }
 
   return {
     connected: true as const,
-    snapshot: verifiedScheduleSnapshot(snapshots, lookup)
+    snapshot: undefined,
+    error: lastError
   };
 }
 
