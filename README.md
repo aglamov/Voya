@@ -131,7 +131,11 @@ The trip detail screen can also call `POST /api/enrich` for event context cards 
 Required Vercel environment variables:
 
 - `OPENAI_API_KEY`: OpenAI API key.
-- `OPENAI_MODEL`: optional model override. Defaults to `gpt-4o-mini`.
+- `OPENAI_EXTRACT_MODEL`: optional model for confirmation extraction. Defaults to `gpt-5.5`.
+- `OPENAI_REPAIR_MODEL`: optional model for invalid JSON repair. Defaults to `gpt-4o-mini`.
+- `OPENAI_LOCATION_MODEL`: optional model for enrichment location normalization. Defaults to `gpt-4o-mini`.
+- `OPENAI_BRIEF_MODEL`: optional model for travel brief generation. Defaults to `gpt-4o-mini`.
+- `OPENAI_MODEL`: optional global fallback used when a task-specific model variable is not set.
 
 Optional enrichment environment variables:
 

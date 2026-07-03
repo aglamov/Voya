@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { openai } from "@ai-sdk/openai";
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
+import { openAIModelFor } from "./ai-models.js";
 
 const itemSchema = z.object({
   kind: z.enum(["flight", "hotel", "event", "transit"]),
@@ -27,7 +28,8 @@ const requestSchema = z.object({
   text: z.string().min(1).max(50000)
 });
 
-const modelName = () => process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+const extractionModelName = () => openAIModelFor("extraction");
+const jsonRepairModelName = () => openAIModelFor("jsonRepair");
 
 const schemaInstructions = [
   "Return only JSON with this exact shape:",
@@ -67,7 +69,8 @@ function extractionErrorDetails(error: unknown) {
     message: error.message,
     statusCode: "statusCode" in error ? error.statusCode : undefined,
     type: "type" in error ? error.type : undefined,
-    model: modelName()
+    extractionModel: extractionModelName(),
+    jsonRepairModel: jsonRepairModelName()
   };
 }
 
@@ -86,7 +89,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const { object } = await generateObject({
-      model: openai(modelName()),
+      model: openai(extractionModelName()),
       schema: extractionSchema,
       schemaName: "TravelConfirmationExtraction",
       schemaDescription: "Structured itinerary data extracted from a travel booking confirmation.",
@@ -117,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ].join("\n"),
       experimental_repairText: async ({ text: generatedText, error }) => {
         const { text: repairedText } = await generateText({
-          model: openai(modelName()),
+          model: openai(jsonRepairModelName()),
           system: "Repair invalid JSON so it matches the requested travel extraction schema. Return only JSON.",
           prompt: [
             schemaInstructions,

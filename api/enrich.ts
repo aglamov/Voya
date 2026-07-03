@@ -3,6 +3,7 @@ import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { getFlightStatus } from "./_flight.js";
+import { openAIModelFor } from "./ai-models.js";
 
 type EnrichmentCard = {
   title: string;
@@ -123,7 +124,8 @@ const travelBriefSchema = z.object({
   imageURLs: z.array(z.string().url()).max(4)
 });
 
-const modelName = () => process.env.OPENAI_MODEL ?? "gpt-4o-mini";
+const locationModelName = () => openAIModelFor("location");
+const briefModelName = () => openAIModelFor("brief");
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -336,7 +338,7 @@ async function aiLocationLookup(kind: string, title: string, location: string): 
 
   try {
     const { object } = await generateObject({
-      model: openai(modelName()),
+      model: openai(locationModelName()),
       schema: locationNormalizationSchema,
       schemaName: "LocationNormalization",
       schemaDescription: "Normalized provider lookup location for a travel itinerary item.",
@@ -989,7 +991,7 @@ async function aiBrief(kind: string, title: string, location: string, status: st
 
   try {
     const { object } = await generateObject({
-      model: openai(modelName()),
+      model: openai(briefModelName()),
       schema: travelBriefSchema,
       schemaName: "TravelAssistantBrief",
       schemaDescription: "Human travel assistant brief generated from trusted provider facts.",
