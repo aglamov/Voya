@@ -16,6 +16,34 @@ type EnrichmentResponse = {
   summary: string;
   cards: EnrichmentCard[];
   warnings: string[];
+  briefMarkdown: string;
+  sections: TravelBriefSection[];
+  actions: TravelAction[];
+  routeLegs: TravelRouteLeg[];
+  imageURLs: string[];
+};
+
+type TravelBriefSection = {
+  title: string;
+  body: string;
+  kind: "overview" | "route" | "weather" | "event" | "flight" | "place" | "risk" | "action";
+};
+
+type TravelAction = {
+  title: string;
+  detail: string;
+  priority: "now" | "soon" | "later";
+  kind: "route" | "weather" | "booking" | "flight" | "event" | "safety" | "context";
+  actionURL?: string;
+};
+
+type TravelRouteLeg = {
+  title: string;
+  origin?: string;
+  destination?: string;
+  guidance: string;
+  bufferMinutes?: number;
+  mapURL?: string;
 };
 
 type EnrichmentRequest = {
@@ -67,6 +95,32 @@ const locationNormalizationSchema = z.object({
     lon: z.number().min(-180).max(180)
   }).optional().nullable().describe("Only include coordinates if they are explicit in the input, not guessed."),
   confidence: z.number().min(0).max(1)
+});
+
+const travelBriefSchema = z.object({
+  summary: z.string().min(1).describe("A concise human travel-assistant summary."),
+  briefMarkdown: z.string().min(1).describe("Formatted Markdown travel brief with short sections and bullets."),
+  sections: z.array(z.object({
+    title: z.string().min(1),
+    body: z.string().min(1),
+    kind: z.enum(["overview", "route", "weather", "event", "flight", "place", "risk", "action"])
+  })).min(3).max(7),
+  actions: z.array(z.object({
+    title: z.string().min(1),
+    detail: z.string().min(1),
+    priority: z.enum(["now", "soon", "later"]),
+    kind: z.enum(["route", "weather", "booking", "flight", "event", "safety", "context"]),
+    actionURL: z.string().url().optional().nullable()
+  })).min(2).max(5),
+  routeLegs: z.array(z.object({
+    title: z.string().min(1),
+    origin: z.string().optional().nullable(),
+    destination: z.string().optional().nullable(),
+    guidance: z.string().min(1),
+    bufferMinutes: z.number().int().min(0).max(240).optional().nullable(),
+    mapURL: z.string().url().optional().nullable()
+  })).max(4),
+  imageURLs: z.array(z.string().url()).max(4)
 });
 
 const modelName = () => process.env.OPENAI_MODEL ?? "gpt-4o-mini";
@@ -715,6 +769,299 @@ function compactPercent(value?: number) {
   return value == null ? undefined : `${Math.round(value * 100)}%`;
 }
 
+function cleanMarkdownLine(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function mapsSearchURL(query: string) {
+  if (!query) {
+    return undefined;
+  }
+
+  const url = new URL("https://www.google.com/maps/search/");
+  url.searchParams.set("api", "1");
+  url.searchParams.set("query", query);
+  return url.href;
+}
+
+function cardLine(card: EnrichmentCard) {
+  return cleanMarkdownLine([card.value, card.detail].filter(Boolean).join(" - "));
+}
+
+function bestCard(cards: EnrichmentCard[], kind: EnrichmentCard["kind"]) {
+  return cards.find((card) => card.kind === kind);
+}
+
+function routeTitleForKind(kind: string) {
+  switch (kind) {
+  case "flight":
+    return "Route to airport";
+  case "hotel":
+    return "Arrival route";
+  case "event":
+    return "Route to venue";
+  case "transit":
+    return "Travel leg";
+  default:
+    return "Getting there";
+  }
+}
+
+function deterministicRouteLeg(kind: string, title: string, location: string): TravelRouteLeg[] {
+  if (!location) {
+    return [];
+  }
+
+  const destination = placeForExternalLookup(kind, location) || location;
+  const guidance = kind === "flight"
+    ? "Plan the door-to-airport journey with enough buffer for bags, security, and gate changes."
+    : kind === "event"
+      ? "Plan the route before you leave, then keep a small buffer for entry, tickets, and finding the right door."
+      : kind === "hotel"
+        ? "Use this leg to make arrival feel automatic: route, check-in window, and nearby essentials."
+        : "Keep the route, buffer, and fallback option ready before this leg starts.";
+
+  return [{
+    title: routeTitleForKind(kind),
+    destination,
+    guidance,
+    bufferMinutes: kind === "flight" ? 120 : kind === "event" ? 20 : 15,
+    mapURL: mapsSearchURL(destination || title)
+  }];
+}
+
+function deterministicActions(kind: string, title: string, location: string, cards: EnrichmentCard[]): TravelAction[] {
+  const actions: TravelAction[] = [];
+  const warning = cards.find((card) => card.kind === "warning");
+  const maps = bestCard(cards, "maps");
+  const weather = cards.find((card) => card.kind === "weather" || card.title.toLowerCase().includes("weather"));
+  const flight = cards.find((card) => card.kind === "flight");
+  const event = cards.find((card) => card.kind === "events" && card.actionURL);
+
+  if (warning) {
+    actions.push({
+      title: "Review the risk",
+      detail: cardLine(warning),
+      priority: "now",
+      kind: warning.title.toLowerCase().includes("flight") ? "flight" : "safety",
+      actionURL: warning.actionURL
+    });
+  }
+
+  if (location) {
+    actions.push({
+      title: kind === "flight" ? "Check the airport route" : "Preview the route",
+      detail: maps?.detail || `Open the route context for ${location}.`,
+      priority: kind === "flight" ? "soon" : "later",
+      kind: "route",
+      actionURL: mapsSearchURL(location)
+    });
+  }
+
+  if (flight && kind === "flight") {
+    actions.push({
+      title: "Keep flight status visible",
+      detail: cardLine(flight),
+      priority: "soon",
+      kind: "flight",
+      actionURL: flight.actionURL
+    });
+  }
+
+  if (weather) {
+    actions.push({
+      title: "Prepare for the weather",
+      detail: cardLine(weather) || "Check the forecast before leaving.",
+      priority: warning ? "now" : "soon",
+      kind: "weather",
+      actionURL: weather.actionURL
+    });
+  }
+
+  if (event) {
+    actions.push({
+      title: "Look at what is nearby",
+      detail: cardLine(event),
+      priority: "later",
+      kind: "event",
+      actionURL: event.actionURL
+    });
+  }
+
+  actions.push({
+    title: "Keep booking details handy",
+    detail: title ? `Use "${title}" as the source of truth if provider data changes.` : "Add a clearer title so Voya can reason about this moment.",
+    priority: "later",
+    kind: "booking"
+  });
+
+  return actions.slice(0, 5);
+}
+
+function deterministicSections(kind: string, title: string, location: string, cards: EnrichmentCard[], warnings: string[]): TravelBriefSection[] {
+  const weather = cards.find((card) => card.kind === "weather" || card.title.toLowerCase().includes("weather"));
+  const flight = cards.find((card) => card.kind === "flight");
+  const events = cards.find((card) => card.kind === "events");
+  const maps = bestCard(cards, "maps");
+
+  const sections: TravelBriefSection[] = [{
+    title: "What this moment means",
+    body: title
+      ? `${title} is not just an itinerary item; it combines timing, place, route, weather, and booking context.`
+      : "Add a clear title and Voya can turn this into a practical travel moment.",
+    kind: "overview"
+  }];
+
+  if (maps || location) {
+    sections.push({
+      title: "Getting there",
+      body: maps?.detail || location || "Add a venue, airport, hotel, station, or map link to unlock route guidance.",
+      kind: "route"
+    });
+  }
+
+  if (flight && kind === "flight") {
+    sections.push({
+      title: "Flight intelligence",
+      body: cardLine(flight),
+      kind: flight.kind === "warning" ? "risk" : "flight"
+    });
+  }
+
+  if (weather) {
+    sections.push({
+      title: "Weather as a decision",
+      body: cardLine(weather) || "Forecast data should become practical advice: what to wear, what to pack, and when to leave.",
+      kind: weather.kind === "warning" ? "risk" : "weather"
+    });
+  }
+
+  if (events) {
+    sections.push({
+      title: kind === "event" ? "Event context" : "Nearby opportunities",
+      body: cardLine(events),
+      kind: "event"
+    });
+  }
+
+  if (warnings.length > 0) {
+    sections.push({
+      title: "Risks to keep visible",
+      body: warnings.join(" "),
+      kind: "risk"
+    });
+  }
+
+  sections.push({
+    title: "Assistant stance",
+    body: "Voya should keep translating provider data into decisions: leave time, buffer, fallback route, weather prep, and what deserves attention now.",
+    kind: "action"
+  });
+
+  return sections.slice(0, 7);
+}
+
+function markdownFromSections(summary: string, sections: TravelBriefSection[], actions: TravelAction[], routeLegs: TravelRouteLeg[]) {
+  const sectionLines = sections.map((section) => [
+    `### ${section.title}`,
+    section.body
+  ].join("\n")).join("\n\n");
+  const routeLines = routeLegs.length
+    ? [
+      "### Journey legs",
+      ...routeLegs.map((leg) => `- **${leg.title}**: ${leg.guidance}${leg.bufferMinutes ? ` Keep ~${leg.bufferMinutes} min buffer.` : ""}`)
+    ].join("\n")
+    : "";
+  const actionLines = actions.length
+    ? [
+      "### Next actions",
+      ...actions.map((action) => `- **${action.title}**: ${action.detail}`)
+    ].join("\n")
+    : "";
+
+  return ["## Travel brief", summary, sectionLines, routeLines, actionLines].filter(Boolean).join("\n\n");
+}
+
+async function aiBrief(kind: string, title: string, location: string, status: string, cards: EnrichmentCard[], warnings: string[]) {
+  if (!process.env.OPENAI_API_KEY) {
+    return undefined;
+  }
+
+  try {
+    const { object } = await generateObject({
+      model: openai(modelName()),
+      schema: travelBriefSchema,
+      schemaName: "TravelAssistantBrief",
+      schemaDescription: "Human travel assistant brief generated from trusted provider facts.",
+      system: [
+        "You are Voya, a practical travel assistant.",
+        "Use only the provided facts. Do not invent performers, seating, gates, routes, prices, opening hours, or precise transit times.",
+        "Be human and decision-oriented: translate facts into what the traveler should know or do.",
+        "Prefer short Markdown sections, concrete next actions, route guidance, weather decisions, and visible risks.",
+        "If a fact is missing, say what would unlock it instead of pretending.",
+        "Return structured JSON only."
+      ].join(" "),
+      prompt: [
+        `Kind: ${kind || "unknown"}`,
+        `Title: ${title || "unknown"}`,
+        `Location: ${location || "unknown"}`,
+        `Status: ${status || "unknown"}`,
+        `Warnings: ${warnings.length ? warnings.join(" | ") : "none"}`,
+        "",
+        "Trusted provider facts:",
+        JSON.stringify(cards, null, 2),
+        "",
+        "Create a formatted travel brief for the detail screen."
+      ].join("\n")
+    });
+
+    return object;
+  } catch (error) {
+    console.error("Travel brief generation failed", error);
+    return undefined;
+  }
+}
+
+async function buildTravelBrief(kind: string, title: string, location: string, status: string, cards: EnrichmentCard[], warnings: string[]): Promise<Pick<EnrichmentResponse, "summary" | "briefMarkdown" | "sections" | "actions" | "routeLegs" | "imageURLs">> {
+  const routeLegs = deterministicRouteLeg(kind, title, location);
+  const actions = deterministicActions(kind, title, location, cards);
+  const sections = deterministicSections(kind, title, location, cards, warnings);
+  const summary = title
+    ? `Voya is watching ${title} as a travel moment, not just a booking.`
+    : "Add more details and Voya will turn this into a practical travel moment.";
+  const fallback = {
+    summary,
+    briefMarkdown: markdownFromSections(summary, sections, actions, routeLegs),
+    sections,
+    actions,
+    routeLegs,
+    imageURLs: cards.map((card) => card.actionURL).filter((url): url is string => Boolean(url)).slice(0, 2)
+  };
+
+  const generated = await aiBrief(kind, title, location, status, cards, warnings);
+  if (!generated) {
+    return fallback;
+  }
+
+  const generatedActions = generated.actions.map((action) => ({ ...action, actionURL: action.actionURL ?? undefined }));
+  const generatedRouteLegs = generated.routeLegs.map((leg) => ({
+    ...leg,
+    origin: leg.origin ?? undefined,
+    destination: leg.destination ?? undefined,
+    bufferMinutes: leg.bufferMinutes ?? undefined,
+    mapURL: leg.mapURL ?? undefined
+  }));
+
+  return {
+    summary: generated.summary || fallback.summary,
+    briefMarkdown: generated.briefMarkdown || fallback.briefMarkdown,
+    sections: generated.sections.length ? generated.sections : fallback.sections,
+    actions: generatedActions.length ? generatedActions : fallback.actions,
+    routeLegs: generatedRouteLegs.length ? generatedRouteLegs : fallback.routeLegs,
+    imageURLs: generated.imageURLs.length ? generated.imageURLs : fallback.imageURLs
+  };
+}
+
 function flightLegLookup(
   flightNumber: string,
   index: number,
@@ -990,10 +1337,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     cards.splice(2, 0, ...await flightCards(title, location, body.startsAt));
   }
 
+  const warnings = cards.filter((card) => card.kind === "warning").map((card) => `${card.title}: ${card.detail ?? card.value}`);
+  const brief = await buildTravelBrief(kind, title, location, status, cards, warnings);
+
   const response: EnrichmentResponse = {
-    summary: title ? `Useful context for ${title}.` : "Add more details to enrich this trip item.",
+    summary: brief.summary,
     cards,
-    warnings: cards.filter((card) => card.kind === "warning").map((card) => `${card.title}: ${card.detail ?? card.value}`)
+    warnings,
+    briefMarkdown: brief.briefMarkdown,
+    sections: brief.sections,
+    actions: brief.actions,
+    routeLegs: brief.routeLegs,
+    imageURLs: brief.imageURLs
   };
 
   return res.status(200).json(response);
