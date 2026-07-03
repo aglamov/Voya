@@ -1837,7 +1837,7 @@ private struct ItemInsightPanel: View {
                 InsightTile(title: "Focus", value: phase.insightText, symbol: "scope")
                 InsightTile(title: "Timing", value: timingText, symbol: "clock")
                 if let enrichment {
-                    ForEach(enrichment.cards.prefix(4)) { card in
+                    ForEach(enrichment.cards.prefix(8)) { card in
                         if let actionURL = card.actionURL {
                             Button {
                                 openURL(actionURL)

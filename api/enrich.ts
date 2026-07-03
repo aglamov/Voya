@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { z } from "zod";
+import { getFlightStatus } from "./_flight.js";
 
 type EnrichmentCard = {
   title: string;
@@ -76,6 +77,10 @@ function clean(value: unknown) {
 
 function firstFlightNumber(value: string) {
   return value.match(/\b[A-Z]{2}\s?\d{2,4}\b/i)?.[0]?.replace(/\s+/g, "").toUpperCase();
+}
+
+function airportCodesFromText(value: string) {
+  return [...value.matchAll(/\b[A-Z]{3}\b/g)].map((match) => match[0].toUpperCase());
 }
 
 function asciiKey(value: string) {
@@ -624,23 +629,100 @@ async function eventsCard(location: string | LocationLookup | undefined, startsA
   };
 }
 
-function flightCard(title: string, location: string): EnrichmentCard {
-  const flightNumber = firstFlightNumber(`${title} ${location}`);
-  if (!flightNumber) {
-    return {
-      title: "Flight",
-      value: "No flight number",
-      detail: "Add a flight number to enable live status providers later.",
-      kind: "flight"
-    };
+function compactDate(value?: string | number | null) {
+  const date = parseRequestDate(value);
+  return date ? date.toISOString().slice(0, 10) : undefined;
+}
+
+function compactTime(value?: string) {
+  if (!value) {
+    return undefined;
   }
 
-  return {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function compactRoute(origin?: string, destination?: string) {
+  return [origin, destination].filter(Boolean).join(" -> ");
+}
+
+async function flightCards(title: string, location: string, startsAt?: string | number | null): Promise<EnrichmentCard[]> {
+  const flightNumber = firstFlightNumber(`${title} ${location}`);
+  if (!flightNumber) {
+    return [{
+      title: "Flight",
+      value: "No flight number",
+      detail: "Add a flight number such as BA2490 to enable live status.",
+      kind: "flight"
+    }];
+  }
+
+  const airportCodes = airportCodesFromText(location);
+  const originAirport = airportCodes[0];
+  const destinationAirport = airportCodes.length > 1 ? airportCodes.at(-1) : undefined;
+  const response = await getFlightStatus({
+    flightNumber,
+    date: compactDate(startsAt),
+    originAirport,
+    destinationAirport
+  });
+
+  if (!response.snapshot) {
+    return [{
+      title: "Flight",
+      value: flightNumber,
+      detail: response.validation.reasons[0] ?? "Live flight status is unavailable.",
+      kind: "flight"
+    }];
+  }
+
+  const snapshot = response.snapshot;
+  const gateParts = [
+    snapshot.departureTerminal ? `T${snapshot.departureTerminal}` : undefined,
+    snapshot.departureGate ? `Gate ${snapshot.departureGate}` : undefined
+  ].filter(Boolean);
+  const aircraftParts = [
+    snapshot.aircraftRegistration,
+    snapshot.aircraftType,
+    snapshot.position ? `${snapshot.position.lat.toFixed(2)}, ${snapshot.position.lon.toFixed(2)}` : undefined
+  ].filter(Boolean);
+
+  return [{
     title: "Flight",
-    value: flightNumber,
-    detail: "Ready for FlightAware, Amadeus, or Aviationstack status integration.",
+    value: `${flightNumber} · ${snapshot.providerStatus ?? snapshot.status}`,
+    detail: [
+      compactRoute(snapshot.originAirport, snapshot.destinationAirport),
+      compactTime(snapshot.estimatedDepartureAt ?? snapshot.scheduledDepartureAt)
+    ].filter(Boolean).join(" · "),
     kind: "flight"
-  };
+  }, {
+    title: "Delay",
+    value: response.delayStats.headline,
+    detail: response.delayStats.onTimeProbability == null
+      ? undefined
+      : `${Math.round(response.delayStats.onTimeProbability * 100)}% Voya on-time estimate`,
+    kind: (snapshot.delayMinutes ?? 0) >= 15 ? "warning" : "flight"
+  }, {
+    title: "Gate",
+    value: gateParts.length ? gateParts.join(" · ") : "Not posted",
+    detail: response.gate.baggageClaim ? `Baggage ${response.gate.baggageClaim}` : response.gate.guidance[1],
+    kind: "flight"
+  }, {
+    title: "Aircraft",
+    value: aircraftParts.length ? aircraftParts.join(" · ") : "Not available",
+    detail: snapshot.position?.updatedAt ? `Live position updated ${compactTime(snapshot.position.updatedAt)}` : snapshot.airlineName,
+    kind: "flight"
+  }];
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -674,7 +756,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   ];
 
   if (kind === "flight") {
-    cards.splice(2, 0, flightCard(title, location));
+    cards.splice(2, 0, ...await flightCards(title, location, body.startsAt));
   }
 
   const response: EnrichmentResponse = {

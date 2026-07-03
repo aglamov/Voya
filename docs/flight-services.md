@@ -233,9 +233,56 @@ For the first production version:
 5. Represent on-time probability as a cautious Voya score until a paid predictive feed is justified.
 6. Revisit Cirium, OAG, and Foresight when Voya has enough active monitored flights to justify enterprise pricing.
 
+## Implemented API Slice
+
+The initial Vercel slice exposes:
+
+```text
+GET /api/flight-status
+POST /api/flight-status
+POST /api/booking-validation
+```
+
+`/api/flight-status` accepts:
+
+```json
+{
+  "flightNumber": "BA2490",
+  "date": "2026-08-12",
+  "originAirport": "LHR",
+  "destinationAirport": "FCO"
+}
+```
+
+It returns a provider-neutral response with:
+
+- flight existence validation
+- normalized flight snapshot
+- delay headline and cautious on-time probability
+- aircraft position when the provider exposes a track
+- terminal, gate, arrival gate, and baggage claim when available
+- gate guidance copy that is careful about airport-display authority
+- next actions for cancellation, delay, missing gate, or normal travel
+
+`/api/booking-validation` combines the imported confirmation evidence, extraction confidence, user review, and the live provider response. It intentionally returns `canValidatePnr: false` because public flight-status feeds do not prove that the passenger's PNR or ticket is active.
+
+Set `AVIATIONSTACK_API_KEY` in Vercel to enable the free aviationstack provider. The adapter requests the `/v1/flights` endpoint and normalizes as much of the response as the plan returns:
+
+- `flight_date` and `flight_status`
+- airline name, IATA, and ICAO
+- flight number, IATA, ICAO, and codeshare data
+- departure airport name, IATA, ICAO, timezone, terminal, gate, delay, scheduled, estimated, actual, estimated runway, and actual runway
+- arrival airport name, IATA, ICAO, timezone, terminal, gate, baggage, delay, scheduled, estimated, actual, estimated runway, and actual runway
+- aircraft registration, IATA, ICAO, and ICAO24
+- live latitude, longitude, altitude, direction, horizontal speed, vertical speed, ground state, and update time
+
+`FLIGHTAWARE_AEROAPI_KEY` remains an optional paid fallback. Without either key, both endpoints return a graceful `provider_not_connected` state.
+
 ## Source Links
 
 - FlightAware AeroAPI: https://www.flightaware.com/commercial/aeroapi/
 - FlightAware Foresight: https://www.flightaware.com/commercial/foresight/
 - OAG flight status and on-time performance data: https://www.oag.com/flight-status-data
 - Amadeus Flight Order Management API: https://developers.amadeus.com/self-service/category/flights/api-doc/flight-order-management/api-reference
+- Flightradar24 how it works: https://www.flightradar24.com/how-it-works
+- aviationstack API documentation: https://aviationstack.com/documentation
