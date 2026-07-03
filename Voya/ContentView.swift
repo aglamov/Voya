@@ -2445,6 +2445,10 @@ private struct AssistantGuidanceRow: View {
 private struct EditItineraryItemView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: ItineraryItemDraft
+    @State private var flightLookupNumber: String
+    @State private var flightLookupResult: FlightLookupResponse?
+    @State private var isFlightLookupLoading = false
+    @State private var flightLookupMessage: String?
     let mode: ItineraryItemEditorMode
     let tripTitle: String?
     let onSave: (ItineraryItemDraft) -> Void
@@ -2456,6 +2460,7 @@ private struct EditItineraryItemView: View {
         onDelete: (() -> Void)? = nil
     ) {
         _draft = State(initialValue: ItineraryItemDraft(item: item))
+        _flightLookupNumber = State(initialValue: Self.firstFlightNumber(in: item.title))
         mode = .edit
         tripTitle = nil
         self.onSave = onSave
@@ -2464,6 +2469,7 @@ private struct EditItineraryItemView: View {
 
     init(mode: ItineraryItemEditorMode, tripTitle: String, onSave: @escaping (ItineraryItemDraft) -> Void) {
         _draft = State(initialValue: ItineraryItemDraft())
+        _flightLookupNumber = State(initialValue: "")
         self.mode = mode
         self.tripTitle = tripTitle
         self.onSave = onSave
@@ -2505,6 +2511,10 @@ private struct EditItineraryItemView: View {
 
                     VStack(alignment: .leading, spacing: 14) {
                         ItineraryKindPicker(selection: $draft.kind)
+
+                        if draft.kind == .flight {
+                            flightLookupPanel
+                        }
 
                         ClearableTextField("Title", text: $draft.title, prompt: "Flight BA2490, hotel stay, dinner reservation")
 
@@ -2599,9 +2609,166 @@ private struct EditItineraryItemView: View {
         .presentationDragIndicator(.visible)
     }
 
+    private var flightLookupPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ClearableTextField("Flight number", text: $flightLookupNumber, prompt: "LH1830")
+
+                Button {
+                    Task {
+                        await lookupFlight()
+                    }
+                } label: {
+                    Image(systemName: isFlightLookupLoading ? "hourglass" : "magnifyingglass")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 48, height: 48)
+                        .background(isFlightLookupDisabled ? Color.voyaMuted : Color.voyaTeal)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isFlightLookupDisabled)
+            }
+
+            if let candidate = flightLookupResult?.candidate {
+                Button {
+                    apply(candidate)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "airplane.departure")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(Color.voyaTeal)
+                            .frame(width: 36, height: 36)
+                            .background(Color.voyaTeal.opacity(0.10))
+                            .clipShape(Circle())
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(candidate.flightNumber)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                            Text(flightCandidateSummary(candidate))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                                .lineLimit(2)
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "arrow.down.doc.fill")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.voyaTeal)
+                    }
+                    .padding(12)
+                    .background(Color.voyaSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            } else if let flightLookupMessage {
+                Text(flightLookupMessage)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .padding(.horizontal, 2)
+            }
+        }
+        .padding(12)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onChange(of: draft.title) { _, title in
+            guard flightLookupNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+            flightLookupNumber = Self.firstFlightNumber(in: title)
+        }
+    }
+
+    private var isFlightLookupDisabled: Bool {
+        isFlightLookupLoading || flightLookupNumber.trimmingCharacters(in: .whitespacesAndNewlines).count < 2
+    }
+
     private var isSaveDisabled: Bool {
         draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || draft.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @MainActor
+    private func lookupFlight() async {
+        let flightNumber = flightLookupNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !flightNumber.isEmpty else {
+            return
+        }
+
+        isFlightLookupLoading = true
+        flightLookupMessage = nil
+        defer { isFlightLookupLoading = false }
+
+        do {
+            let response = try await VercelFlightLookupService().lookup(flightNumber: flightNumber, date: draft.startsAt)
+            flightLookupResult = response
+            if response.candidate == nil {
+                flightLookupMessage = response.warnings.first ?? response.validation.reasons.first ?? "No matching flight found for this date."
+            }
+        } catch {
+            flightLookupResult = nil
+            flightLookupMessage = "Flight lookup is unavailable right now."
+        }
+    }
+
+    private func apply(_ candidate: FlightLookupCandidate) {
+        draft.kind = .flight
+        draft.title = candidate.titleText
+        if !candidate.routeText.isEmpty {
+            draft.location = candidate.routeText
+        }
+        draft.status = candidate.statusText
+
+        if let departure = candidate.parsedDepartureAt {
+            draft.hasStartDate = true
+            draft.startsAt = departure
+        }
+
+        if let arrival = candidate.parsedArrivalAt {
+            draft.hasEndDate = true
+            draft.endsAt = arrival
+        }
+
+        flightLookupMessage = "Flight details applied."
+    }
+
+    private func flightCandidateSummary(_ candidate: FlightLookupCandidate) -> String {
+        var parts: [String] = []
+        if !candidate.routeText.isEmpty {
+            parts.append(candidate.routeText)
+        }
+        if let departure = candidate.parsedDepartureAt {
+            parts.append(ItineraryDateFormatter.displayTime(start: departure, end: candidate.parsedArrivalAt))
+        }
+        if let duration = candidate.durationMinutes {
+            parts.append(Self.durationText(minutes: duration))
+        }
+        if let aircraft = candidate.aircraftType?.trimmingCharacters(in: .whitespacesAndNewlines), !aircraft.isEmpty {
+            parts.append(aircraft)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func firstFlightNumber(in value: String) -> String {
+        guard let match = value.firstMatch(of: /[A-Z0-9]{2,3}\s?\d{1,4}[A-Z]?/) else {
+            return ""
+        }
+
+        return String(match.output).replacingOccurrences(of: " ", with: "").uppercased()
+    }
+
+    private static func durationText(minutes: Int) -> String {
+        let hours = minutes / 60
+        let remainingMinutes = minutes % 60
+        if hours > 0 && remainingMinutes > 0 {
+            return "\(hours)h \(remainingMinutes)m"
+        }
+        if hours > 0 {
+            return "\(hours)h"
+        }
+        return "\(remainingMinutes)m"
     }
 }
 
