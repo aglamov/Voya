@@ -443,6 +443,24 @@ function lookupWindow(date?: string) {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
+function hoursUntil(date?: string) {
+  if (!date) {
+    return undefined;
+  }
+
+  const target = new Date(date);
+  if (Number.isNaN(target.getTime())) {
+    return undefined;
+  }
+
+  return (target.getTime() - Date.now()) / 36e5;
+}
+
+function isTooFarForLiveFlightStatus(date?: string) {
+  const hours = hoursUntil(date);
+  return hours != null && hours > 48;
+}
+
 async function flightAwareFetch(path: string) {
   const apiKey = process.env.FLIGHTAWARE_AEROAPI_KEY?.trim();
   if (!apiKey) {
@@ -506,6 +524,32 @@ async function flightAwareScheduledDepartures(lookup: FlightLookup, window: { st
   url.searchParams.set("end", window.end);
 
   return flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
+}
+
+async function flightAwareScheduleSnapshot(lookup: FlightLookup, window: { start: string; end: string }) {
+  const scheduleResult = await flightAwareScheduledDepartures(lookup, window);
+  if (!scheduleResult) {
+    return { connected: true as const, snapshot: undefined };
+  }
+  if (!scheduleResult.connected) {
+    return { connected: false as const, snapshot: undefined };
+  }
+  if (!scheduleResult.ok) {
+    return {
+      connected: true as const,
+      snapshot: undefined,
+      error: `FlightAware schedule lookup returned HTTP ${scheduleResult.status}${scheduleResult.error ? `: ${scheduleResult.error}` : ""}.`
+    };
+  }
+
+  const scheduleData = scheduleResult.data as FlightAwareScheduledDeparturesResponse;
+  const scheduleFlights = scheduleData.scheduled_departures ?? scheduleData.flights ?? [];
+  const scheduleSnapshots = scheduleFlights.map((flight) => normalizeFlightAwareFlight(flight, lookup.flightNumber));
+
+  return {
+    connected: true as const,
+    snapshot: verifiedScheduleSnapshot(scheduleSnapshots, lookup)
+  };
 }
 
 async function fetchTrack(snapshot: FlightSnapshot) {
@@ -591,8 +635,19 @@ function delayHeadline(snapshot?: FlightSnapshot) {
   return `Estimated delay is about ${delay} minutes.`;
 }
 
+function normalizedPublicBaseURL(value?: string) {
+  const trimmed = value?.trim().replace(/\/$/, "");
+  if (!trimmed) {
+    return "https://your-voya-backend.example";
+  }
+  if (trimmed.startsWith("ttps://")) {
+    return `h${trimmed}`;
+  }
+  return trimmed;
+}
+
 function alerting(webhookBaseURL?: string): FlightStatusResponse["alerting"] {
-  const baseURL = webhookBaseURL?.replace(/\/$/, "") || "https://your-voya-backend.example";
+  const baseURL = normalizedPublicBaseURL(webhookBaseURL);
 
   return {
     supported: true,
@@ -624,6 +679,22 @@ export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatu
     return flightStatusError(normalizedLookup, "provider_error", ["Date is not a valid ISO date."]);
   }
 
+  if (isTooFarForLiveFlightStatus(normalizedLookup.date)) {
+    const scheduleLookup = await flightAwareScheduleSnapshot(normalizedLookup, window);
+    if (!scheduleLookup.connected) {
+      return flightStatusError(normalizedLookup, "provider_not_connected", ["Set FLIGHTAWARE_AEROAPI_KEY to enable FlightAware AeroAPI status, schedule, gate, and alert data."]);
+    }
+    if (scheduleLookup.snapshot) {
+      return flightStatusSuccess(normalizedLookup, scheduleLookup.snapshot, [
+        "Live FlightAware status is available closer to departure; this card is using schedule and gate data."
+      ]);
+    }
+
+    return flightStatusError(normalizedLookup, "not_found", [
+      scheduleLookup.error ?? "FlightAware live status opens about 2 days before departure; schedule lookup did not return a route/date match yet."
+    ]);
+  }
+
   let result = await flightAwareFlights(normalizedLookup.flightNumber, window);
   if (!result.connected) {
     return flightStatusError(normalizedLookup, "provider_not_connected", ["Set FLIGHTAWARE_AEROAPI_KEY to enable FlightAware AeroAPI status, schedule, gate, and alert data."]);
@@ -650,16 +721,11 @@ export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatu
   }
 
   if (!result.ok && result.status === 400 && normalizedLookup.date && normalizedLookup.originAirport) {
-    const scheduleResult = await flightAwareScheduledDepartures(normalizedLookup, window);
-    if (scheduleResult?.connected && scheduleResult.ok) {
-      const scheduleData = scheduleResult.data as FlightAwareScheduledDeparturesResponse;
-      const scheduleFlights = scheduleData.scheduled_departures ?? scheduleData.flights ?? [];
-      const scheduleSnapshots = scheduleFlights.map((flight) => normalizeFlightAwareFlight(flight, normalizedLookup.flightNumber));
-      const scheduleSnapshot = verifiedScheduleSnapshot(scheduleSnapshots, normalizedLookup);
-
-      if (scheduleSnapshot) {
-        return flightStatusSuccess(normalizedLookup, scheduleSnapshot);
-      }
+    const scheduleLookup = await flightAwareScheduleSnapshot(normalizedLookup, window);
+    if (scheduleLookup.snapshot) {
+      return flightStatusSuccess(normalizedLookup, scheduleLookup.snapshot, [
+        "Live FlightAware status was unavailable, so Voya used schedule and gate data for this route/date match."
+      ]);
     }
   }
 
@@ -682,7 +748,8 @@ export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatu
 
 function flightStatusSuccess(
   normalizedLookup: FlightLookup,
-  snapshot: FlightSnapshot
+  snapshot: FlightSnapshot,
+  warnings: string[] = []
 ): FlightStatusResponse {
   return {
     query: normalizedLookup,
@@ -739,7 +806,7 @@ function flightStatusSuccess(
       connected: true,
       attribution: "Flight status, schedules, gate assignments, and alert capability from FlightAware AeroAPI."
     },
-    warnings: []
+    warnings
   };
 }
 
