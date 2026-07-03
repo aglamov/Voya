@@ -125,6 +125,8 @@ export type FlightStatusResponse = {
   warnings: string[];
 };
 
+type ProviderErrorCode = "missing_access_key" | "function_access_restricted" | "rate_limit" | "provider_error";
+
 type FlightAwareAirport = {
   code?: string;
   code_iata?: string;
@@ -505,6 +507,7 @@ async function aviationstackFetchJSON(url: URL, apiKey?: string) {
   const response = await fetch(url, apiKey ? { headers: { apikey: apiKey } } : undefined);
   const data = await response.json().catch(() => undefined) as AviationstackResponse | undefined;
   const providerError = data?.error;
+  const providerErrorCode = providerError?.code ?? providerError?.type;
   const error = providerError
     ? [providerError.message, providerError.info, providerError.type, providerError.code].filter(Boolean).join(" ")
     : undefined;
@@ -513,33 +516,38 @@ async function aviationstackFetchJSON(url: URL, apiKey?: string) {
     ok: response.ok && !providerError,
     status: response.status,
     data,
-    error
+    error,
+    errorCode: providerErrorCode
   };
 }
 
-async function aviationstackFetch(lookup: FlightLookup) {
-  const apiKey = process.env.AVIATIONSTACK_API_KEY?.trim();
-  if (!apiKey) {
-    return { connected: false as const };
-  }
-
+function aviationstackURL(lookup: FlightLookup, mode: "full" | "minimal") {
   const url = new URL("http://api.aviationstack.com/v1/flights");
-  url.searchParams.set("access_key", apiKey);
   url.searchParams.set("limit", "10");
   url.searchParams.set("flight_iata", cleanFlightNumber(lookup.flightNumber));
-  if (lookup.date) {
-    url.searchParams.set("flight_date", lookup.date.slice(0, 10));
+
+  if (mode === "full") {
+    if (lookup.date) {
+      url.searchParams.set("flight_date", lookup.date.slice(0, 10));
+    }
+    if (lookup.originAirport) {
+      url.searchParams.set("dep_iata", lookup.originAirport.toUpperCase());
+    }
+    if (lookup.destinationAirport) {
+      url.searchParams.set("arr_iata", lookup.destinationAirport.toUpperCase());
+    }
   }
-  if (lookup.originAirport) {
-    url.searchParams.set("dep_iata", lookup.originAirport.toUpperCase());
-  }
-  if (lookup.destinationAirport) {
-    url.searchParams.set("arr_iata", lookup.destinationAirport.toUpperCase());
-  }
+
+  return url;
+}
+
+async function aviationstackFetchAttempt(lookup: FlightLookup, apiKey: string, mode: "full" | "minimal") {
+  const url = aviationstackURL(lookup, mode);
+  url.searchParams.set("access_key", apiKey);
 
   const accessKeyResult = await aviationstackFetchJSON(url);
   if (accessKeyResult.ok) {
-    return { connected: true as const, ok: true as const, data: accessKeyResult.data };
+    return { connected: true as const, ok: true as const, data: accessKeyResult.data, mode };
   }
 
   if (accessKeyResult.status === 401 || accessKeyResult.status === 403) {
@@ -559,7 +567,9 @@ async function aviationstackFetch(lookup: FlightLookup) {
       status: headerOnlyMissingAccessKey ? accessKeyResult.status : headerResult.status,
       error: headerOnlyMissingAccessKey
         ? accessKeyResult.error ?? headerResult.error
-        : headerResult.error ?? accessKeyResult.error
+        : headerResult.error ?? accessKeyResult.error,
+      errorCode: (headerOnlyMissingAccessKey ? accessKeyResult.errorCode : headerResult.errorCode) as ProviderErrorCode | undefined,
+      mode
     };
   }
 
@@ -567,7 +577,39 @@ async function aviationstackFetch(lookup: FlightLookup) {
     connected: true as const,
     ok: false as const,
     status: accessKeyResult.status,
-    error: accessKeyResult.error
+    error: accessKeyResult.error,
+    errorCode: accessKeyResult.errorCode as ProviderErrorCode | undefined,
+    mode
+  };
+}
+
+function restrictedScheduleMessage(lookup: FlightLookup) {
+  const dateText = lookup.date ? ` for ${lookup.date.slice(0, 10)}` : "";
+  return `aviationstack free plan could not access scheduled flight lookup${dateText}. Live data may only appear close to departure; future schedules/status usually require a paid aviationstack plan.`;
+}
+
+async function aviationstackFetch(lookup: FlightLookup) {
+  const apiKey = process.env.AVIATIONSTACK_API_KEY?.trim();
+  if (!apiKey) {
+    return { connected: false as const };
+  }
+
+  const fullResult = await aviationstackFetchAttempt(lookup, apiKey, "full");
+  if (fullResult.ok || fullResult.errorCode !== "function_access_restricted") {
+    return fullResult;
+  }
+
+  const minimalResult = await aviationstackFetchAttempt(lookup, apiKey, "minimal");
+  if (minimalResult.ok) {
+    return minimalResult;
+  }
+
+  return {
+    ...minimalResult,
+    error: minimalResult.errorCode === "function_access_restricted"
+      ? restrictedScheduleMessage(lookup)
+      : fullResult.error ?? minimalResult.error,
+    errorCode: fullResult.errorCode
   };
 }
 
