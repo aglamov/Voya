@@ -330,6 +330,7 @@ private struct TripsView: View {
                                 ) {
                                     TransferRecommendationCard(
                                         context: context,
+                                        phase: TransferPhase(context: context, plan: mobilityPlans[context.id]),
                                         plan: mobilityPlans[context.id],
                                         errorMessage: mobilityPlanErrors[context.id],
                                         isLoading: loadingMobilityPlanIDs.contains(context.id),
@@ -364,6 +365,11 @@ private struct TripsView: View {
                                let context = VercelMobilityService.transferContext(from: item, to: itinerary[index + 1]) {
                                 TransferRecommendationCard(
                                     context: context,
+                                    phase: TransferPhase(
+                                        context: context,
+                                        plan: mobilityPlans[context.id],
+                                        fallbackStart: item.endsAt ?? item.startsAt
+                                    ),
                                     plan: mobilityPlans[context.id],
                                     errorMessage: mobilityPlanErrors[context.id],
                                     isLoading: loadingMobilityPlanIDs.contains(context.id),
@@ -390,6 +396,7 @@ private struct TripsView: View {
                                 ) {
                                     TransferRecommendationCard(
                                         context: context,
+                                        phase: TransferPhase(context: context, plan: mobilityPlans[context.id]),
                                         plan: mobilityPlans[context.id],
                                         errorMessage: mobilityPlanErrors[context.id],
                                         isLoading: loadingMobilityPlanIDs.contains(context.id),
@@ -1641,6 +1648,7 @@ private struct TimelineRow: View {
 
 private struct TransferRecommendationCard: View {
     let context: MobilityTransferContext
+    let phase: TransferPhase
     let plan: MobilityPlan?
     let errorMessage: String?
     let isLoading: Bool
@@ -1656,34 +1664,43 @@ private struct TransferRecommendationCard: View {
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white)
                     .frame(width: 34, height: 34)
-                    .background(Color.voyaTeal)
+                    .background(phase.accent)
                     .clipShape(Circle())
+                    .opacity(phase.iconOpacity)
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
                         Text("Transfer")
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(Color.voyaTeal)
+                            .foregroundStyle(phase.accent)
 
                         if let primaryOption {
                             Text(primaryOption.mode.displayName)
                                 .font(.caption2.weight(.bold))
-                                .foregroundStyle(Color.voyaTeal)
+                                .foregroundStyle(phase.accent)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
-                                .background(Color.voyaTeal.opacity(0.12))
+                                .background(phase.accent.opacity(phase.kindBadgeOpacity))
                                 .clipShape(Capsule())
                         }
+
+                        Text(phase.label)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(phase.accent)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(phase.badgeBackground)
+                            .clipShape(Capsule())
                     }
 
                     Text(routeTitle)
                         .font(.headline)
-                        .foregroundStyle(Color.voyaInk)
+                        .foregroundStyle(phase.titleColor)
                         .lineLimit(2)
 
                     Text(primaryDetail)
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.voyaMuted)
+                        .foregroundStyle(phase.secondaryColor)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -1693,7 +1710,7 @@ private struct TransferRecommendationCard: View {
                     Button(action: onRefresh) {
                         Image(systemName: isLoading ? "hourglass" : "arrow.clockwise")
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(isLoading ? Color.voyaMuted : Color.voyaTeal)
+                            .foregroundStyle(isLoading ? Color.voyaMuted : phase.accent)
                             .frame(width: 32, height: 32)
                             .background(Color.voyaSurface)
                             .clipShape(Circle())
@@ -1704,7 +1721,7 @@ private struct TransferRecommendationCard: View {
 
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(Color.voyaMuted)
+                        .foregroundStyle(Color.voyaMuted.opacity(phase.contentOpacity))
                 }
             }
 
@@ -1712,10 +1729,10 @@ private struct TransferRecommendationCard: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .scaleEffect(0.76)
-                        .tint(Color.voyaTeal)
+                        .tint(phase.accent)
                     Text("Checking live route timing")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.voyaMuted)
+                        .foregroundStyle(phase.secondaryColor)
                 }
             } else if let errorMessage, plan == nil {
                 Text(errorMessage)
@@ -1730,9 +1747,9 @@ private struct TransferRecommendationCard: View {
                     Label(shortDuration(primaryOption), systemImage: "map")
                 }
                 .font(.caption.weight(.bold))
-                .foregroundStyle(Color.voyaTeal)
+                .foregroundStyle(phase.accent)
                 .padding(12)
-                .background(Color.voyaMint.opacity(0.72))
+                .background(phase.metricBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
@@ -1745,11 +1762,11 @@ private struct TransferRecommendationCard: View {
                                 Text(option.mode.displayName)
                             }
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(Color.voyaInk)
+                            .foregroundStyle(phase.titleColor)
 
                             Text(shortDuration(option))
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(Color.voyaMuted)
+                                .foregroundStyle(phase.secondaryColor)
                                 .lineLimit(1)
                         }
                         .padding(10)
@@ -1761,14 +1778,15 @@ private struct TransferRecommendationCard: View {
             }
         }
         .padding(14)
-        .background(Color.voyaTeal.opacity(0.07))
+        .background(phase.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.voyaTeal.opacity(0.16), lineWidth: 1)
+                .stroke(phase.accent.opacity(phase.borderOpacity), lineWidth: 1)
         )
         .padding(.horizontal, 18)
         .padding(.vertical, 6)
+        .opacity(phase.contentOpacity)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onTapGesture(perform: onOpen)
         .task(id: context.id) {
@@ -1842,6 +1860,123 @@ private struct TransferRecommendationCard: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             ?? ""
         return shortened.isEmpty ? value : shortened
+    }
+}
+
+private enum TransferPhase: Equatable {
+    case past
+    case current
+    case future
+    case undated
+
+    init(context: MobilityTransferContext, plan: MobilityPlan?, fallbackStart: Date? = nil, now: Date = Date()) {
+        let option = plan?.recommendedOption
+        let start = option?.leaveBy.flatMap(MobilityDateFormatter.date(from:))
+            ?? context.targetDepartureAt
+            ?? fallbackStart
+        let end = option?.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
+            ?? context.targetArrivalAt
+            ?? context.targetDepartureAt
+
+        guard start != nil || end != nil else {
+            self = .undated
+            return
+        }
+
+        if let start, let end {
+            if now >= start && now <= end {
+                self = .current
+                return
+            }
+
+            self = end < now ? .past : .future
+            return
+        }
+
+        if let start {
+            if start < now {
+                self = .past
+            } else {
+                self = .future
+            }
+            return
+        }
+
+        if let end {
+            self = end < now ? .past : .future
+            return
+        }
+
+        self = .undated
+    }
+
+    var label: String {
+        switch self {
+        case .past: String(localized: "Done")
+        case .current: String(localized: "Now")
+        case .future: String(localized: "Transfer")
+        case .undated: String(localized: "Review")
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .past: Color.voyaMuted
+        case .current: Color.voyaTeal
+        case .future: Color.voyaInk
+        case .undated: Color.voyaGold
+        }
+    }
+
+    var titleColor: Color {
+        self == .past ? Color.voyaMuted : Color.voyaInk
+    }
+
+    var secondaryColor: Color {
+        self == .past ? Color.voyaMuted.opacity(0.76) : Color.voyaMuted
+    }
+
+    var cardBackground: Color {
+        switch self {
+        case .past: Color.clear
+        case .current: Color.voyaTeal.opacity(0.12)
+        case .future: Color.voyaTeal.opacity(0.07)
+        case .undated: Color.voyaGold.opacity(0.08)
+        }
+    }
+
+    var badgeBackground: Color {
+        switch self {
+        case .past: Color.voyaSurface
+        case .current: Color.voyaTeal.opacity(0.13)
+        case .future: Color.voyaSurface
+        case .undated: Color.voyaGold.opacity(0.13)
+        }
+    }
+
+    var metricBackground: Color {
+        switch self {
+        case .past: Color.voyaSurface
+        case .current: Color.voyaMint.opacity(0.76)
+        case .future: Color.voyaMint.opacity(0.72)
+        case .undated: Color.voyaGold.opacity(0.10)
+        }
+    }
+
+    var contentOpacity: Double {
+        self == .past ? 0.62 : 1
+    }
+
+    var iconOpacity: Double {
+        self == .past ? 0.72 : 1
+    }
+
+    var borderOpacity: Double {
+        self == .past ? 0.08 : 0.16
+    }
+
+    var kindBadgeOpacity: Double {
+        self == .past ? 0.08 : 0.12
     }
 }
 
@@ -2326,7 +2461,7 @@ private enum ItineraryPhase: Equatable {
     case future
     case undated
 
-    init(item: ItineraryItem, now: Date = Date(), calendar: Calendar = .current) {
+    init(item: ItineraryItem, now: Date = Date()) {
         guard let start = item.startsAt else {
             self = .undated
             return
@@ -2338,12 +2473,12 @@ private enum ItineraryPhase: Equatable {
             return
         }
 
-        if calendar.isDateInToday(start) || calendar.isDateInToday(end) {
-            self = .current
+        if end < now {
+            self = .past
             return
         }
 
-        self = end < now ? .past : .future
+        self = .future
     }
 
     var label: String {
