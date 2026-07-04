@@ -28,6 +28,7 @@ export const mobilityPlanSchema = z.object({
 });
 
 type MobilityPlanRequest = z.infer<typeof mobilityPlanSchema>;
+type MobilityPlace = MobilityPlanRequest["origin"];
 type RouteMode = z.infer<typeof routeModeSchema>;
 
 type RouteTone = "recommended" | "good" | "watch" | "unavailable";
@@ -105,11 +106,193 @@ function mapsApiKey() {
   return process.env.GOOGLE_ROUTES_API_KEY ?? process.env.GOOGLE_MAPS_API_KEY;
 }
 
-function labelFor(place: MobilityPlanRequest["origin"]) {
+function labelFor(place: MobilityPlace) {
   return place.label ?? place.address ?? `${place.latitude},${place.longitude}`;
 }
 
-function googleWaypoint(place: MobilityPlanRequest["origin"]) {
+function routeValueFor(place: MobilityPlace) {
+  if (place.latitude != null && place.longitude != null) {
+    return `${place.latitude},${place.longitude}`;
+  }
+
+  return place.address ?? place.label ?? "";
+}
+
+function parseCoordinatePair(latValue: string, lonValue: string) {
+  const latitude = Number(latValue);
+  const longitude = Number(lonValue);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return undefined;
+  }
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    return undefined;
+  }
+
+  return { latitude, longitude };
+}
+
+function coordinatesFromText(value: string) {
+  const atMatch = value.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:[,/?]|$)/);
+  if (atMatch) {
+    return parseCoordinatePair(atMatch[1], atMatch[2]);
+  }
+
+  const bangMatch = value.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+  if (bangMatch) {
+    return parseCoordinatePair(bangMatch[1], bangMatch[2]);
+  }
+
+  const plainMatch = value.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (plainMatch) {
+    return parseCoordinatePair(plainMatch[1], plainMatch[2]);
+  }
+
+  return undefined;
+}
+
+function isGoogleMapsHost(hostname: string) {
+  return [
+    "google.com",
+    "www.google.com",
+    "maps.google.com",
+    "maps.app.goo.gl",
+    "goo.gl"
+  ].some((host) => hostname === host || hostname.endsWith(`.${host}`));
+}
+
+function mapURL(value: string) {
+  try {
+    const url = new URL(value);
+    return isGoogleMapsHost(url.hostname) ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function coordinatesFromMapURL(url: URL) {
+  const directCoordinates = coordinatesFromText(decodeURIComponent(url.href));
+  if (directCoordinates) {
+    return directCoordinates;
+  }
+
+  for (const parameter of ["q", "query", "ll", "center"]) {
+    const value = url.searchParams.get(parameter);
+    if (!value) {
+      continue;
+    }
+
+    const coordinates = coordinatesFromText(value);
+    if (coordinates) {
+      return coordinates;
+    }
+  }
+
+  return undefined;
+}
+
+function placeNameFromMapURL(url: URL) {
+  const query = url.searchParams.get("q") ?? url.searchParams.get("query");
+  if (query && !coordinatesFromText(query)) {
+    return query;
+  }
+
+  const placeMatch = decodeURIComponent(url.pathname).match(/\/place\/([^/]+)/);
+  if (!placeMatch) {
+    return undefined;
+  }
+
+  return placeMatch[1].replace(/\+/g, " ").trim();
+}
+
+async function resolvedGoogleMapURL(value: string) {
+  const url = mapURL(value);
+  if (!url) {
+    return undefined;
+  }
+
+  if (coordinatesFromMapURL(url) || placeNameFromMapURL(url)) {
+    return url;
+  }
+
+  if (url.hostname !== "maps.app.goo.gl" && url.hostname !== "goo.gl") {
+    return url;
+  }
+
+  try {
+    for (const method of ["HEAD", "GET"] as const) {
+      const response = await fetch(url, { method, redirect: "follow" });
+      const resolvedURL = mapURL(response.url);
+      if (resolvedURL && resolvedURL.href !== url.href) {
+        return resolvedURL;
+      }
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
+
+async function normalizedPlace(place: MobilityPlace, role: "origin" | "destination") {
+  const address = place.address?.trim();
+  if (!address) {
+    return { place };
+  }
+
+  const url = await resolvedGoogleMapURL(address);
+  if (!url) {
+    const coordinates = coordinatesFromText(address);
+    return coordinates ? { place: { ...place, ...coordinates } } : { place };
+  }
+
+  const coordinates = coordinatesFromMapURL(url);
+  const placeName = placeNameFromMapURL(url);
+  if (coordinates) {
+    return {
+      place: {
+        ...place,
+        address: undefined,
+        label: place.label ?? placeName ?? "Map point",
+        ...coordinates
+      }
+    };
+  }
+
+  if (placeName) {
+    return {
+      place: {
+        ...place,
+        address: placeName,
+        label: place.label ?? placeName
+      }
+    };
+  }
+
+  return {
+    place,
+    warning: `Google Maps ${role} link could not be resolved to coordinates or a place name.`
+  };
+}
+
+async function normalizedMobilityRequest(request: MobilityPlanRequest, warnings: string[]): Promise<MobilityPlanRequest> {
+  const [origin, destination] = await Promise.all([
+    normalizedPlace(request.origin, "origin"),
+    normalizedPlace(request.destination, "destination")
+  ]);
+
+  for (const warning of [origin.warning, destination.warning]) {
+    if (warning) {
+      warnings.push(warning);
+    }
+  }
+
+  return {
+    ...request,
+    origin: origin.place,
+    destination: destination.place
+  };
+}
+
+function googleWaypoint(place: MobilityPlace) {
   if (place.latitude != null && place.longitude != null) {
     return {
       location: {
@@ -244,11 +427,11 @@ function subtractMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() - minutes * 60_000);
 }
 
-function mapsURL(origin: MobilityPlanRequest["origin"], destination: MobilityPlanRequest["destination"], mode: RouteMode) {
+function mapsURL(origin: MobilityPlace, destination: MobilityPlace, mode: RouteMode) {
   const url = new URL("https://www.google.com/maps/dir/");
   url.searchParams.set("api", "1");
-  url.searchParams.set("origin", labelFor(origin));
-  url.searchParams.set("destination", labelFor(destination));
+  url.searchParams.set("origin", routeValueFor(origin));
+  url.searchParams.set("destination", routeValueFor(destination));
   url.searchParams.set("travelmode", googleMapsTravelMode(mode));
   return url.toString();
 }
@@ -518,6 +701,7 @@ function recommendationFor(request: MobilityPlanRequest, options: MobilityRouteO
 export async function buildMobilityPlan(request: MobilityPlanRequest): Promise<MobilityPlanResponse> {
   const modes = request.modes ?? ["taxi", "transit", "drive"];
   const warnings: string[] = [];
+  request = await normalizedMobilityRequest(request, warnings);
   const providerConnected = Boolean(mapsApiKey());
   const options: MobilityRouteOption[] = [];
 

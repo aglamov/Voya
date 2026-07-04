@@ -1549,6 +1549,7 @@ private struct TimelineRow: View {
     let phase: ItineraryPhase
     let isLast: Bool
     let onOpen: () -> Void
+    @State private var displayLocation = ""
 
     var body: some View {
         Button(action: onOpen) {
@@ -1605,7 +1606,7 @@ private struct TimelineRow: View {
                             .foregroundStyle(Color.voyaMuted.opacity(phase.contentOpacity))
                     }
 
-                    Text(item.location.isEmpty ? String(localized: "Location needed") : item.location)
+                    Text(displayLocation.isEmpty ? String(localized: "Location needed") : displayLocation)
                         .font(.subheadline)
                         .foregroundStyle(phase.secondaryColor)
 
@@ -1627,6 +1628,10 @@ private struct TimelineRow: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 10)
         .padding(.top, 8)
+        .task(id: item.location) {
+            displayLocation = LocationDisplayResolver.immediateDisplayName(for: item.location)
+            displayLocation = await LocationDisplayResolver.resolvedDisplayName(for: item.location)
+        }
     }
 
     private var kindAccent: Color {
@@ -1641,6 +1646,8 @@ private struct TransferRecommendationCard: View {
     let isLoading: Bool
     let onOpen: () -> Void
     let onRefresh: () -> Void
+    @State private var displayOrigin = ""
+    @State private var displayDestination = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1764,6 +1771,14 @@ private struct TransferRecommendationCard: View {
         .padding(.vertical, 6)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onTapGesture(perform: onOpen)
+        .task(id: context.id) {
+            displayOrigin = LocationDisplayResolver.immediateDisplayName(for: context.origin)
+            displayDestination = LocationDisplayResolver.immediateDisplayName(for: context.destination)
+            async let origin = LocationDisplayResolver.resolvedDisplayName(for: context.origin)
+            async let destination = LocationDisplayResolver.resolvedDisplayName(for: context.destination)
+            displayOrigin = await origin
+            displayDestination = await destination
+        }
     }
 
     private var primaryOption: MobilityRouteOption? {
@@ -1781,7 +1796,7 @@ private struct TransferRecommendationCard: View {
     }
 
     private var routeTitle: String {
-        "\(shortPlace(context.origin)) -> \(shortPlace(context.destination))"
+        "\(shortPlace(displayOrigin.isEmpty ? context.origin : displayOrigin)) -> \(shortPlace(displayDestination.isEmpty ? context.destination : displayDestination))"
     }
 
     private var primaryDetail: String {
@@ -1838,6 +1853,8 @@ private struct TransferDetailView: View {
     let errorMessage: String?
     let isLoading: Bool
     let onRefresh: () -> Void
+    @State private var displayOrigin = ""
+    @State private var displayDestination = ""
 
     var body: some View {
         ZStack {
@@ -1882,6 +1899,14 @@ private struct TransferDetailView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .task(id: context.id) {
+            displayOrigin = LocationDisplayResolver.immediateDisplayName(for: context.origin)
+            displayDestination = LocationDisplayResolver.immediateDisplayName(for: context.destination)
+            async let origin = LocationDisplayResolver.resolvedDisplayName(for: context.origin)
+            async let destination = LocationDisplayResolver.resolvedDisplayName(for: context.destination)
+            displayOrigin = await origin
+            displayDestination = await destination
+        }
     }
 
     private var header: some View {
@@ -1891,7 +1916,7 @@ private struct TransferDetailView: View {
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(Color.voyaTeal)
 
-                Text("\(shortPlace(context.origin)) → \(shortPlace(context.destination))")
+                Text("\(shortPlace(displayOrigin.isEmpty ? context.origin : displayOrigin)) → \(shortPlace(displayDestination.isEmpty ? context.destination : displayDestination))")
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.voyaInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1949,8 +1974,8 @@ private struct TransferDetailView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    routePlace("From", context.origin)
-                    routePlace("To", context.destination)
+                    routePlace("From", displayOrigin.isEmpty ? context.origin : displayOrigin)
+                    routePlace("To", displayDestination.isEmpty ? context.destination : displayDestination)
                 }
             }
 
@@ -2475,6 +2500,150 @@ private enum LocationLinkResolver {
     }
 }
 
+private enum LocationDisplayResolver {
+    static func immediateDisplayName(for value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+
+        guard let url = googleMapsURL(from: trimmed) else {
+            return trimmed
+        }
+
+        return placeName(from: url) ?? coordinates(from: url).map { _ in String(localized: "Map point") } ?? String(localized: "Map point")
+    }
+
+    static func resolvedDisplayName(for value: String) async -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+
+        guard let url = googleMapsURL(from: trimmed) else {
+            return trimmed
+        }
+
+        if let displayName = placeName(from: url) ?? coordinates(from: url).map({ _ in String(localized: "Map point") }) {
+            return displayName
+        }
+
+        guard isShortGoogleMapsURL(url),
+              let resolvedURL = await resolvedURL(from: url),
+              resolvedURL != url else {
+            return String(localized: "Map point")
+        }
+
+        return placeName(from: resolvedURL) ?? coordinates(from: resolvedURL).map { _ in String(localized: "Map point") } ?? String(localized: "Map point")
+    }
+
+    private static func googleMapsURL(from value: String) -> URL? {
+        guard let url = URL(string: value),
+              let host = url.host?.lowercased(),
+              isGoogleMapsHost(host) else {
+            return nil
+        }
+
+        return url
+    }
+
+    private static func isGoogleMapsHost(_ host: String) -> Bool {
+        [
+            "google.com",
+            "www.google.com",
+            "maps.google.com",
+            "maps.app.goo.gl",
+            "goo.gl"
+        ].contains { host == $0 || host.hasSuffix(".\($0)") }
+    }
+
+    private static func isShortGoogleMapsURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else {
+            return false
+        }
+
+        return host == "maps.app.goo.gl" || host == "goo.gl"
+    }
+
+    private static func placeName(from url: URL) -> String? {
+        if let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "q" || $0.name == "query" })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !query.isEmpty,
+           coordinates(from: query) == nil {
+            return cleanPlaceName(query)
+        }
+
+        let path = url.path.removingPercentEncoding ?? url.path
+        guard let range = path.range(of: #"/place/([^/]+)"#, options: .regularExpression) else {
+            return nil
+        }
+
+        let rawName = String(path[range])
+            .replacingOccurrences(of: "/place/", with: "")
+        return cleanPlaceName(rawName)
+    }
+
+    private static func cleanPlaceName(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "+", with: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func coordinates(from url: URL) -> (Double, Double)? {
+        coordinates(from: url.absoluteString.removingPercentEncoding ?? url.absoluteString)
+    }
+
+    private static func coordinates(from value: String) -> (Double, Double)? {
+        let patterns = [
+            #"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:[,/?]|$)"#,
+            #"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)"#,
+            #"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$"#
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
+                  match.numberOfRanges >= 3,
+                  let latRange = Range(match.range(at: 1), in: value),
+                  let lonRange = Range(match.range(at: 2), in: value),
+                  let latitude = Double(value[latRange]),
+                  let longitude = Double(value[lonRange]),
+                  (-90...90).contains(latitude),
+                  (-180...180).contains(longitude) else {
+                continue
+            }
+
+            return (latitude, longitude)
+        }
+
+        return nil
+    }
+
+    private static func resolvedURL(from url: URL) async -> URL? {
+        for method in ["HEAD", "GET"] {
+            var request = URLRequest(url: url)
+            request.httpMethod = method
+            request.timeoutInterval = 8
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let resolvedURL = response.url,
+                   resolvedURL != url,
+                   googleMapsURL(from: resolvedURL.absoluteString) != nil {
+                    return resolvedURL
+                }
+            } catch {
+                continue
+            }
+        }
+
+        return nil
+    }
+}
+
 private enum ItineraryItemEditorMode {
     case add
     case edit
@@ -2805,6 +2974,7 @@ private struct ItemCompanionCard: View {
     let item: ItineraryItem
     let phase: ItineraryPhase
     let enrichment: ItemEnrichment?
+    @State private var displayLocation = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -2864,6 +3034,10 @@ private struct ItemCompanionCard: View {
                 .stroke(item.kind.timelineAccent.opacity(0.16), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.06), radius: 18, y: 10)
+        .task(id: item.location) {
+            displayLocation = LocationDisplayResolver.immediateDisplayName(for: item.location)
+            displayLocation = await LocationDisplayResolver.resolvedDisplayName(for: item.location)
+        }
     }
 
     private var momentTitle: String {
@@ -2880,7 +3054,7 @@ private struct ItemCompanionCard: View {
     }
 
     private var momentSubtitle: String {
-        let place = item.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let place = displayLocation.trimmingCharacters(in: .whitespacesAndNewlines)
         if place.isEmpty {
             return item.displayTime
         }
