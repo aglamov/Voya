@@ -340,6 +340,20 @@ enum DateIntervalFormatter {
     }
 }
 
+enum VoyaAppLocale {
+    static var currentIdentifier: String {
+        Locale.autoupdatingCurrent.identifier
+    }
+
+    static var currentLanguageCode: String {
+        Locale.autoupdatingCurrent.language.languageCode?.identifier ?? "en"
+    }
+
+    static var currentLanguageName: String {
+        Locale.autoupdatingCurrent.localizedString(forLanguageCode: currentLanguageCode) ?? currentLanguageCode
+    }
+}
+
 enum ItineraryDateParser {
     static func startDate(from value: String?) -> Date? {
         dates(from: value).first
@@ -1489,7 +1503,13 @@ private struct VercelConfirmationExtractor {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 35
         request.httpBody = try JSONEncoder().encode(
-            VercelExtractionRequest(sourceName: document.name, text: document.text)
+            VercelExtractionRequest(
+                sourceName: document.name,
+                text: document.text,
+                locale: VoyaAppLocale.currentIdentifier,
+                languageCode: VoyaAppLocale.currentLanguageCode,
+                languageName: VoyaAppLocale.currentLanguageName
+            )
         )
 
         let (data, response) = try await session.data(for: request)
@@ -1577,12 +1597,13 @@ struct TravelRouteLeg: Codable, Identifiable {
 }
 
 enum ItemEnrichmentCache {
-    private static let schemaVersion = "travel-brief-v4"
+    private static let schemaVersion = "travel-brief-v5"
 
     static func key(for item: ItineraryItem) -> String {
         let dateFormatter = ISO8601DateFormatter()
         return [
             schemaVersion,
+            VoyaAppLocale.currentIdentifier,
             item.kind.rawValue,
             normalized(item.title),
             normalized(item.location),
@@ -1708,7 +1729,10 @@ struct VercelItemEnricher {
                 location: item.location,
                 startsAt: item.startsAt,
                 endsAt: item.endsAt,
-                status: item.status
+                status: item.status,
+                locale: VoyaAppLocale.currentIdentifier,
+                languageCode: VoyaAppLocale.currentLanguageCode,
+                languageName: VoyaAppLocale.currentLanguageName
             )
         )
 
@@ -1901,11 +1925,17 @@ private struct ItemEnrichmentRequest: Encodable {
     var startsAt: Date?
     var endsAt: Date?
     var status: String
+    var locale: String
+    var languageCode: String
+    var languageName: String
 }
 
 private struct VercelExtractionRequest: Encodable {
     let sourceName: String
     let text: String
+    let locale: String
+    let languageCode: String
+    let languageName: String
 }
 
 private struct VercelExtractionResponse: Decodable {

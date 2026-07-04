@@ -54,6 +54,9 @@ type EnrichmentRequest = {
   startsAt?: string | number | null;
   endsAt?: string | number | null;
   status?: string;
+  locale?: string;
+  languageCode?: string;
+  languageName?: string;
 };
 
 type GeocodeResult =
@@ -126,6 +129,23 @@ const travelBriefSchema = z.object({
 
 const locationModelName = () => openAIModelFor("location");
 const briefModelName = () => openAIModelFor("brief");
+
+function responseLanguageInstruction(languageCode?: string, languageName?: string, locale?: string) {
+  const code = clean(languageCode) || "en";
+  const name = clean(languageName) || code;
+  const region = clean(locale) || code;
+
+  if (code.toLowerCase().startsWith("en")) {
+    return "Write all human-facing assistant text in English.";
+  }
+
+  return [
+    `Write all human-facing assistant text in ${name} (locale ${region}).`,
+    "This includes summary, briefMarkdown, section titles/bodies, action titles/details, route-leg titles/guidance, card titles you create, and warnings you create.",
+    "Keep airline codes, flight numbers, airport codes, confirmation codes, URLs, hotel/venue names, street addresses, provider values, and proper nouns as shown unless a localized form is obvious.",
+    "Do not translate machine enum values such as priority, kind, or URLs."
+  ].join(" ");
+}
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -992,7 +1012,7 @@ function markdownFromSections(summary: string, sections: TravelBriefSection[], a
   return ["## Travel brief", summary, sectionLines, routeLines, actionLines].filter(Boolean).join("\n\n");
 }
 
-async function aiBrief(kind: string, title: string, location: string, status: string, cards: EnrichmentCard[], warnings: string[]) {
+async function aiBrief(kind: string, title: string, location: string, status: string, cards: EnrichmentCard[], warnings: string[], languageInstruction: string, locale: string) {
   if (!process.env.OPENAI_API_KEY) {
     return undefined;
   }
@@ -1011,9 +1031,13 @@ async function aiBrief(kind: string, title: string, location: string, status: st
         "Do not pack labeled fields into one run-on paragraph. Use natural sentences with spaces between every idea.",
         "Keep each section body to 1-3 readable sentences. Put dense labels into separate sections instead of inline.",
         "If a fact is missing, say what would unlock it instead of pretending.",
+        languageInstruction,
         "Return structured JSON only."
       ].join(" "),
       prompt: [
+        `App locale: ${locale}`,
+        languageInstruction,
+        "",
         `Kind: ${kind || "unknown"}`,
         `Title: ${title || "unknown"}`,
         `Location: ${location || "unknown"}`,
@@ -1034,13 +1058,19 @@ async function aiBrief(kind: string, title: string, location: string, status: st
   }
 }
 
-async function buildTravelBrief(kind: string, title: string, location: string, status: string, cards: EnrichmentCard[], warnings: string[]): Promise<Pick<EnrichmentResponse, "summary" | "briefMarkdown" | "sections" | "actions" | "routeLegs" | "imageURLs">> {
+async function buildTravelBrief(kind: string, title: string, location: string, status: string, cards: EnrichmentCard[], warnings: string[], locale: string, languageCode: string, languageName: string): Promise<Pick<EnrichmentResponse, "summary" | "briefMarkdown" | "sections" | "actions" | "routeLegs" | "imageURLs">> {
   const routeLegs = deterministicRouteLeg(kind, title, location);
   const actions = deterministicActions(kind, title, location, cards);
   const sections = deterministicSections(kind, title, location, cards, warnings);
-  const summary = title
-    ? `Voya is watching ${title} as a travel moment, not just a booking.`
-    : "Add more details and Voya will turn this into a practical travel moment.";
+  const isRussian = languageCode.toLowerCase().startsWith("ru");
+  const languageInstruction = responseLanguageInstruction(languageCode, languageName, locale);
+  const summary = isRussian
+    ? (title
+      ? `Voya следит за ${title} как за моментом поездки, а не просто бронированием.`
+      : "Добавьте больше деталей, и Voya превратит это в практичный момент поездки.")
+    : (title
+      ? `Voya is watching ${title} as a travel moment, not just a booking.`
+      : "Add more details and Voya will turn this into a practical travel moment.");
   const fallback = {
     summary,
     briefMarkdown: markdownFromSections(summary, sections, actions, routeLegs),
@@ -1050,7 +1080,7 @@ async function buildTravelBrief(kind: string, title: string, location: string, s
     imageURLs: cards.map((card) => card.actionURL).filter((url): url is string => Boolean(url)).slice(0, 2)
   };
 
-  const generated = await aiBrief(kind, title, location, status, cards, warnings);
+  const generated = await aiBrief(kind, title, location, status, cards, warnings, languageInstruction, locale);
   if (!generated) {
     return fallback;
   }
@@ -1332,6 +1362,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const location = clean(body.location);
   const lookupPlace = await normalizeLocationForProviders(kind, title, location);
   const status = clean(body.status);
+  const locale = clean(body.locale) || "en";
+  const languageCode = clean(body.languageCode) || locale.split(/[-_]/)[0] || "en";
+  const languageName = clean(body.languageName) || languageCode;
 
   const cards: EnrichmentCard[] = [
     {
@@ -1355,7 +1388,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const warnings = cards.filter((card) => card.kind === "warning").map((card) => `${card.title}: ${card.detail ?? card.value}`);
-  const brief = await buildTravelBrief(kind, title, location, status, cards, warnings);
+  const brief = await buildTravelBrief(kind, title, location, status, cards, warnings, locale, languageCode, languageName);
 
   const response: EnrichmentResponse = {
     summary: brief.summary,

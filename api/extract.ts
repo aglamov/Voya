@@ -25,11 +25,31 @@ const extractionSchema = z.object({
 
 const requestSchema = z.object({
   sourceName: z.string().min(1).max(240),
-  text: z.string().min(1).max(50000)
+  text: z.string().min(1).max(50000),
+  locale: z.string().min(2).max(64).optional(),
+  languageCode: z.string().min(2).max(16).optional(),
+  languageName: z.string().min(2).max(80).optional()
 });
 
 const extractionModelName = () => openAIModelFor("extraction");
 const jsonRepairModelName = () => openAIModelFor("jsonRepair");
+
+function responseLanguageInstruction(languageCode?: string, languageName?: string, locale?: string) {
+  const code = languageCode?.trim() || "en";
+  const name = languageName?.trim() || code;
+  const region = locale?.trim() || code;
+
+  if (code.toLowerCase().startsWith("en")) {
+    return "Return all human-facing text fields in English.";
+  }
+
+  return [
+    `Return all human-facing text fields in ${name} (locale ${region}).`,
+    "This includes type, title, normalizedDestination when it is a generic place phrase, primaryTime, item titles, item locations when they are generic/missing-field text, item statuses, and warnings.",
+    "Keep airline codes, flight numbers, airport codes, confirmation codes, URLs, hotel/venue names, street addresses, and proper nouns as shown unless the source itself provides a localized form.",
+    "Keep ISO date-time values unchanged except for choosing the correct local offset."
+  ].join(" ");
+}
 
 const schemaInstructions = [
   "Return only JSON with this exact shape:",
@@ -85,7 +105,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "Invalid confirmation payload" });
   }
 
-  const { sourceName, text } = parsedRequest.data;
+  const { sourceName, text, locale, languageCode, languageName } = parsedRequest.data;
+  const languageInstruction = responseLanguageInstruction(languageCode, languageName, locale);
 
   try {
     const { object } = await generateObject({
@@ -101,10 +122,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         "Infer a clean normalizedDestination from the itinerary, preferring the longest stay/place over a transit airport.",
         "When details are missing, keep the item but mark the missing field plainly and add a warning.",
         "Do not invent confirmation numbers, addresses, gates, or statuses.",
+        languageInstruction,
         schemaInstructions
       ].join(" "),
       prompt: [
         `Source file: ${sourceName}`,
+        `App locale: ${locale ?? "en"}`,
+        languageInstruction,
         "Extract flights, hotels, events, and transit reservations into itinerary items.",
         "Use kind values only from: flight, hotel, event, transit.",
         "Use local timezone offsets in startsAt and endsAt for the relevant departure, arrival, hotel, or venue location. Do not use Z/UTC unless the source explicitly says UTC.",
