@@ -1805,6 +1805,15 @@ struct VercelMobilityService {
         guard destinationItem.kind != .transit else {
             return nil
         }
+
+        if originItem.kind == .flight,
+           destinationItem.kind == .flight,
+           let arrivalAirport = routeParts(in: originItem.location).last,
+           let departureAirport = routeParts(in: destinationItem.location).first,
+           arrivalAirport.caseInsensitiveCompare(departureAirport) == .orderedSame {
+            return nil
+        }
+
         guard let origin = transferOrigin(for: originItem),
               let destination = transferDestination(for: destinationItem),
               origin.caseInsensitiveCompare(destination) != .orderedSame else {

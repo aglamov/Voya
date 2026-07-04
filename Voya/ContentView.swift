@@ -364,6 +364,11 @@ private struct TripsView: View {
                             }
 
                             if index + 1 < itinerary.count,
+                               let layover = FlightLayoverDisplay(arrivingFlight: item, departingFlight: itinerary[index + 1]) {
+                                FlightLayoverCard(layover: layover)
+                            }
+
+                            if index + 1 < itinerary.count,
                                let context = VercelMobilityService.transferContext(from: item, to: itinerary[index + 1]) {
                                 TransferRecommendationCard(
                                     context: context,
@@ -1817,6 +1822,90 @@ private struct TimelineRow: View {
     }
 }
 
+private struct FlightLayoverDisplay {
+    let airport: String
+    let duration: String
+    let detail: String
+
+    init?(arrivingFlight: ItineraryItem, departingFlight: ItineraryItem) {
+        guard arrivingFlight.kind == .flight,
+              departingFlight.kind == .flight,
+              let arrival = arrivingFlight.endsAt,
+              let departure = departingFlight.startsAt,
+              departure > arrival else {
+            return nil
+        }
+
+        let arrivingAirport = Self.routeParts(in: arrivingFlight.location).last
+        let departingAirport = Self.routeParts(in: departingFlight.location).first
+        airport = arrivingAirport ?? departingAirport ?? String(localized: "Connection")
+
+        let minutes = Int(departure.timeIntervalSince(arrival) / 60)
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        if hours > 0 && remainder > 0 {
+            duration = "\(hours)h \(remainder)m"
+        } else if hours > 0 {
+            duration = "\(hours)h"
+        } else {
+            duration = "\(remainder)m"
+        }
+
+        if let arrivingAirport, let departingAirport, arrivingAirport.localizedCaseInsensitiveCompare(departingAirport) != .orderedSame {
+            detail = String(localized: "\(arrivingAirport) to \(departingAirport)")
+        } else {
+            detail = String(localized: "Connection at \(airport)")
+        }
+    }
+
+    private static func routeParts(in value: String) -> [String] {
+        value
+            .replacingOccurrences(of: "→", with: " to ")
+            .components(separatedBy: " to ")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+}
+
+private struct FlightLayoverCard: View {
+    let layover: FlightLayoverDisplay
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "hourglass")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.voyaSky)
+                .frame(width: 34, height: 34)
+                .background(Color.voyaSky.opacity(0.10))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Connection")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaMuted)
+                    Spacer()
+                    Text(layover.duration)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaSky)
+                }
+
+                Text(layover.airport)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.voyaInk)
+                Text(layover.detail)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+            }
+        }
+        .padding(13)
+        .background(Color.voyaSky.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 6)
+    }
+}
+
 private struct TransferRecommendationCard: View {
     let context: MobilityTransferContext
     let phase: TransferPhase
@@ -2999,9 +3088,6 @@ private struct ItineraryItemDetailView: View {
                         onOpenLocation: openMaps,
                         onCopyLocation: copyLocation
                     )
-                    if let enrichment, enrichment.hasPlanDetails {
-                        TravelBriefCard(enrichment: enrichment)
-                    }
                     ItemInsightPanel(
                         item: item,
                         phase: ItineraryPhase(item: item),
@@ -3332,7 +3418,7 @@ private struct ItemCompanionCard: View {
             }
             .padding(18)
 
-            MomentMapPreview(
+            MomentLocationRow(
                 item: item,
                 displayLocation: displayLocation,
                 route: flightRoute,
@@ -3666,7 +3752,7 @@ private struct MomentMetric: View {
     }
 }
 
-private struct MomentMapPreview: View {
+private struct MomentLocationRow: View {
     let item: ItineraryItem
     let displayLocation: String
     let route: FlightRouteDisplay?
@@ -3675,24 +3761,27 @@ private struct MomentMapPreview: View {
     let onCopyLocation: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ZStack(alignment: .bottomLeading) {
-                mapArtwork
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: route == nil ? "mappin.and.ellipse" : "arrow.triangle.swap")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(item.kind.timelineAccent)
+                    .frame(width: 34, height: 34)
+                    .background(item.kind.timelineAccent.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(route == nil ? String(localized: "Location") : String(localized: "Route"))
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.82))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaMuted)
                     Text(previewTitle)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.82)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.voyaInk)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(14)
+
+                Spacer(minLength: 0)
             }
-            .frame(height: 136)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
             HStack(spacing: 10) {
                 Button(action: onOpenLocation) {
@@ -3720,35 +3809,9 @@ private struct MomentMapPreview: View {
                 .accessibilityLabel(isCopied ? "Copied" : "Copy location")
             }
         }
-    }
-
-    private var mapArtwork: some View {
-        ZStack {
-            LinearGradient(
-                colors: [item.kind.timelineAccent.opacity(0.86), Color.voyaInk.opacity(0.92)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            GridPattern()
-                .stroke(.white.opacity(0.12), lineWidth: 1)
-
-            Path { path in
-                path.move(to: CGPoint(x: 28, y: 96))
-                path.addCurve(to: CGPoint(x: 130, y: 46), control1: CGPoint(x: 55, y: 40), control2: CGPoint(x: 96, y: 120))
-                path.addCurve(to: CGPoint(x: 250, y: 72), control1: CGPoint(x: 174, y: -4), control2: CGPoint(x: 202, y: 104))
-                path.addCurve(to: CGPoint(x: 340, y: 34), control1: CGPoint(x: 284, y: 50), control2: CGPoint(x: 312, y: 50))
-            }
-            .stroke(.white.opacity(0.72), style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [8, 8]))
-
-            HStack {
-                MapPin(color: .white, fill: item.kind.timelineAccent)
-                    .offset(x: 28, y: 22)
-                Spacer()
-                MapPin(color: .white, fill: Color.voyaGold)
-                    .offset(x: -42, y: -18)
-            }
-        }
+        .padding(14)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var previewTitle: String {
@@ -3771,42 +3834,6 @@ private struct MomentMapPreview: View {
 
     private var hasLocation: Bool {
         !item.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-}
-
-private struct GridPattern: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let step: CGFloat = 28
-
-        stride(from: rect.minX - rect.height, through: rect.maxX + rect.height, by: step).forEach { x in
-            path.move(to: CGPoint(x: x, y: rect.minY))
-            path.addLine(to: CGPoint(x: x + rect.height, y: rect.maxY))
-        }
-
-        stride(from: rect.minX, through: rect.maxX + rect.height, by: step).forEach { x in
-            path.move(to: CGPoint(x: x, y: rect.maxY))
-            path.addLine(to: CGPoint(x: x - rect.height, y: rect.minY))
-        }
-
-        return path
-    }
-}
-
-private struct MapPin: View {
-    let color: Color
-    let fill: Color
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(color.opacity(0.22))
-                .frame(width: 38, height: 38)
-            Circle()
-                .fill(fill)
-                .frame(width: 18, height: 18)
-                .overlay(Circle().stroke(color, lineWidth: 4))
-        }
     }
 }
 
@@ -4041,16 +4068,20 @@ private struct ItemInsightPanel: View {
     }
 
     private var guidanceRows: [AssistantGuidance] {
-        var rows = [
-            AssistantGuidance(
-                title: String(localized: "Next move"),
-                value: primaryNextMove,
-                detail: primaryNextMoveDetail,
-                symbol: "figure.walk.motion",
-                tint: Color.voyaTeal,
-                actionURL: nil
+        var rows: [AssistantGuidance] = []
+
+        if let firstWarning = enrichment?.warnings.first, !firstWarning.isEmpty {
+            rows.append(
+                AssistantGuidance(
+                    title: String(localized: "Attention"),
+                    value: firstWarning,
+                    detail: nil,
+                    symbol: "exclamationmark.triangle.fill",
+                    tint: Color.voyaCoral,
+                    actionURL: nil
+                )
             )
-        ]
+        }
 
         if let enrichment, !enrichment.routeLegs.isEmpty {
             rows.append(contentsOf: enrichment.routeLegs.prefix(3).map { leg in
@@ -4066,7 +4097,7 @@ private struct ItemInsightPanel: View {
         }
 
         if let enrichment, !enrichment.actions.isEmpty {
-            rows.append(contentsOf: enrichment.actions.prefix(5).map { action in
+            rows.append(contentsOf: enrichment.actions.prefix(3).map { action in
                 AssistantGuidance(
                     title: actionTitle(for: action),
                     value: action.title,
@@ -4079,7 +4110,10 @@ private struct ItemInsightPanel: View {
         }
 
         if let enrichment, !enrichment.cards.isEmpty {
-            rows.append(contentsOf: enrichment.cards.prefix(8).map { card in
+            let supportingCards = enrichment.cards.filter { card in
+                !["maps", "warning"].contains(card.kind)
+            }
+            rows.append(contentsOf: supportingCards.prefix(3).map { card in
                 AssistantGuidance(
                     title: guidanceTitle(for: card),
                     value: card.value,
@@ -4089,22 +4123,10 @@ private struct ItemInsightPanel: View {
                     actionURL: card.actionURL
                 )
             })
-        } else {
-            rows.append(contentsOf: fallbackRows)
         }
 
-        if let firstWarning = enrichment?.warnings.first, !firstWarning.isEmpty {
-            rows.insert(
-                AssistantGuidance(
-                    title: String(localized: "Watch this"),
-                    value: firstWarning,
-                    detail: String(localized: "Voya will keep this visible because it may affect the plan."),
-                    symbol: "exclamationmark.triangle.fill",
-                    tint: Color.voyaCoral,
-                    actionURL: nil
-                ),
-                at: min(1, rows.count)
-            )
+        if rows.isEmpty {
+            rows.append(contentsOf: fallbackRows)
         }
 
         return rows
