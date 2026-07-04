@@ -222,6 +222,7 @@ Example request:
   "destination": { "address": "Fiumicino Airport Terminal 3" },
   "arrivalTime": "2026-08-16T08:40:00Z",
   "modes": ["taxi", "transit", "drive"],
+  "ownedVehicleAvailable": false,
   "airportBufferMinutes": 120,
   "taxiPickupBufferMinutes": 10,
   "locale": "en-US"
@@ -270,7 +271,7 @@ Recommended: Taxi, leave by 06:02
 
 Other options:
 - Public transit: 54 min travel + 120 min buffer, cheaper, more walking
-- Drive: 31 min travel + 120 min buffer, parking/drop-off uncertainty
+- Own car: 31 min travel + 120 min buffer, only recommended when a personal or rental car is available
 ```
 
 Tapping opens:
