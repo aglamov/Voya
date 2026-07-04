@@ -147,6 +147,7 @@ Optional enrichment environment variables:
 - `TICKETMASTER_API_KEY` or `TICKETMASTER_CONSUMER_KEY`: enables nearby public event cards and Ticketmaster event links through the Discovery API. Use the Consumer Key from Ticketmaster Developer; the Consumer Secret is not needed for Discovery event search.
 - `FLIGHTAWARE_AEROAPI_KEY`: enables `GET/POST /api/flight-status` and `POST /api/booking-validation` through FlightAware AeroAPI for flight existence checks, airline schedules, gate assignments, gate times, baggage claim, delay fields, aircraft details, tracking data, and alert capability.
 - `GOOGLE_ROUTES_API_KEY` or `GOOGLE_MAPS_API_KEY`: enables `POST /api/mobility` through Google Routes API for live transfer duration, traffic-aware driving, public transit, walking, cycling, route comparison, and time-to-leave planning.
+- `UBER_CLIENT_ID` and `UBER_CLIENT_SECRET`: optional Uber developer credentials. `GET /api/uber-diagnostics` checks whether OAuth and estimates/products endpoints are accessible without exposing secrets.
 - `VOYA_API_PUBLIC_BASE_URL`: optional public backend URL used to describe the FlightAware alert callback endpoint, for example `https://voya-lime.vercel.app`.
 
 Flight support endpoints:
