@@ -66,6 +66,7 @@ Voya should compare the full trip, not only the flight:
 - estimated hotel price
 - destination convenience
 - airport-to-city transit
+- time-to-leave and transfer reliability
 - weather
 - events
 - seasonality
@@ -98,6 +99,20 @@ Examples:
 - "Leave in 25 minutes to reach the airport comfortably."
 - "The public transit route to your hotel takes 42 minutes."
 - "Your event starts at 19:30. The best route from the hotel leaves at 18:45."
+
+### 5. Move Between Trip Points
+
+The user wants to know the best way to move through the trip, not just where each booking is.
+
+Voya should:
+
+- infer likely origin and destination from confirmed itinerary items
+- ask for missing home, hotel, terminal, or venue details only when needed
+- compare taxi, driving, public transit, walking, and cycling where available
+- include context-aware buffers for airport security, baggage, check-in, weather, late-night arrivals, and unfamiliar cities
+- recommend a route with a plain-language reason
+- refresh route timing near departure and warn only when the traveler needs to act
+- open the selected route in Apple Maps, Google Maps, or a regional map app
 
 ## AI Responsibilities
 
@@ -274,6 +289,7 @@ The user can confirm, edit, or discard before the item enters the itinerary.
 - Apple MapKit
 - Google Routes API
 - GTFS and GTFS Realtime for supported cities
+- Yandex Maps or 2GIS where local coverage is materially stronger
 
 ## Early Monetization Ideas
 

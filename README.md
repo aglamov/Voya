@@ -62,6 +62,7 @@ The app may compare:
 - Tours and experiences
 - Airport transfer options
 - Public transport convenience
+- Time-to-leave and transfer reliability
 - Weather and seasonality
 
 ### Import Confirmations
@@ -90,6 +91,7 @@ Examples:
 - Hotel check-in and check-out reminders
 - Public transport route to hotel or event
 - Time-to-leave notifications
+- Comparisons between taxi, driving, public transport, walking, and cycling where relevant
 - Contextual suggestions when plans change
 
 ## MVP Scope
@@ -122,6 +124,8 @@ See [docs/architecture.md](docs/architecture.md) for the initial iPhone app, bac
 
 See [docs/flight-services.md](docs/flight-services.md) for the recommended flight confirmation, live status, delay prediction, gate-change, and alert provider strategy.
 
+See [docs/mobility-services.md](docs/mobility-services.md) for the recommended route planning, transfer recommendation, maps provider, time-to-leave, and regional mobility strategy.
+
 ## Vercel AI Extraction
 
 The app calls a Vercel Function at `POST /api/extract` to recognize pasted or uploaded travel confirmations. The function calls OpenAI directly and returns normalized itinerary JSON for the review screen.
@@ -142,6 +146,7 @@ Optional enrichment environment variables:
 - `OPENWEATHER_API_KEY`: enables weather cards through OpenWeather geocoding and One Call APIs.
 - `TICKETMASTER_API_KEY` or `TICKETMASTER_CONSUMER_KEY`: enables nearby public event cards and Ticketmaster event links through the Discovery API. Use the Consumer Key from Ticketmaster Developer; the Consumer Secret is not needed for Discovery event search.
 - `FLIGHTAWARE_AEROAPI_KEY`: enables `GET/POST /api/flight-status` and `POST /api/booking-validation` through FlightAware AeroAPI for flight existence checks, airline schedules, gate assignments, gate times, baggage claim, delay fields, aircraft details, tracking data, and alert capability.
+- `GOOGLE_ROUTES_API_KEY` or `GOOGLE_MAPS_API_KEY`: enables `POST /api/mobility` through Google Routes API for live transfer duration, traffic-aware driving, public transit, walking, cycling, route comparison, and time-to-leave planning.
 - `VOYA_API_PUBLIC_BASE_URL`: optional public backend URL used to describe the FlightAware alert callback endpoint, for example `https://voya-lime.vercel.app`.
 
 Flight support endpoints:
@@ -151,6 +156,10 @@ Flight support endpoints:
 - `POST /api/booking-validation` combines imported-confirmation evidence, user review, and provider flight existence validation. It does not claim true PNR or ticket validation unless Voya later integrates directly with the airline, OTA, NDC, GDS, or booking provider.
 - `GET/POST/DELETE /api/flightaware-alert-subscriptions` proxies FlightAware AeroAPI `/alerts` management calls while keeping the AeroAPI key server-side. Use the exact alert payload shape from FlightAware's `/alerts` documentation.
 - `POST /api/flightaware-alerts` receives FlightAware alert callbacks after a FlightAware alert subscription points to this callback URL, then normalizes them for Voya alert generation.
+
+Mobility support endpoints:
+
+- `POST /api/mobility` with origin, destination, target arrival/departure time, candidate modes, and Voya buffer settings. It returns provider-neutral route options, total duration, travel duration, buffer minutes, leave-by time, trade-offs, map handoff URLs, and a recommended mode. Without a Google key, it returns explicit provider warnings and usable map handoff URLs instead of fake ETAs.
 
 iOS configuration:
 

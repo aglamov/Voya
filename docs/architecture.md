@@ -159,6 +159,8 @@ Initial job types:
 - push delivery
 - time-to-leave calculation
 - transit route refresh
+- transfer plan refresh
+- route option diffing
 - recommendation refresh
 
 Flight monitoring should become more frequent as departure approaches.
@@ -202,7 +204,11 @@ GET /recommendations/:id
 
 GET /trips/:id/alerts
 POST /push/register-device
+
+POST /mobility
 ```
+
+`POST /mobility` should remain provider-neutral. The first implementation can call Google Routes API, but the response should expose Voya-owned `RouteOption` and `MobilityRecommendation` shapes rather than Google payloads.
 
 ## Provider Strategy
 
@@ -221,6 +227,8 @@ Provider categories:
 Each adapter should normalize data into Voya-owned models. The product should not leak provider-specific shapes into iOS.
 
 Flight services need a specific split between confirmation import, live status monitoring, predictive scoring, and alerts. See [Flight Services Strategy](flight-services.md) for the recommended MVP provider stack and normalized flight snapshot model.
+
+Mobility services need a similar split between provider routing, Voya-owned transfer recommendations, time-to-leave buffers, regional provider selection, and native map handoff. See [Mobility Services Strategy](mobility-services.md) for the recommended production provider stack and normalized transfer model.
 
 ## Suggested Build Order
 
