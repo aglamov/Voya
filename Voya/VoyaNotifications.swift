@@ -104,9 +104,44 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
     }
 
     private func notificationRequests(for trip: VoyaNotificationTrip, now: Date) -> [UNNotificationRequest] {
-        trip.items.flatMap { item in
+        tripStartNotificationRequests(for: trip, now: now) + trip.items.flatMap { item in
             notificationRequests(for: item, in: trip, now: now)
         }
+    }
+
+    private func tripStartNotificationRequests(for trip: VoyaNotificationTrip, now: Date) -> [UNNotificationRequest] {
+        guard let firstStart = trip.items.compactMap(\.startsAt).min() else {
+            return []
+        }
+
+        let triggerDate = firstStart.addingTimeInterval(TimeInterval(-3 * 24 * 60 * 60))
+        guard triggerDate > now.addingTimeInterval(60) else {
+            return []
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "Trip starts in 3 days")
+        content.subtitle = trip.title
+        content.body = String(localized: "Check the plan, documents, route, and buffers before \(trip.title).")
+        content.sound = .default
+        content.threadIdentifier = trip.id.uuidString
+        content.userInfo = [
+            "tripID": trip.id.uuidString,
+            "kind": "trip"
+        ]
+
+        let trigger = UNCalendarNotificationTrigger(
+            dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: triggerDate),
+            repeats: false
+        )
+
+        return [
+            UNNotificationRequest(
+                identifier: "\(identifierPrefix)\(trip.id.uuidString).trip-start-3d",
+                content: content,
+                trigger: trigger
+            )
+        ]
     }
 
     private func notificationRequests(for item: VoyaNotificationItem, in trip: VoyaNotificationTrip, now: Date) -> [UNNotificationRequest] {
@@ -163,7 +198,7 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
             ]
         case .transit:
             return [
-                .beforeStart(id: "transit-30m", minutes: 30),
+                .beforeStart(id: "transit-leave", minutes: 30),
                 .atStart(id: "transit-departure")
             ]
         }
@@ -195,7 +230,10 @@ private enum ItineraryReminderSpec {
 
     func title(for item: VoyaNotificationItem, trip: VoyaNotificationTrip) -> String {
         switch self {
-        case .beforeStart(_, let minutes):
+        case .beforeStart(let id, let minutes):
+            if id == "transit-leave" {
+                return String(localized: "Time to leave")
+            }
             return String(localized: "\(item.kind.displayName) in \(Self.displayLeadTime(minutes))")
         case .atStart:
             return startTitle(for: item)
@@ -211,6 +249,12 @@ private enum ItineraryReminderSpec {
 
         let firstPart = title.isEmpty ? item.kind.displayName : title
         let secondPart = location.isEmpty ? status : location
+        if case .beforeStart(let id, _) = self, id == "transit-leave" {
+            return secondPart.isEmpty
+                ? String(localized: "Open the route and start moving.")
+                : String(localized: "Open the route and start moving to \(secondPart).")
+        }
+
         return secondPart.isEmpty ? firstPart : "\(firstPart) · \(secondPart)"
     }
 

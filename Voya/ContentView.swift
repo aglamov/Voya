@@ -1,8 +1,10 @@
 import SwiftUI
 import SwiftData
+import ImageIO
 import PDFKit
 import UniformTypeIdentifiers
 import UIKit
+import Vision
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -580,6 +582,7 @@ private struct ImportView: View {
     @EnvironmentObject private var store: VoyaStore
     @Binding var selectedTab: VoyaTab
     @State private var isFileImporterPresented = false
+    @State private var isPhotoImporterPresented = false
     @State private var isPasteImporterPresented = false
 
     private enum ScrollTarget {
@@ -596,15 +599,15 @@ private struct ImportView: View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
-                    HeaderBar(title: "Import", subtitle: "Travel inbox")
+                    HeaderBar(title: "Import", subtitle: "Add confirmation")
 
                     VStack(alignment: .leading, spacing: 18) {
                         HStack(alignment: .top, spacing: 14) {
                             VStack(alignment: .leading, spacing: 7) {
-                                Text("Travel inbox")
+                                Text("Add confirmation")
                                     .font(.system(size: 30, weight: .bold, design: .rounded))
                                     .foregroundStyle(Color.voyaInk)
-                                Text("Turn confirmations into a clean itinerary.")
+                                Text("Paste text, choose a file, or read a photo.")
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(Color.voyaMuted)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -620,24 +623,27 @@ private struct ImportView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
 
-                        Button {
-                            isFileImporterPresented = true
-                        } label: {
-                            ImportPrimaryDropZone()
-                        }
-                        .buttonStyle(.plain)
-
                         LazyVGrid(columns: columns, spacing: 12) {
                             Button {
-                                isPasteImporterPresented = true
+                                isFileImporterPresented = true
                             } label: {
-                                ImportOption(symbol: "text.alignleft", title: "Paste", tint: .voyaGold)
+                                ImportOption(symbol: "doc.text.magnifyingglass", title: "File", subtitle: "PDF or text", tint: .voyaTeal)
                             }
                             .buttonStyle(.plain)
 
-                            ImportOption(symbol: "photo.on.rectangle", title: "Screenshot", tint: .voyaCoral, isEnabled: false)
-                            ImportOption(symbol: "camera.viewfinder", title: "Photo", tint: .indigo, isEnabled: false)
-                            ImportOption(symbol: "envelope.open", title: "Email", tint: .voyaSky, isEnabled: false)
+                            Button {
+                                isPasteImporterPresented = true
+                            } label: {
+                                ImportOption(symbol: "text.alignleft", title: "Paste", subtitle: "Booking text", tint: .voyaGold)
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                isPhotoImporterPresented = true
+                            } label: {
+                                ImportOption(symbol: "photo.on.rectangle", title: "Photo", subtitle: "OCR from image", tint: .voyaCoral)
+                            }
+                            .buttonStyle(.plain)
                         }
 
                         if let importMessage = store.importMessage {
@@ -696,6 +702,13 @@ private struct ImportView: View {
         ) { result in
             handleFileImport(result)
         }
+        .fileImporter(
+            isPresented: $isPhotoImporterPresented,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: false
+        ) { result in
+            handlePhotoImport(result)
+        }
         .sheet(isPresented: $isPasteImporterPresented) {
             PasteConfirmationView()
                 .environmentObject(store)
@@ -735,6 +748,50 @@ private struct ImportView: View {
         } catch {
             store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
         }
+    }
+
+    private func handlePhotoImport(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let sourceName = url.lastPathComponent
+        guard let image = UIImage(contentsOfFile: url.path),
+              let cgImage = image.cgImage else {
+            store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
+            return
+        }
+
+        do {
+            let text = try recognizeText(in: cgImage, orientation: CGImagePropertyOrientation(image.imageOrientation))
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
+                return
+            }
+            store.extract(text: text, sourceName: sourceName)
+        } catch {
+            store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
+        }
+    }
+
+    private func recognizeText(in image: CGImage, orientation: CGImagePropertyOrientation) throws -> String {
+        var recognizedLines: [String] = []
+        let request = VNRecognizeTextRequest { request, _ in
+            guard let observations = request.results as? [VNRecognizedTextObservation] else { return }
+            recognizedLines = observations.compactMap { observation in
+                observation.topCandidates(1).first?.string
+            }
+        }
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+
+        let handler = VNImageRequestHandler(cgImage: image, orientation: orientation)
+        try handler.perform([request])
+        return recognizedLines.joined(separator: "\n")
     }
 
     private func readPDFText(from url: URL) -> String? {
@@ -1557,7 +1614,7 @@ private struct TripHeroSummary {
             statusText = String(localized: "Trip ended")
             phaseText = String(localized: "Done")
         } else {
-            statusText = String(localized: "Ready when you are")
+            statusText = String(localized: "Dates needed")
             phaseText = String(localized: "Ready")
         }
 
@@ -4918,32 +4975,26 @@ private struct ImportPrimaryDropZone: View {
 private struct ImportOption: View {
     let symbol: String
     let title: String
+    let subtitle: String
     let tint: Color
-    var isEnabled = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Image(systemName: symbol)
                 .font(.title3.weight(.bold))
-                .foregroundStyle(isEnabled ? tint : Color.voyaMuted)
+                .foregroundStyle(tint)
                 .frame(width: 42, height: 42)
-                .background((isEnabled ? tint : Color.voyaMuted).opacity(0.12))
+                .background(tint.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
-            HStack {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.headline)
-                    .foregroundStyle(isEnabled ? Color.voyaInk : Color.voyaMuted)
-                Spacer()
-                if !isEnabled {
-                    Text("Soon")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(Color.voyaMuted)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(.white)
-                        .clipShape(Capsule())
-                }
+                    .foregroundStyle(Color.voyaInk)
+                Text(subtitle)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .lineLimit(2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -4951,6 +5002,31 @@ private struct ImportOption: View {
         .padding(14)
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private extension CGImagePropertyOrientation {
+    init(_ orientation: UIImage.Orientation) {
+        switch orientation {
+        case .up:
+            self = .up
+        case .upMirrored:
+            self = .upMirrored
+        case .down:
+            self = .down
+        case .downMirrored:
+            self = .downMirrored
+        case .left:
+            self = .left
+        case .leftMirrored:
+            self = .leftMirrored
+        case .right:
+            self = .right
+        case .rightMirrored:
+            self = .rightMirrored
+        @unknown default:
+            self = .up
+        }
     }
 }
 

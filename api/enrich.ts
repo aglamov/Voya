@@ -539,6 +539,16 @@ function eventDetail(event: TicketmasterEvent) {
   return parts.join(" · ");
 }
 
+function weatherGeocodeCandidates(location: string) {
+  const candidates = [location.trim()];
+  const parts = location.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 2) {
+    candidates.push(parts.slice(-2).join(", "));
+  }
+
+  return [...new Set(candidates.filter(Boolean))];
+}
+
 async function geocode(locationLookup: string | LocationLookup) {
   let location = typeof locationLookup === "string" ? locationLookup : locationLookup.query;
   if (typeof locationLookup !== "string" && locationLookup.coordinates) {
@@ -576,20 +586,25 @@ async function geocode(locationLookup: string | LocationLookup) {
     return { error: "missing_input" } satisfies GeocodeResult;
   }
 
-  const url = new URL("https://api.openweathermap.org/geo/1.0/direct");
-  url.searchParams.set("q", location);
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("appid", apiKey);
+  for (const candidate of weatherGeocodeCandidates(location)) {
+    const url = new URL("https://api.openweathermap.org/geo/1.0/direct");
+    url.searchParams.set("q", candidate);
+    url.searchParams.set("limit", "1");
+    url.searchParams.set("appid", apiKey);
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    return { error: "provider_error", status: response.status } satisfies GeocodeResult;
+    const response = await fetch(url);
+    if (!response.ok) {
+      return { error: "provider_error", status: response.status } satisfies GeocodeResult;
+    }
+
+    const places = (await response.json()) as Array<{ lat: number; lon: number; name?: string; country?: string }>;
+    const place = places[0];
+    if (place) {
+      return { place };
+    }
   }
 
-  const places = (await response.json()) as Array<{ lat: number; lon: number; name?: string; country?: string }>;
-  const place = places[0];
-
-  return place ? { place } : { error: "not_found" } satisfies GeocodeResult;
+  return { error: "not_found" } satisfies GeocodeResult;
 }
 
 async function weatherCard(location: string | LocationLookup | undefined): Promise<EnrichmentCard> {

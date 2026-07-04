@@ -635,7 +635,8 @@ function tradeoffsFor(mode: RouteMode, durationMinutes?: number, bufferMinutes =
   if (mode === "taxi") {
     tradeoffs.push("Highest convenience, but price and pickup time can vary.");
   } else if (mode === "transit") {
-    tradeoffs.push("Usually cheaper and lower-emission, but depends on schedules and transfers.");
+    tradeoffs.push("Shown by default so the traveler can see the public transport route first.");
+    tradeoffs.push("Check live schedules, transfers, and platform details in maps before leaving.");
   } else if (mode === "drive") {
     tradeoffs.push("Useful only when a personal or rental car is actually available.");
     tradeoffs.push("Flexible timing, but traffic, parking, and airport drop-off rules can change the real cost.");
@@ -689,12 +690,12 @@ function recommendationFor(request: MobilityPlanRequest, options: MobilityRouteO
     mode: best.mode,
     title: best.title,
     reason: best.mode === "taxi"
-      ? "Best balance when time, luggage, or arrival stress matter more than price."
+      ? "Consider this when time, luggage, or arrival stress matter more than price."
       : best.mode === "transit"
-        ? "Best balance of duration, cost, and predictability for this transfer."
+        ? "Public transport is shown first by default; verify the exact route and schedule in maps."
         : best.mode === "drive"
-          ? "Best option because a personal or rental car is available for this transfer."
-          : "Best current balance of travel time and reliability.",
+          ? "Useful when a personal or rental car is available for this transfer."
+          : "Useful when travel time and reliability fit this transfer.",
     leaveBy: best.leaveBy
   };
 }
