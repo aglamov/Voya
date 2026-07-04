@@ -30,7 +30,7 @@ struct TripRecommendation: Identifiable {
     let accent: Color
 }
 
-enum ItineraryKind: String, CaseIterable, Codable {
+enum ItineraryKind: String, CaseIterable, Codable, Sendable {
     case flight = "Flight"
     case hotel = "Hotel"
     case event = "Event"
@@ -619,6 +619,7 @@ final class VoyaStore: ObservableObject {
             } else if selectedTripID == nil {
                 selectedTripID = trips.first?.id
             }
+            syncTripNotifications()
         } catch {
             importMessage = String(localized: "Could not load saved trips")
             trips = []
@@ -710,8 +711,33 @@ final class VoyaStore: ObservableObject {
 
         do {
             try modelContext.save()
+            syncTripNotifications()
         } catch {
             importMessage = String(localized: "Could not clean up duplicate trip items")
+        }
+    }
+
+    private func syncTripNotifications() {
+        let notificationTrips = trips.map { trip in
+            VoyaNotificationTrip(
+                id: trip.id,
+                title: trip.title,
+                items: sortedItinerary(trip.items).map { item in
+                    VoyaNotificationItem(
+                        id: item.id,
+                        kind: item.kind,
+                        title: item.title,
+                        location: item.location,
+                        status: item.status,
+                        startsAt: item.startsAt,
+                        endsAt: item.endsAt
+                    )
+                }
+            )
+        }
+
+        Task {
+            await VoyaNotificationScheduler.shared.syncNotifications(for: notificationTrips)
         }
     }
 
