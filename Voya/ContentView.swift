@@ -304,6 +304,8 @@ private struct TripsView: View {
                     }
 
                     let itinerary = store.itinerary(for: trip)
+                    TripOperationsCard(trip: trip, itinerary: itinerary)
+
                     HStack {
                         Text("Timeline")
                             .font(.title3.bold())
@@ -591,27 +593,46 @@ private struct ImportView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     HeaderBar(title: "Import", subtitle: "Travel inbox")
 
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Drop confirmations here.")
-                            .font(.system(size: 30, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.voyaInk)
+                    VStack(alignment: .leading, spacing: 18) {
+                        HStack(alignment: .top, spacing: 14) {
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text("Travel inbox")
+                                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.voyaInk)
+                                Text("Turn confirmations into a clean itinerary.")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Color.voyaMuted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer(minLength: 10)
+
+                            Image(systemName: store.isExtractingConfirmation ? "wand.and.stars" : "tray.and.arrow.down.fill")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 52, height: 52)
+                                .background(Color.voyaInk)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        }
+
+                        Button {
+                            isFileImporterPresented = true
+                        } label: {
+                            ImportPrimaryDropZone()
+                        }
+                        .buttonStyle(.plain)
 
                         LazyVGrid(columns: columns, spacing: 12) {
-                            Button {
-                                isFileImporterPresented = true
-                            } label: {
-                                ImportOption(symbol: "doc.text", title: "PDF/TXT", tint: .voyaTeal)
-                            }
-                            .buttonStyle(.plain)
-
-                            ImportOption(symbol: "photo.on.rectangle", title: "Screenshot", tint: .voyaCoral, isEnabled: false)
-                            ImportOption(symbol: "camera.viewfinder", title: "Photo", tint: .indigo, isEnabled: false)
                             Button {
                                 isPasteImporterPresented = true
                             } label: {
                                 ImportOption(symbol: "text.alignleft", title: "Paste", tint: .voyaGold)
                             }
                             .buttonStyle(.plain)
+
+                            ImportOption(symbol: "photo.on.rectangle", title: "Screenshot", tint: .voyaCoral, isEnabled: false)
+                            ImportOption(symbol: "camera.viewfinder", title: "Photo", tint: .indigo, isEnabled: false)
+                            ImportOption(symbol: "envelope.open", title: "Email", tint: .voyaSky, isEnabled: false)
                         }
 
                         if let importMessage = store.importMessage {
@@ -1168,6 +1189,156 @@ private struct EmptyTripsCard: View {
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+}
+
+private struct TripOperationsCard: View {
+    let trip: Trip
+    let itinerary: [ItineraryItem]
+
+    private var sortedItems: [ItineraryItem] {
+        itinerary.sorted { first, second in
+            switch (first.startsAt, second.startsAt) {
+            case let (firstDate?, secondDate?):
+                return firstDate < secondDate
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                return first.createdAt < second.createdAt
+            }
+        }
+    }
+
+    private var nextItem: ItineraryItem? {
+        let now = Date()
+        return sortedItems.first { item in
+            guard let start = item.startsAt else {
+                return false
+            }
+            return (item.endsAt ?? start) >= now
+        } ?? sortedItems.first
+    }
+
+    private var firstTimedItem: ItineraryItem? {
+        sortedItems.first { $0.startsAt != nil }
+    }
+
+    private var lastTimedItem: ItineraryItem? {
+        sortedItems.last { $0.startsAt != nil || $0.endsAt != nil }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "location.viewfinder")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Color.voyaTeal)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Trip command")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text(commandSummary)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) {
+                TripMetricTile(title: "Items", value: "\(itinerary.count)", symbol: "checklist")
+                TripMetricTile(title: "Next", value: nextItem?.displayTime ?? "Review", symbol: "clock")
+                TripMetricTile(title: "Transfers", value: transferCountText, symbol: "tram")
+            }
+
+            if let nextItem {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: nextItem.kind.symbol)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(nextItem.kind.timelineAccent)
+                        .frame(width: 34, height: 34)
+                        .background(nextItem.kind.timelineAccent.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(nextItem.title.isEmpty ? String(localized: "Untitled item") : nextItem.title)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                            .lineLimit(1)
+                        Text(nextItem.location.isEmpty ? String(localized: "Location needed") : nextItem.location)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(12)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+        .padding(16)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private var commandSummary: String {
+        if let destination = trip.destination?.trimmingCharacters(in: .whitespacesAndNewlines), !destination.isEmpty {
+            return String(localized: "\(destination) · \(trip.dates)")
+        }
+
+        if let firstTimedItem, let lastTimedItem, firstTimedItem.id != lastTimedItem.id {
+            return String(localized: "\(firstTimedItem.displayTime) to \(lastTimedItem.displayTime)")
+        }
+
+        return trip.summary.isEmpty ? String(localized: "Ready for itinerary review") : trip.summary
+    }
+
+    private var transferCountText: String {
+        guard itinerary.count > 1 else {
+            return "0"
+        }
+
+        let transferCount = max(itinerary.count - 1, 0)
+        return "\(transferCount)"
+    }
+}
+
+private struct TripMetricTile: View {
+    let title: LocalizedStringKey
+    let value: String
+    let symbol: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Image(systemName: symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaTeal)
+
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.voyaInk)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(Color.voyaMuted)
+                .lineLimit(1)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 }
 
@@ -1800,7 +1971,7 @@ private struct TransferRecommendationCard: View {
     }
 
     private var primaryOption: MobilityRouteOption? {
-        plan?.recommendedOption
+        plan?.defaultOption
     }
 
     private var alternativeOptions: [MobilityRouteOption] {
@@ -1818,11 +1989,12 @@ private struct TransferRecommendationCard: View {
     }
 
     private var primaryDetail: String {
-        if let reason = plan?.recommendation?.reason {
-            return reason
+        if let recommendation = plan?.recommendation,
+           recommendation.mode == primaryOption?.mode {
+            return recommendation.reason
         }
 
-        return String(localized: "Voya compares taxi, transit, and own car timing for this leg.")
+        return String(localized: "Public transport is shown first, with taxi and car alternatives kept for comparison.")
     }
 
     private func primaryOptionSummary(_ option: MobilityRouteOption) -> String {
@@ -2007,7 +2179,8 @@ private struct TransferDetailView: View {
                         errorCard(errorMessage)
                     }
 
-                    if let recommendation = plan?.recommendation {
+                    if let recommendation = plan?.recommendation,
+                       recommendation.mode == primaryOption?.mode {
                         recommendationCard(recommendation)
                     }
 
@@ -2301,17 +2474,18 @@ private struct TransferDetailView: View {
     }
 
     private var primaryOption: MobilityRouteOption? {
-        plan?.recommendedOption
+        plan?.defaultOption
     }
 
     private var primaryDetail: String {
         if let option = primaryOption {
             return "\(option.mode.displayName) · \(shortDuration(option))"
         }
-        if let reason = plan?.recommendation?.reason {
-            return reason
+        if let recommendation = plan?.recommendation,
+           recommendation.mode == primaryOption?.mode {
+            return recommendation.reason
         }
-        return String(localized: "Route timing and alternatives")
+        return String(localized: "Public transport timing and alternatives")
     }
 
     private func leaveByText(for option: MobilityRouteOption) -> String? {
@@ -2820,12 +2994,14 @@ private struct ItineraryItemDetailView: View {
                     ItemCompanionCard(
                         item: item,
                         phase: ItineraryPhase(item: item),
-                        enrichment: enrichment
+                        enrichment: enrichment,
+                        didCopyLocation: didCopyLocation,
+                        onOpenLocation: openMaps,
+                        onCopyLocation: copyLocation
                     )
-                    if let enrichment {
+                    if let enrichment, enrichment.hasPlanDetails {
                         TravelBriefCard(enrichment: enrichment)
                     }
-                    locationActions
                     ItemInsightPanel(
                         item: item,
                         phase: ItineraryPhase(item: item),
@@ -3109,60 +3285,65 @@ private struct ItemCompanionCard: View {
     let item: ItineraryItem
     let phase: ItineraryPhase
     let enrichment: ItemEnrichment?
+    let didCopyLocation: Bool
+    let onOpenLocation: () -> Void
+    let onCopyLocation: () -> Void
     @State private var displayLocation = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 14) {
-                Image(systemName: item.kind.symbol)
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
-                    .background(item.kind.timelineAccent)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 15) {
+                HStack(alignment: .center, spacing: 10) {
+                    Label(kindLabel, systemImage: item.kind.symbol)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(item.kind.timelineAccent)
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(momentTitle)
-                        .font(.title3.bold())
-                        .foregroundStyle(Color.voyaInk)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
 
-                    Text(momentSubtitle)
+                    Label(statusLabel, systemImage: statusSymbol)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(statusTint)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(statusTint.opacity(0.10))
+                        .clipShape(Capsule())
+                }
+
+                if let flightRoute {
+                    flightHeader(flightRoute)
+                } else {
+                    standardHeader
+                }
+
+                Divider()
+
+                HStack(spacing: 9) {
+                    MomentMetric(title: "Time", value: timeMetric, symbol: "clock", tint: item.kind.timelineAccent)
+                    MomentMetric(title: secondaryMetricTitle, value: secondaryMetricValue, symbol: secondaryMetricSymbol, tint: secondaryMetricTint)
+                }
+
+                if let summaryText {
+                    Text(summaryText)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.voyaMuted)
+                        .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .padding(18)
 
-            if let summary = enrichment?.summary, !summary.isEmpty {
-                Text(summary)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(Color.voyaInk)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text(defaultBrief)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(Color.voyaInk)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack(spacing: 10) {
-                let focusCue = primaryCue
-                AssistantCue(title: focusCue.title, value: focusCue.value, symbol: focusCue.symbol)
-                let timingCue = secondaryCue
-                AssistantCue(title: timingCue.title, value: timingCue.value, symbol: timingCue.symbol)
-            }
-        }
-        .padding(18)
-        .background(
-            LinearGradient(
-                colors: [.white, item.kind.timelineAccent.opacity(0.10)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+            MomentMapPreview(
+                item: item,
+                displayLocation: displayLocation,
+                route: flightRoute,
+                isCopied: didCopyLocation,
+                onOpenLocation: onOpenLocation,
+                onCopyLocation: onCopyLocation
             )
-        )
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+        }
+        .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -3175,79 +3356,247 @@ private struct ItemCompanionCard: View {
         }
     }
 
-    private var momentTitle: String {
+    private func flightHeader(_ route: FlightRouteDisplay) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            airportBlock(code: route.origin, time: startTimeText, alignment: .leading, isTrailing: false)
+
+            VStack(spacing: 4) {
+                Image(systemName: "airplane")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.voyaMuted.opacity(0.64))
+                Capsule()
+                    .fill(Color.voyaLine)
+                    .frame(height: 2)
+            }
+            .frame(maxWidth: .infinity)
+
+            airportBlock(code: route.destination, time: endTimeText, alignment: .trailing, isTrailing: true)
+        }
+    }
+
+    private func airportBlock(code: String, time: String, alignment: HorizontalAlignment, isTrailing: Bool) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            Text(code)
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.voyaInk)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Text(time)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(item.kind.timelineAccent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(width: 96, alignment: isTrailing ? .trailing : .leading)
+    }
+
+    private var standardHeader: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: item.kind.symbol)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background(item.kind.timelineAccent)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(displayTitle)
+                    .font(.title3.bold())
+                    .foregroundStyle(Color.voyaInk)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(displayLocation.isEmpty ? locationFallback : displayLocation)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var displayTitle: String {
+        let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? String(localized: "Untitled item") : title
+    }
+
+    private var kindLabel: String {
         switch item.kind {
-        case .flight:
-            return String(localized: "Make this flight feel calm.")
-        case .hotel:
-            return String(localized: "Arrive and settle in.")
-        case .event:
-            return String(localized: "Make the most of this event.")
-        case .transit:
-            return String(localized: "Move between places smoothly.")
+        case .flight: String(localized: "Flight")
+        case .hotel: String(localized: "Stay")
+        case .event: String(localized: "Event")
+        case .transit: String(localized: "Transfer")
         }
     }
 
-    private var momentSubtitle: String {
-        let place = displayLocation.trimmingCharacters(in: .whitespacesAndNewlines)
-        if place.isEmpty {
-            return item.displayTime
-        }
-        return "\(item.displayTime) · \(place)"
-    }
-
-    private var defaultBrief: String {
-        switch item.kind {
-        case .flight:
-            return String(localized: "Voya can track status, timing, gate context, weather, and the route around this flight once enrichment is available.")
-        case .hotel:
-            return String(localized: "Use this as the base for check-in timing, the arrival route, nearby essentials, and weather-aware plans.")
-        case .event:
-            return String(localized: "Voya will turn venue context, timing, weather, and nearby options into a practical plan for getting there and enjoying it.")
-        case .transit:
-            return String(localized: "This leg should become guidance: when to leave, how much buffer to keep, and what fallback route makes sense.")
-        }
-    }
-
-    private var primaryCue: CompanionCue {
+    private var statusLabel: String {
         if let warning = enrichment?.warnings.first, !warning.isEmpty {
-            return CompanionCue(title: String(localized: "Watch"), value: trimmedCue(warning), symbol: "exclamationmark.triangle")
+            return String(localized: "Needs attention")
         }
 
-        if item.kind == .flight {
-            if let gate = card(titled: "Gate") {
-                return CompanionCue(title: String(localized: "Gate"), value: trimmedCue(gate.value), symbol: "rectangle.connected.to.line.below")
-            }
-            if let delay = card(titled: "Delay") {
-                return CompanionCue(title: String(localized: "Delay"), value: trimmedCue(delay.value), symbol: "clock.badge.exclamationmark")
-            }
+        let status = item.status.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !status.isEmpty {
+            return status
+        }
+
+        return phase.label
+    }
+
+    private var statusSymbol: String {
+        if enrichment?.warnings.first?.isEmpty == false {
+            return "exclamationmark.triangle.fill"
+        }
+
+        switch phase {
+        case .past:
+            return "checkmark.circle.fill"
+        case .current:
+            return "dot.radiowaves.left.and.right"
+        case .future:
+            return "calendar.badge.clock"
+        case .undated:
+            return "questionmark.circle"
+        }
+    }
+
+    private var statusTint: Color {
+        if enrichment?.warnings.first?.isEmpty == false {
+            return Color.voyaCoral
+        }
+
+        switch phase {
+        case .past:
+            return Color.voyaMuted
+        case .current:
+            return Color.voyaTeal
+        case .future:
+            return item.kind.timelineAccent
+        case .undated:
+            return Color.voyaGold
+        }
+    }
+
+    private var timeMetric: String {
+        item.startsAt == nil ? String(localized: "Add time") : item.displayTime
+    }
+
+    private var secondaryMetricTitle: LocalizedStringKey {
+        if itemDurationText != nil {
+            return "Duration"
+        }
+        if bufferText != nil {
+            return "Buffer"
+        }
+        return item.kind == .flight ? "Route" : "Place"
+    }
+
+    private var secondaryMetricValue: String {
+        itemDurationText ?? bufferText ?? shortLocationText
+    }
+
+    private var secondaryMetricSymbol: String {
+        if itemDurationText != nil {
+            return "timer"
+        }
+        if bufferText != nil {
+            return "figure.walk"
+        }
+        return item.kind == .flight ? "arrow.left.arrow.right" : "mappin.and.ellipse"
+    }
+
+    private var secondaryMetricTint: Color {
+        if bufferText != nil {
+            return Color.voyaTeal
+        }
+        return item.kind.timelineAccent
+    }
+
+    private var bufferText: String? {
+        guard let bufferMinutes = enrichment?.routeLegs.first?.bufferMinutes else {
+            return nil
+        }
+        return String(localized: "\(bufferMinutes) min")
+    }
+
+    private var summaryText: String? {
+        if let warning = enrichment?.warnings.first, !warning.isEmpty {
+            return trimmedBody(warning)
         }
 
         if let action = enrichment?.actions.first {
-            return CompanionCue(title: action.priority == "now" ? String(localized: "Do now") : String(localized: "Next"), value: trimmedCue(action.title), symbol: "checkmark.circle")
+            return trimmedBody([action.title, action.detail].filter { !$0.isEmpty }.joined(separator: ". "))
         }
 
-        if !item.status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return CompanionCue(title: String(localized: "Status"), value: trimmedCue(item.status), symbol: "checkmark.seal")
+        if let summary = enrichment?.summary.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
+            return trimmedBody(summary)
         }
 
-        return CompanionCue(title: String(localized: "Focus"), value: phase.insightText, symbol: "scope")
+        return defaultOperationalNote
     }
 
-    private var secondaryCue: CompanionCue {
-        if let duration = itemDurationText {
-            return CompanionCue(title: String(localized: "Duration"), value: duration, symbol: "timer")
+    private var defaultOperationalNote: String {
+        switch item.kind {
+        case .flight:
+            return String(localized: "Add flight status data to surface gate, delay, airport buffer, and arrival route.")
+        case .hotel:
+            return String(localized: "Add address and check-in time to prepare the arrival route and stay details.")
+        case .event:
+            return String(localized: "Add venue and start time to prepare route, entry buffer, ticket, and weather context.")
+        case .transit:
+            return String(localized: "Add departure and arrival details to prepare route timing and fallback options.")
+        }
+    }
+
+    private var locationFallback: String {
+        item.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? String(localized: "Location needed") : item.location
+    }
+
+    private var shortLocationText: String {
+        let value = displayLocation.isEmpty ? locationFallback : displayLocation
+        let shortened = value.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? value
+        return shortened.isEmpty ? String(localized: "Add place") : shortened
+    }
+
+    private var startTimeText: String {
+        item.startsAt.map { MomentDateFormatter.time.string(from: $0) } ?? String(localized: "--:--")
+    }
+
+    private var endTimeText: String {
+        item.endsAt.map { MomentDateFormatter.time.string(from: $0) } ?? String(localized: "--:--")
+    }
+
+    private var flightRoute: FlightRouteDisplay? {
+        guard item.kind == .flight else {
+            return nil
         }
 
-        if let routeLeg = enrichment?.routeLegs.first, let bufferMinutes = routeLeg.bufferMinutes {
-            return CompanionCue(title: String(localized: "Buffer"), value: String(localized: "\(bufferMinutes) min"), symbol: "figure.walk")
+        for candidate in [item.location, item.title] {
+            let parts = candidate
+                .replacingOccurrences(of: "→", with: " to ")
+                .components(separatedBy: " to ")
+                .map { cleanRouteToken($0) }
+                .filter { !$0.isEmpty }
+            if parts.count >= 2 {
+                return FlightRouteDisplay(origin: parts[0], destination: parts[1])
+            }
         }
 
-        if item.startsAt != nil {
-            return CompanionCue(title: String(localized: "Time"), value: item.displayTime, symbol: "clock")
-        }
+        return nil
+    }
 
-        return CompanionCue(title: String(localized: "Time"), value: String(localized: "Add time"), symbol: "clock.badge.questionmark")
+    private func cleanRouteToken(_ value: String) -> String {
+        let token = value
+            .replacingOccurrences(of: #"\([^)]*\)"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let airportCode = token.split(separator: " ").last.map(String.init) ?? token
+        return airportCode.uppercased().count == 3 ? airportCode.uppercased() : token
+    }
+
+    private func trimmedBody(_ value: String) -> String {
+        let trimmed = value
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count > 150 ? "\(trimmed.prefix(147))..." : trimmed
     }
 
     private var itemDurationText: String? {
@@ -3270,23 +3619,201 @@ private struct ItemCompanionCard: View {
         }
         return "\(remainder)m"
     }
+}
 
-    private func card(titled title: String) -> ItemEnrichmentCard? {
-        enrichment?.cards.first { $0.title.localizedCaseInsensitiveContains(title) }
-    }
+private struct FlightRouteDisplay {
+    let origin: String
+    let destination: String
+}
 
-    private func trimmedCue(_ value: String) -> String {
-        let trimmed = value
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.count > 24 ? "\(trimmed.prefix(21))..." : trimmed
+private enum MomentDateFormatter {
+    static let time: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+}
+
+private struct MomentMetric: View {
+    let title: LocalizedStringKey
+    let value: String
+    let symbol: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color.voyaMuted)
+                Text(value)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaInk)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 }
 
-private struct CompanionCue {
-    let title: String
-    let value: String
-    let symbol: String
+private struct MomentMapPreview: View {
+    let item: ItineraryItem
+    let displayLocation: String
+    let route: FlightRouteDisplay?
+    let isCopied: Bool
+    let onOpenLocation: () -> Void
+    let onCopyLocation: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ZStack(alignment: .bottomLeading) {
+                mapArtwork
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(route == nil ? String(localized: "Location") : String(localized: "Route"))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.82))
+                    Text(previewTitle)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.82)
+                }
+                .padding(14)
+            }
+            .frame(height: 136)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            HStack(spacing: 10) {
+                Button(action: onOpenLocation) {
+                    Label(openTitle, systemImage: "map")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .foregroundStyle(.white)
+                        .background(hasLocation ? Color.voyaInk : Color.voyaMuted)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!hasLocation)
+
+                Button(action: onCopyLocation) {
+                    Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                        .frame(width: 46, height: 42)
+                        .background(Color.voyaSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!hasLocation)
+                .accessibilityLabel(isCopied ? "Copied" : "Copy location")
+            }
+        }
+    }
+
+    private var mapArtwork: some View {
+        ZStack {
+            LinearGradient(
+                colors: [item.kind.timelineAccent.opacity(0.86), Color.voyaInk.opacity(0.92)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            GridPattern()
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+
+            Path { path in
+                path.move(to: CGPoint(x: 28, y: 96))
+                path.addCurve(to: CGPoint(x: 130, y: 46), control1: CGPoint(x: 55, y: 40), control2: CGPoint(x: 96, y: 120))
+                path.addCurve(to: CGPoint(x: 250, y: 72), control1: CGPoint(x: 174, y: -4), control2: CGPoint(x: 202, y: 104))
+                path.addCurve(to: CGPoint(x: 340, y: 34), control1: CGPoint(x: 284, y: 50), control2: CGPoint(x: 312, y: 50))
+            }
+            .stroke(.white.opacity(0.72), style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [8, 8]))
+
+            HStack {
+                MapPin(color: .white, fill: item.kind.timelineAccent)
+                    .offset(x: 28, y: 22)
+                Spacer()
+                MapPin(color: .white, fill: Color.voyaGold)
+                    .offset(x: -42, y: -18)
+            }
+        }
+    }
+
+    private var previewTitle: String {
+        if let route {
+            return "\(route.origin) → \(route.destination)"
+        }
+
+        let resolved = displayLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !resolved.isEmpty {
+            return resolved
+        }
+
+        let raw = item.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? String(localized: "Add a place to unlock route context") : raw
+    }
+
+    private var openTitle: LocalizedStringKey {
+        LocationLinkResolver.directURL(from: item.location) == nil ? "Open map" : "Open link"
+    }
+
+    private var hasLocation: Bool {
+        !item.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+private struct GridPattern: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let step: CGFloat = 28
+
+        stride(from: rect.minX - rect.height, through: rect.maxX + rect.height, by: step).forEach { x in
+            path.move(to: CGPoint(x: x, y: rect.minY))
+            path.addLine(to: CGPoint(x: x + rect.height, y: rect.maxY))
+        }
+
+        stride(from: rect.minX, through: rect.maxX + rect.height, by: step).forEach { x in
+            path.move(to: CGPoint(x: x, y: rect.maxY))
+            path.addLine(to: CGPoint(x: x - rect.height, y: rect.minY))
+        }
+
+        return path
+    }
+}
+
+private struct MapPin: View {
+    let color: Color
+    let fill: Color
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(color.opacity(0.22))
+                .frame(width: 38, height: 38)
+            Circle()
+                .fill(fill)
+                .frame(width: 18, height: 18)
+                .overlay(Circle().stroke(color, lineWidth: 4))
+        }
+    }
+}
+
+private extension ItemEnrichment {
+    var hasPlanDetails: Bool {
+        !sections.isEmpty || !briefMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageURLs.isEmpty
+    }
 }
 
 private struct TravelBriefCard: View {
@@ -3296,7 +3823,7 @@ private struct TravelBriefCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Label("Travel brief", systemImage: "sparkles")
+                Label("Plan details", systemImage: "list.bullet.rectangle")
                     .font(.headline)
                     .foregroundStyle(Color.voyaInk)
                 Spacer()
@@ -3466,10 +3993,10 @@ private struct ItemInsightPanel: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Assistant guidance")
+                    Text("Signals")
                         .font(.headline)
                         .foregroundStyle(Color.voyaInk)
-                    Text("Useful signals, translated into travel decisions.")
+                    Text("Live context and next actions for this item.")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Color.voyaMuted)
                 }
@@ -4323,6 +4850,46 @@ private struct EditTripView: View {
 
     private var isSaveDisabled: Bool {
         draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+private struct ImportPrimaryDropZone: View {
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 50, height: 50)
+                .background(Color.voyaTeal)
+                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("PDF or text file")
+                    .font(.headline)
+                    .foregroundStyle(Color.voyaInk)
+                Text("Flights, hotels, events, rail, and transfers")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "plus")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(Color.voyaTeal)
+                .frame(width: 34, height: 34)
+                .background(Color.voyaTeal.opacity(0.10))
+                .clipShape(Circle())
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
+        .background(Color.voyaMint.opacity(0.62))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.voyaTeal.opacity(0.18), lineWidth: 1)
+        )
     }
 }
 

@@ -1692,6 +1692,15 @@ struct MobilityPlan: Decodable {
 
         return options.first { $0.mode == recommendation.mode } ?? options.first
     }
+
+    var publicTransitOption: MobilityRouteOption? {
+        options.first { $0.mode == .transit && $0.durationMinutes != nil }
+            ?? options.first { $0.mode == .transit }
+    }
+
+    var defaultOption: MobilityRouteOption? {
+        publicTransitOption ?? recommendedOption
+    }
 }
 
 struct MobilityRouteOption: Decodable, Identifiable {
@@ -1776,7 +1785,7 @@ struct VercelMobilityService {
                 arrivalTime: context.targetArrivalAt,
                 departureTime: context.targetDepartureAt,
                 locale: VoyaAppLocale.currentIdentifier,
-                modes: [.taxi, .transit, .drive],
+                modes: [.transit, .taxi, .drive],
                 ownedVehicleAvailable: false,
                 airportBufferMinutes: context.airportBufferMinutes,
                 taxiPickupBufferMinutes: context.taxiPickupBufferMinutes

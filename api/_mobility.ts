@@ -666,8 +666,8 @@ function score(request: MobilityPlanRequest, option: MobilityRouteOption) {
   const costPenalty = { low: 0, medium: 5, high: 12, unknown: 4 }[option.costLevel];
   const isAirportTransfer = (request.airportBufferMinutes ?? 0) > 0;
   const contextBonus =
-    option.mode === "taxi" && isAirportTransfer ? 18 :
-    option.mode === "transit" && isAirportTransfer ? 8 :
+    option.mode === "transit" ? 22 :
+    option.mode === "taxi" && isAirportTransfer ? 10 :
     option.mode === "drive" && request.ownedVehicleAvailable ? 10 :
     0;
   const unavailableVehiclePenalty = option.mode === "drive" && !request.ownedVehicleAvailable ? 35 : 0;
@@ -677,7 +677,8 @@ function score(request: MobilityPlanRequest, option: MobilityRouteOption) {
 
 function recommendationFor(request: MobilityPlanRequest, options: MobilityRouteOption[]): MobilityPlanResponse["recommendation"] {
   const available = options.filter((option) => option.durationMinutes != null);
-  const best = available.sort((a, b) => score(request, b) - score(request, a))[0];
+  const transit = available.find((option) => option.mode === "transit");
+  const best = transit ?? available.sort((a, b) => score(request, b) - score(request, a))[0];
   if (!best) {
     return undefined;
   }
@@ -699,7 +700,7 @@ function recommendationFor(request: MobilityPlanRequest, options: MobilityRouteO
 }
 
 export async function buildMobilityPlan(request: MobilityPlanRequest): Promise<MobilityPlanResponse> {
-  const modes = request.modes ?? ["taxi", "transit", "drive"];
+  const modes = request.modes ?? ["transit", "taxi", "drive"];
   const warnings: string[] = [];
   request = await normalizedMobilityRequest(request, warnings);
   const providerConnected = Boolean(mapsApiKey());
