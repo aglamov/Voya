@@ -222,6 +222,8 @@ private struct RecommendationCard: View {
 
 private struct TripsView: View {
     @EnvironmentObject private var store: VoyaStore
+    @AppStorage(VoyaPreferenceKey.homeLocationName) private var homeLocationName = "Home"
+    @AppStorage(VoyaPreferenceKey.homeLocationAddress) private var homeLocationAddress = ""
     @State private var itemBeingViewed: ItineraryItem?
     @State private var tripBeingEdited: Trip?
     @State private var tripAddingItem: Trip?
@@ -318,6 +320,34 @@ private struct TripsView: View {
 
                     VStack(spacing: 0) {
                         ForEach(Array(itinerary.enumerated()), id: \.element.id) { index, item in
+                            if index == 0 {
+                                if let context = VercelMobilityService.startTransferContext(
+                                    for: trip,
+                                    firstItem: item,
+                                    defaultHomeAddress: homeLocationAddress,
+                                    defaultHomeName: homeLocationName
+                                ) {
+                                    TransferRecommendationCard(
+                                        context: context,
+                                        plan: mobilityPlans[context.id],
+                                        errorMessage: mobilityPlanErrors[context.id],
+                                        isLoading: loadingMobilityPlanIDs.contains(context.id),
+                                        onRefresh: {
+                                            Task {
+                                                await loadMobilityPlan(context: context, forceRefresh: true)
+                                            }
+                                        }
+                                    )
+                                    .task(id: context.id) {
+                                        await loadMobilityPlan(context: context)
+                                    }
+                                } else if shouldPromptForStartPoint(trip: trip, firstItem: item) {
+                                    MissingStartPointCard {
+                                        tripBeingEdited = trip
+                                    }
+                                }
+                            }
+
                             TimelineRow(
                                 item: item,
                                 phase: ItineraryPhase(item: item),
@@ -341,6 +371,34 @@ private struct TripsView: View {
                                 )
                                 .task(id: context.id) {
                                     await loadMobilityPlan(from: item, to: itinerary[index + 1])
+                                }
+                            }
+
+                            if index == itinerary.count - 1 {
+                                if let context = VercelMobilityService.endTransferContext(
+                                    for: trip,
+                                    lastItem: item,
+                                    defaultHomeAddress: homeLocationAddress,
+                                    defaultHomeName: homeLocationName
+                                ) {
+                                    TransferRecommendationCard(
+                                        context: context,
+                                        plan: mobilityPlans[context.id],
+                                        errorMessage: mobilityPlanErrors[context.id],
+                                        isLoading: loadingMobilityPlanIDs.contains(context.id),
+                                        onRefresh: {
+                                            Task {
+                                                await loadMobilityPlan(context: context, forceRefresh: true)
+                                            }
+                                        }
+                                    )
+                                    .task(id: context.id) {
+                                        await loadMobilityPlan(context: context)
+                                    }
+                                } else if shouldPromptForEndPoint(trip: trip, lastItem: item) {
+                                    MissingEndPointCard {
+                                        tripBeingEdited = trip
+                                    }
                                 }
                             }
                         }
@@ -376,7 +434,11 @@ private struct TripsView: View {
                     title: draft.title,
                     destination: draft.destination,
                     summary: draft.summary,
-                    notes: draft.notes
+                    notes: draft.notes,
+                    startLocationName: draft.startLocationName,
+                    startLocationAddress: draft.startLocationAddress,
+                    endLocationName: draft.endLocationName,
+                    endLocationAddress: draft.endLocationAddress
                 )
             } onDelete: {
                 store.deleteTrip(trip)
@@ -434,6 +496,11 @@ private struct TripsView: View {
         guard let context = VercelMobilityService.transferContext(from: originItem, to: destinationItem) else {
             return
         }
+        await loadMobilityPlan(context: context, forceRefresh: forceRefresh)
+    }
+
+    @MainActor
+    private func loadMobilityPlan(context: MobilityTransferContext, forceRefresh: Bool = false) async {
         if !forceRefresh, mobilityPlans[context.id] != nil {
             return
         }
@@ -448,10 +515,23 @@ private struct TripsView: View {
         }
 
         do {
-            mobilityPlans[context.id] = try await VercelMobilityService().planTransfer(from: originItem, to: destinationItem)
+            mobilityPlans[context.id] = try await VercelMobilityService().planTransfer(context: context)
         } catch {
             mobilityPlanErrors[context.id] = String(localized: "Route timing unavailable")
         }
+    }
+
+    private func shouldPromptForStartPoint(trip: Trip, firstItem: ItineraryItem) -> Bool {
+        firstItem.kind != .transit
+            && trip.startLocationAddress?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+            && homeLocationAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !firstItem.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func shouldPromptForEndPoint(trip: Trip, lastItem: ItineraryItem) -> Bool {
+        trip.endLocationAddress?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+            && homeLocationAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !lastItem.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
 }
@@ -718,6 +798,8 @@ private struct PasteConfirmationView: View {
 
 private struct AssistantView: View {
     @EnvironmentObject private var store: VoyaStore
+    @AppStorage(VoyaPreferenceKey.homeLocationName) private var homeLocationName = "Home"
+    @AppStorage(VoyaPreferenceKey.homeLocationAddress) private var homeLocationAddress = ""
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -763,6 +845,11 @@ private struct AssistantView: View {
                     }
                 }
 
+                HomeBaseSettingsCard(
+                    homeLocationName: $homeLocationName,
+                    homeLocationAddress: $homeLocationAddress
+                )
+
                 HStack(spacing: 12) {
                     Text("What if my flight is delayed?")
                         .font(.callout.weight(.medium))
@@ -787,6 +874,47 @@ private struct AssistantView: View {
             .padding(.horizontal, 18)
             .padding(.top, 18)
         }
+    }
+}
+
+private struct HomeBaseSettingsCard: View {
+    @Binding var homeLocationName: String
+    @Binding var homeLocationAddress: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "house.and.flag.fill")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Color.voyaTeal)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Home base")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text("Default start and return point")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+
+                Spacer()
+            }
+
+            ClearableTextField("Place name", text: $homeLocationName, prompt: "Home")
+            ClearableTextField("Address", text: $homeLocationAddress, prompt: "Street address, city, or Google Maps link", lineLimit: 2...4)
+
+            Text("Trips use this address unless custom start or end points are set in trip details.")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.voyaMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
     }
 }
 
@@ -1600,6 +1728,98 @@ private struct TransferRecommendationCard: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             ?? ""
         return shortened.isEmpty ? value : shortened
+    }
+}
+
+private struct MissingStartPointCard: View {
+    let onEditTrip: () -> Void
+
+    var body: some View {
+        Button(action: onEditTrip) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "house.and.flag")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Color.voyaGold)
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Start point")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaGold)
+                    Text("Add where this trip starts")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                    Text("Set a home address in Assistant or enter a custom start point for this trip.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaMuted)
+            }
+            .padding(14)
+            .background(Color.voyaGold.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.voyaGold.opacity(0.18), lineWidth: 1)
+            )
+            .padding(.horizontal, 18)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct MissingEndPointCard: View {
+    let onEditTrip: () -> Void
+
+    var body: some View {
+        Button(action: onEditTrip) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "house.and.flag.fill")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Color.voyaTeal)
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("End point")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaTeal)
+                    Text("Add where this trip ends")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                    Text("Set a home address in Assistant or enter a custom return point for this trip.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaMuted)
+            }
+            .padding(14)
+            .background(Color.voyaTeal.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.voyaTeal.opacity(0.18), lineWidth: 1)
+            )
+            .padding(.horizontal, 18)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -3149,12 +3369,20 @@ private struct TripDraft {
     var destination: String
     var summary: String
     var notes: String
+    var startLocationName: String
+    var startLocationAddress: String
+    var endLocationName: String
+    var endLocationAddress: String
 
     init(trip: Trip) {
         title = trip.title
         destination = trip.destination ?? ""
         summary = trip.summary
         notes = trip.notes ?? ""
+        startLocationName = trip.startLocationName ?? ""
+        startLocationAddress = trip.startLocationAddress ?? ""
+        endLocationName = trip.endLocationName ?? ""
+        endLocationAddress = trip.endLocationAddress ?? ""
     }
 }
 
@@ -3212,6 +3440,76 @@ private struct EditTripView: View {
                         ClearableTextField("Destination", text: $draft.destination, prompt: "Rome")
                         ClearableTextField("Summary", text: $draft.summary, prompt: "Confirmed flights and stay")
                         ClearableTextField("Notes", text: $draft.notes, prompt: "Anything useful for this trip", lineLimit: 3...6)
+                    }
+                    .padding(18)
+                    .background(.white)
+                    .foregroundStyle(Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "location.north.line.fill")
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 42, height: 42)
+                                .background(Color.voyaTeal)
+                                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Trip start point")
+                                    .font(.headline)
+                                    .foregroundStyle(Color.voyaInk)
+                                Text("Overrides Home for this trip")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Color.voyaMuted)
+                            }
+
+                            Spacer()
+                        }
+
+                        ClearableTextField("Place name", text: $draft.startLocationName, prompt: "Home, Office, Hotel")
+                        ClearableTextField("Address", text: $draft.startLocationAddress, prompt: "Leave empty to use Home", lineLimit: 2...4)
+
+                        Text("Leave this blank when the trip starts from your default Home base.")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(18)
+                    .background(.white)
+                    .foregroundStyle(Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "house.and.flag.fill")
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 42, height: 42)
+                                .background(Color.voyaGold)
+                                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Trip end point")
+                                    .font(.headline)
+                                    .foregroundStyle(Color.voyaInk)
+                                Text("Overrides Home for the return")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Color.voyaMuted)
+                            }
+
+                            Spacer()
+                        }
+
+                        ClearableTextField("Place name", text: $draft.endLocationName, prompt: "Home, Office, Hotel")
+                        ClearableTextField("Address", text: $draft.endLocationAddress, prompt: "Leave empty to return Home", lineLimit: 2...4)
+
+                        Text("Leave this blank when the trip should end at your default Home base.")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(18)
                     .background(.white)

@@ -141,6 +141,10 @@ final class Trip: Identifiable {
     var destinationImageCredit: String?
     var notes: String?
     var rawData: String?
+    var startLocationName: String?
+    var startLocationAddress: String?
+    var endLocationName: String?
+    var endLocationAddress: String?
 
     init(
         id: UUID = UUID(),
@@ -157,7 +161,11 @@ final class Trip: Identifiable {
         destinationImageURL: URL? = nil,
         destinationImageCredit: String? = nil,
         notes: String? = nil,
-        rawData: String? = nil
+        rawData: String? = nil,
+        startLocationName: String? = nil,
+        startLocationAddress: String? = nil,
+        endLocationName: String? = nil,
+        endLocationAddress: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -174,7 +182,16 @@ final class Trip: Identifiable {
         self.destinationImageCredit = destinationImageCredit
         self.notes = notes
         self.rawData = rawData
+        self.startLocationName = startLocationName
+        self.startLocationAddress = startLocationAddress
+        self.endLocationName = endLocationName
+        self.endLocationAddress = endLocationAddress
     }
+}
+
+enum VoyaPreferenceKey {
+    static let homeLocationName = "voya.homeLocationName"
+    static let homeLocationAddress = "voya.homeLocationAddress"
 }
 
 struct DestinationHeroImage {
@@ -909,12 +926,20 @@ final class VoyaStore: ObservableObject {
         title: String,
         destination: String,
         summary: String,
-        notes: String
+        notes: String,
+        startLocationName: String,
+        startLocationAddress: String,
+        endLocationName: String,
+        endLocationAddress: String
     ) {
         trip.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         trip.destination = destination.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         trip.summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
         trip.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        trip.startLocationName = startLocationName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        trip.startLocationAddress = startLocationAddress.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        trip.endLocationName = endLocationName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        trip.endLocationAddress = endLocationAddress.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         trip.updatedAt = Date()
         trip.destinationImageURL = nil
         trip.destinationImageCredit = nil
@@ -1678,6 +1703,7 @@ struct MobilityTransferContext: Identifiable {
     var origin: String
     var destination: String
     var targetArrivalAt: Date?
+    var targetDepartureAt: Date?
     var airportBufferMinutes: Int
     var taxiPickupBufferMinutes: Int
 }
@@ -1696,11 +1722,16 @@ struct VercelMobilityService {
 
     @MainActor
     func planTransfer(from originItem: ItineraryItem, to destinationItem: ItineraryItem) async throws -> MobilityPlan {
-        guard let baseURL else {
-            throw VercelExtractionError.notConfigured
-        }
         guard let context = Self.transferContext(from: originItem, to: destinationItem) else {
             throw VercelExtractionError.badResponse
+        }
+
+        return try await planTransfer(context: context)
+    }
+
+    func planTransfer(context: MobilityTransferContext) async throws -> MobilityPlan {
+        guard let baseURL else {
+            throw VercelExtractionError.notConfigured
         }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("api/mobility"))
@@ -1717,6 +1748,7 @@ struct VercelMobilityService {
                 origin: MobilityPlace(address: context.origin),
                 destination: MobilityPlace(address: context.destination),
                 arrivalTime: context.targetArrivalAt,
+                departureTime: context.targetDepartureAt,
                 locale: VoyaAppLocale.currentIdentifier,
                 modes: [.taxi, .transit, .drive],
                 ownedVehicleAvailable: false,
@@ -1749,7 +1781,63 @@ struct VercelMobilityService {
             origin: origin,
             destination: destination,
             targetArrivalAt: destinationItem.startsAt,
+            targetDepartureAt: nil,
             airportBufferMinutes: airportBufferMinutes(for: destinationItem),
+            taxiPickupBufferMinutes: 10
+        )
+    }
+
+    static func startTransferContext(for trip: Trip, firstItem: ItineraryItem, defaultHomeAddress: String, defaultHomeName: String) -> MobilityTransferContext? {
+        guard firstItem.kind != .transit,
+              let destination = transferDestination(for: firstItem) else {
+            return nil
+        }
+
+        let tripStartAddress = trip.startLocationAddress?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let homeAddress = defaultHomeAddress.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard let originAddress = tripStartAddress ?? homeAddress,
+              originAddress.caseInsensitiveCompare(destination) != .orderedSame else {
+            return nil
+        }
+
+        let idOrigin = originAddress
+            .lowercased()
+            .replacingOccurrences(of: #"\W+"#, with: "-", options: .regularExpression)
+
+        return MobilityTransferContext(
+            id: "\(trip.id.uuidString)-start-\(firstItem.id.uuidString)-\(idOrigin)",
+            origin: originAddress,
+            destination: destination,
+            targetArrivalAt: firstItem.startsAt,
+            targetDepartureAt: nil,
+            airportBufferMinutes: airportBufferMinutes(for: firstItem),
+            taxiPickupBufferMinutes: 10
+        )
+    }
+
+    static func endTransferContext(for trip: Trip, lastItem: ItineraryItem, defaultHomeAddress: String, defaultHomeName: String) -> MobilityTransferContext? {
+        guard let origin = transferOrigin(for: lastItem) else {
+            return nil
+        }
+
+        let tripEndAddress = trip.endLocationAddress?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let homeAddress = defaultHomeAddress.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard let destinationAddress = tripEndAddress ?? homeAddress,
+              origin.caseInsensitiveCompare(destinationAddress) != .orderedSame else {
+            return nil
+        }
+
+        let idDestination = destinationAddress
+            .lowercased()
+            .replacingOccurrences(of: #"\W+"#, with: "-", options: .regularExpression)
+
+        return MobilityTransferContext(
+            id: "\(trip.id.uuidString)-end-\(lastItem.id.uuidString)-\(idDestination)",
+            origin: origin,
+            destination: destinationAddress,
+            targetArrivalAt: nil,
+            targetDepartureAt: lastItem.endsAt ?? lastItem.startsAt,
+            airportBufferMinutes: 0,
             taxiPickupBufferMinutes: 10
         )
     }
@@ -1801,6 +1889,7 @@ private struct MobilityPlanRequest: Encodable {
     var origin: MobilityPlace
     var destination: MobilityPlace
     var arrivalTime: Date?
+    var departureTime: Date?
     var locale: String
     var modes: [MobilityRouteMode]
     var ownedVehicleAvailable: Bool
