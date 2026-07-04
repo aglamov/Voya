@@ -50,13 +50,15 @@ async function parsePayload(response: Response) {
   }
 }
 
-async function getAccessToken(): Promise<UberCheck & { accessToken?: string }> {
+async function requestAccessToken(scope?: string): Promise<UberCheck & { accessToken?: string }> {
   const body = new URLSearchParams({
     client_id: clientID(),
     client_secret: clientSecret(),
-    grant_type: "client_credentials",
-    scope: "request"
+    grant_type: "client_credentials"
   });
+  if (scope) {
+    body.set("scope", scope);
+  }
 
   const response = await fetch(uberOAuthEndpoint, {
     method: "POST",
@@ -79,6 +81,27 @@ async function getAccessToken(): Promise<UberCheck & { accessToken?: string }> {
     ok: true,
     status: response.status,
     accessToken: (payload as Record<string, string>).access_token
+  };
+}
+
+async function getAccessToken(): Promise<UberCheck & { accessToken?: string; attemptedScopes?: string[] }> {
+  const attempts = [undefined, "profile", "request"];
+  let lastResult: UberCheck & { accessToken?: string } = { ok: false };
+
+  for (const scope of attempts) {
+    const result = await requestAccessToken(scope);
+    if (result.ok) {
+      return {
+        ...result,
+        attemptedScopes: attempts.filter((value): value is string => Boolean(value))
+      };
+    }
+    lastResult = result;
+  }
+
+  return {
+    ...lastResult,
+    attemptedScopes: attempts.filter((value): value is string => Boolean(value))
   };
 }
 
@@ -152,7 +175,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         configured: true,
         approved: false,
         checks: {
-          oauth: { ok: oauth.ok, status: oauth.status, error: oauth.error }
+          oauth: { ok: oauth.ok, status: oauth.status, error: oauth.error, attemptedScopes: oauth.attemptedScopes }
         }
       });
     }
@@ -178,7 +201,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       configured: true,
       approved: products.ok || priceEstimates.ok || timeEstimates.ok,
       checks: {
-        oauth: { ok: true, status: oauth.status },
+        oauth: { ok: true, status: oauth.status, attemptedScopes: oauth.attemptedScopes },
         products,
         priceEstimates,
         timeEstimates
