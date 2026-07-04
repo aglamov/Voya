@@ -226,6 +226,9 @@ private struct TripsView: View {
     @State private var tripBeingEdited: Trip?
     @State private var tripAddingItem: Trip?
     @State private var tripListMode: TripListMode = .upcoming
+    @State private var mobilityPlans: [String: MobilityPlan] = [:]
+    @State private var loadingMobilityPlanIDs: Set<String> = []
+    @State private var mobilityPlanErrors: [String: String] = [:]
 
     private enum TripListMode: String, CaseIterable, Identifiable {
         case upcoming = "Upcoming"
@@ -322,6 +325,24 @@ private struct TripsView: View {
                             ) {
                                 itemBeingViewed = item
                             }
+
+                            if index + 1 < itinerary.count,
+                               let context = VercelMobilityService.transferContext(from: item, to: itinerary[index + 1]) {
+                                TransferRecommendationCard(
+                                    context: context,
+                                    plan: mobilityPlans[context.id],
+                                    errorMessage: mobilityPlanErrors[context.id],
+                                    isLoading: loadingMobilityPlanIDs.contains(context.id),
+                                    onRefresh: {
+                                        Task {
+                                            await loadMobilityPlan(from: item, to: itinerary[index + 1], forceRefresh: true)
+                                        }
+                                    }
+                                )
+                                .task(id: context.id) {
+                                    await loadMobilityPlan(from: item, to: itinerary[index + 1])
+                                }
+                            }
                         }
                     }
                     .padding(.vertical, 8)
@@ -406,6 +427,31 @@ private struct TripsView: View {
         }
 
         store.selectedTripID = firstTrip.id
+    }
+
+    @MainActor
+    private func loadMobilityPlan(from originItem: ItineraryItem, to destinationItem: ItineraryItem, forceRefresh: Bool = false) async {
+        guard let context = VercelMobilityService.transferContext(from: originItem, to: destinationItem) else {
+            return
+        }
+        if !forceRefresh, mobilityPlans[context.id] != nil {
+            return
+        }
+        guard !loadingMobilityPlanIDs.contains(context.id) else {
+            return
+        }
+
+        loadingMobilityPlanIDs.insert(context.id)
+        mobilityPlanErrors[context.id] = nil
+        defer {
+            loadingMobilityPlanIDs.remove(context.id)
+        }
+
+        do {
+            mobilityPlans[context.id] = try await VercelMobilityService().planTransfer(from: originItem, to: destinationItem)
+        } catch {
+            mobilityPlanErrors[context.id] = String(localized: "Route timing unavailable")
+        }
     }
 
 }
@@ -1353,6 +1399,227 @@ private struct TimelineRow: View {
 
     private var kindAccent: Color {
         item.kind.timelineAccent
+    }
+}
+
+private struct TransferRecommendationCard: View {
+    @Environment(\.openURL) private var openURL
+    let context: MobilityTransferContext
+    let plan: MobilityPlan?
+    let errorMessage: String?
+    let isLoading: Bool
+    let onRefresh: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: primaryOption?.mode.symbol ?? "point.topleft.down.curvedto.point.bottomright.up")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Color.voyaTeal)
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Transfer")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaTeal)
+
+                    Text(routeTitle)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                        .lineLimit(2)
+
+                    Text(primaryDetail)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Button(action: onRefresh) {
+                    Image(systemName: isLoading ? "hourglass" : "arrow.clockwise")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(isLoading ? Color.voyaMuted : Color.voyaTeal)
+                        .frame(width: 32, height: 32)
+                        .background(Color.voyaSurface)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+                .accessibilityLabel("Refresh transfer timing")
+            }
+
+            if isLoading && plan == nil {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.76)
+                        .tint(Color.voyaTeal)
+                    Text("Checking live route timing")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+            } else if let errorMessage, plan == nil {
+                Text(errorMessage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.voyaCoral)
+            }
+
+            if let primaryOption {
+                Button {
+                    openURL(primaryOption.mapURL)
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(primaryOption.mode.displayName)
+                                .font(.headline)
+                                .foregroundStyle(Color.voyaInk)
+                            Text(primaryOptionSummary(primaryOption))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(leaveByText(for: primaryOption))
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.voyaTeal)
+                            Image(systemName: "map")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.voyaTeal)
+                        }
+                    }
+                    .padding(12)
+                    .background(Color.voyaMint.opacity(0.72))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !alternativeOptions.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(alternativeOptions.prefix(2)) { option in
+                        Button {
+                            openURL(option.mapURL)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(spacing: 5) {
+                                    Image(systemName: option.mode.symbol)
+                                    Text(option.mode.displayName)
+                                }
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+
+                                Text(shortDuration(option))
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(Color.voyaMuted)
+                                    .lineLimit(1)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.voyaSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.voyaTeal.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.voyaTeal.opacity(0.16), lineWidth: 1)
+        )
+        .padding(.horizontal, 18)
+        .padding(.vertical, 6)
+    }
+
+    private var primaryOption: MobilityRouteOption? {
+        plan?.recommendedOption
+    }
+
+    private var alternativeOptions: [MobilityRouteOption] {
+        guard let plan else {
+            return []
+        }
+
+        return plan.options.filter { option in
+            option.id != primaryOption?.id && option.durationMinutes != nil
+        }
+    }
+
+    private var routeTitle: String {
+        "\(shortPlace(context.origin)) -> \(shortPlace(context.destination))"
+    }
+
+    private var primaryDetail: String {
+        if let reason = plan?.recommendation?.reason {
+            return reason
+        }
+
+        return String(localized: "Voya compares taxi, transit, and own car timing for this leg.")
+    }
+
+    private func primaryOptionSummary(_ option: MobilityRouteOption) -> String {
+        let travel = option.travelMinutes.map { String(localized: "\($0) min travel") }
+        let buffer = option.bufferMinutes > 0 ? String(localized: "\(option.bufferMinutes) min buffer") : nil
+        let summary = [travel, buffer]
+            .compactMap { $0 }
+            .joined(separator: " + ")
+        return summary.isEmpty ? option.summary : summary
+    }
+
+    private func leaveByText(for option: MobilityRouteOption) -> String {
+        guard let leaveBy = option.leaveBy,
+              let date = MobilityDateFormatter.date(from: leaveBy) else {
+            return shortDuration(option)
+        }
+
+        return String(localized: "Leave \(MobilityDateFormatter.time.string(from: date))")
+    }
+
+    private func shortDuration(_ option: MobilityRouteOption) -> String {
+        if let durationMinutes = option.durationMinutes {
+            return String(localized: "\(durationMinutes) min total")
+        }
+        if let travelMinutes = option.travelMinutes {
+            return String(localized: "\(travelMinutes) min")
+        }
+        return String(localized: "Open route")
+    }
+
+    private func shortPlace(_ value: String) -> String {
+        let shortened = value
+            .components(separatedBy: ",")
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? ""
+        return shortened.isEmpty ? value : shortened
+    }
+}
+
+private enum MobilityDateFormatter {
+    static let time: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    static func date(from value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 }
 
