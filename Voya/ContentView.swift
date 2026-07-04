@@ -225,6 +225,7 @@ private struct TripsView: View {
     @AppStorage(VoyaPreferenceKey.homeLocationName) private var homeLocationName = "Home"
     @AppStorage(VoyaPreferenceKey.homeLocationAddress) private var homeLocationAddress = ""
     @State private var itemBeingViewed: ItineraryItem?
+    @State private var transferBeingViewed: MobilityTransferContext?
     @State private var tripBeingEdited: Trip?
     @State private var tripAddingItem: Trip?
     @State private var tripListMode: TripListMode = .upcoming
@@ -332,6 +333,9 @@ private struct TripsView: View {
                                         plan: mobilityPlans[context.id],
                                         errorMessage: mobilityPlanErrors[context.id],
                                         isLoading: loadingMobilityPlanIDs.contains(context.id),
+                                        onOpen: {
+                                            transferBeingViewed = context
+                                        },
                                         onRefresh: {
                                             Task {
                                                 await loadMobilityPlan(context: context, forceRefresh: true)
@@ -363,6 +367,9 @@ private struct TripsView: View {
                                     plan: mobilityPlans[context.id],
                                     errorMessage: mobilityPlanErrors[context.id],
                                     isLoading: loadingMobilityPlanIDs.contains(context.id),
+                                    onOpen: {
+                                        transferBeingViewed = context
+                                    },
                                     onRefresh: {
                                         Task {
                                             await loadMobilityPlan(from: item, to: itinerary[index + 1], forceRefresh: true)
@@ -386,6 +393,9 @@ private struct TripsView: View {
                                         plan: mobilityPlans[context.id],
                                         errorMessage: mobilityPlanErrors[context.id],
                                         isLoading: loadingMobilityPlanIDs.contains(context.id),
+                                        onOpen: {
+                                            transferBeingViewed = context
+                                        },
                                         onRefresh: {
                                             Task {
                                                 await loadMobilityPlan(context: context, forceRefresh: true)
@@ -470,6 +480,22 @@ private struct TripsView: View {
                 )
             } onDelete: {
                 store.deleteItineraryItem(item)
+            }
+        }
+        .sheet(item: $transferBeingViewed) { context in
+            TransferDetailView(
+                context: context,
+                plan: mobilityPlans[context.id],
+                errorMessage: mobilityPlanErrors[context.id],
+                isLoading: loadingMobilityPlanIDs.contains(context.id),
+                onRefresh: {
+                    Task {
+                        await loadMobilityPlan(context: context, forceRefresh: true)
+                    }
+                }
+            )
+            .task(id: context.id) {
+                await loadMobilityPlan(context: context)
             }
         }
     }
@@ -880,6 +906,16 @@ private struct AssistantView: View {
 private struct HomeBaseSettingsCard: View {
     @Binding var homeLocationName: String
     @Binding var homeLocationAddress: String
+    @State private var draftName: String
+    @State private var draftAddress: String
+    @State private var didSave = false
+
+    init(homeLocationName: Binding<String>, homeLocationAddress: Binding<String>) {
+        _homeLocationName = homeLocationName
+        _homeLocationAddress = homeLocationAddress
+        _draftName = State(initialValue: homeLocationName.wrappedValue)
+        _draftAddress = State(initialValue: homeLocationAddress.wrappedValue)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -903,18 +939,86 @@ private struct HomeBaseSettingsCard: View {
                 Spacer()
             }
 
-            ClearableTextField("Place name", text: $homeLocationName, prompt: "Home")
-            ClearableTextField("Address", text: $homeLocationAddress, prompt: "Street address, city, or Google Maps link", lineLimit: 2...4)
+            ClearableTextField("Place name", text: $draftName, prompt: "Home")
+            ClearableTextField("Address", text: $draftAddress, prompt: "Street address, city, or Google Maps link", lineLimit: 2...4)
 
             Text("Trips use this address unless custom start or end points are set in trip details.")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Color.voyaMuted)
                 .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button {
+                    saveHomeBase()
+                } label: {
+                    Label(didSave ? "Saved" : "Save home base", systemImage: didSave ? "checkmark" : "checkmark.circle")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .foregroundStyle(.white)
+                        .background(canSave ? Color.voyaInk : Color.voyaMuted)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSave)
+
+                if hasChanges {
+                    Button {
+                        resetDraft()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                            .frame(width: 44, height: 44)
+                            .background(Color.voyaSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Reset home base changes")
+                }
+            }
         }
         .padding(18)
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+        .onChange(of: draftName) { _, _ in didSave = false }
+        .onChange(of: draftAddress) { _, _ in didSave = false }
+    }
+
+    private var normalizedName: String {
+        draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var normalizedAddress: String {
+        draftAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasChanges: Bool {
+        normalizedName != homeLocationName.trimmingCharacters(in: .whitespacesAndNewlines)
+            || normalizedAddress != homeLocationAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSave: Bool {
+        hasChanges
+    }
+
+    private func saveHomeBase() {
+        guard canSave else {
+            return
+        }
+
+        homeLocationName = normalizedName.isEmpty ? String(localized: "Home") : normalizedName
+        homeLocationAddress = normalizedAddress
+        withAnimation(.easeInOut(duration: 0.18)) {
+            didSave = true
+        }
+    }
+
+    private func resetDraft() {
+        draftName = homeLocationName
+        draftAddress = homeLocationAddress
+        didSave = false
     }
 }
 
@@ -1531,11 +1635,11 @@ private struct TimelineRow: View {
 }
 
 private struct TransferRecommendationCard: View {
-    @Environment(\.openURL) private var openURL
     let context: MobilityTransferContext
     let plan: MobilityPlan?
     let errorMessage: String?
     let isLoading: Bool
+    let onOpen: () -> Void
     let onRefresh: () -> Void
 
     var body: some View {
@@ -1549,12 +1653,24 @@ private struct TransferRecommendationCard: View {
                     .clipShape(Circle())
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Transfer")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Color.voyaTeal)
+                    HStack(spacing: 7) {
+                        Text("Transfer")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.voyaTeal)
+
+                        if let primaryOption {
+                            Text(primaryOption.mode.displayName)
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(Color.voyaTeal)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.voyaTeal.opacity(0.12))
+                                .clipShape(Capsule())
+                        }
+                    }
 
                     Text(routeTitle)
-                        .font(.subheadline.weight(.bold))
+                        .font(.headline)
                         .foregroundStyle(Color.voyaInk)
                         .lineLimit(2)
 
@@ -1566,17 +1682,23 @@ private struct TransferRecommendationCard: View {
 
                 Spacer(minLength: 8)
 
-                Button(action: onRefresh) {
-                    Image(systemName: isLoading ? "hourglass" : "arrow.clockwise")
+                VStack(spacing: 8) {
+                    Button(action: onRefresh) {
+                        Image(systemName: isLoading ? "hourglass" : "arrow.clockwise")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(isLoading ? Color.voyaMuted : Color.voyaTeal)
+                            .frame(width: 32, height: 32)
+                            .background(Color.voyaSurface)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isLoading)
+                    .accessibilityLabel("Refresh transfer timing")
+
+                    Image(systemName: "chevron.right")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(isLoading ? Color.voyaMuted : Color.voyaTeal)
-                        .frame(width: 32, height: 32)
-                        .background(Color.voyaSurface)
-                        .clipShape(Circle())
+                        .foregroundStyle(Color.voyaMuted)
                 }
-                .buttonStyle(.plain)
-                .disabled(isLoading)
-                .accessibilityLabel("Refresh transfer timing")
             }
 
             if isLoading && plan == nil {
@@ -1595,63 +1717,38 @@ private struct TransferRecommendationCard: View {
             }
 
             if let primaryOption {
-                Button {
-                    openURL(primaryOption.mapURL)
-                } label: {
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(primaryOption.mode.displayName)
-                                .font(.headline)
-                                .foregroundStyle(Color.voyaInk)
-                            Text(primaryOptionSummary(primaryOption))
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(Color.voyaMuted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text(leaveByText(for: primaryOption))
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(Color.voyaTeal)
-                            Image(systemName: "map")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(Color.voyaTeal)
-                        }
-                    }
-                    .padding(12)
-                    .background(Color.voyaMint.opacity(0.72))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                HStack(spacing: 10) {
+                    Label(leaveByText(for: primaryOption), systemImage: "clock")
+                    Spacer(minLength: 8)
+                    Label(shortDuration(primaryOption), systemImage: "map")
                 }
-                .buttonStyle(.plain)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaTeal)
+                .padding(12)
+                .background(Color.voyaMint.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
             if !alternativeOptions.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(alternativeOptions.prefix(2)) { option in
-                        Button {
-                            openURL(option.mapURL)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack(spacing: 5) {
-                                    Image(systemName: option.mode.symbol)
-                                    Text(option.mode.displayName)
-                                }
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(Color.voyaInk)
-
-                                Text(shortDuration(option))
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(Color.voyaMuted)
-                                    .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(spacing: 5) {
+                                Image(systemName: option.mode.symbol)
+                                Text(option.mode.displayName)
                             }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.voyaSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+
+                            Text(shortDuration(option))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Color.voyaMuted)
+                                .lineLimit(1)
                         }
-                        .buttonStyle(.plain)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.voyaSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
             }
@@ -1665,6 +1762,8 @@ private struct TransferRecommendationCard: View {
         )
         .padding(.horizontal, 18)
         .padding(.vertical, 6)
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .onTapGesture(perform: onOpen)
     }
 
     private var primaryOption: MobilityRouteOption? {
@@ -1714,6 +1813,359 @@ private struct TransferRecommendationCard: View {
     private func shortDuration(_ option: MobilityRouteOption) -> String {
         if let durationMinutes = option.durationMinutes {
             return String(localized: "\(durationMinutes) min total")
+        }
+        if let travelMinutes = option.travelMinutes {
+            return String(localized: "\(travelMinutes) min")
+        }
+        return String(localized: "Open route")
+    }
+
+    private func shortPlace(_ value: String) -> String {
+        let shortened = value
+            .components(separatedBy: ",")
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? ""
+        return shortened.isEmpty ? value : shortened
+    }
+}
+
+private struct TransferDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    let context: MobilityTransferContext
+    let plan: MobilityPlan?
+    let errorMessage: String?
+    let isLoading: Bool
+    let onRefresh: () -> Void
+
+    var body: some View {
+        ZStack {
+            AppBackground()
+                .ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    routeMapCard
+
+                    if isLoading && plan == nil {
+                        loadingCard
+                    } else if let errorMessage, plan == nil {
+                        errorCard(errorMessage)
+                    }
+
+                    if let recommendation = plan?.recommendation {
+                        recommendationCard(recommendation)
+                    }
+
+                    if let plan {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Options")
+                                .font(.title3.bold())
+                                .foregroundStyle(Color.voyaInk)
+
+                            ForEach(Array(plan.options.enumerated()), id: \.offset) { _, option in
+                                transferOptionCard(option)
+                            }
+                        }
+
+                        if !plan.warnings.isEmpty {
+                            warningsCard(plan.warnings)
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 30)
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 7) {
+                Label("Transfer", systemImage: primaryOption?.mode.symbol ?? "point.topleft.down.curvedto.point.bottomright.up")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.voyaTeal)
+
+                Text("\(shortPlace(context.origin)) → \(shortPlace(context.destination))")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.voyaInk)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(primaryDetail)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Button(action: onRefresh) {
+                    Image(systemName: isLoading ? "hourglass" : "arrow.clockwise")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(isLoading ? Color.voyaMuted : Color.voyaInk)
+                        .frame(width: 42, height: 42)
+                        .background(.white)
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                        .frame(width: 42, height: 42)
+                        .background(.white)
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var routeMapCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(spacing: 8) {
+                    Circle()
+                        .fill(Color.voyaTeal)
+                        .frame(width: 11, height: 11)
+                    Rectangle()
+                        .fill(Color.voyaTeal.opacity(0.34))
+                        .frame(width: 2, height: 34)
+                    Circle()
+                        .fill(Color.voyaGold)
+                        .frame(width: 11, height: 11)
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    routePlace("From", context.origin)
+                    routePlace("To", context.destination)
+                }
+            }
+
+            if let primaryOption {
+                Button {
+                    openURL(primaryOption.mapURL)
+                } label: {
+                    Label("Open recommended route", systemImage: "map")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .foregroundStyle(.white)
+                        .background(Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private func routePlace(_ title: LocalizedStringKey, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaTeal)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.voyaInk)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var loadingCard: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .tint(Color.voyaTeal)
+            Text("Checking live route timing")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.voyaMuted)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func errorCard(_ message: String) -> some View {
+        Text(message)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.voyaCoral)
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func recommendationCard(_ recommendation: MobilityRecommendation) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(recommendation.title, systemImage: recommendation.mode.symbol)
+                .font(.headline)
+                .foregroundStyle(Color.voyaInk)
+            Text(recommendation.reason)
+                .font(.subheadline)
+                .foregroundStyle(Color.voyaMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.voyaMint.opacity(0.8))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func transferOptionCard(_ option: MobilityRouteOption) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: option.mode.symbol)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(option.id == primaryOption?.id ? Color.voyaTeal : Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(option.title)
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text(option.summary)
+                        .font(.subheadline)
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                metric("Total", shortDuration(option))
+                metric("Travel", option.travelMinutes.map { "\($0) min" } ?? "—")
+                metric("Buffer", option.bufferMinutes > 0 ? "\(option.bufferMinutes) min" : "—")
+            }
+
+            HStack(spacing: 8) {
+                metric("Cost", option.costLevel.capitalized)
+                metric("Comfort", option.comfortLevel.capitalized)
+                metric("Emissions", option.emissionsLevel.capitalized)
+            }
+
+            if !option.tradeoffs.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(option.tradeoffs.prefix(3), id: \.self) { tradeoff in
+                        Label(tradeoff, systemImage: "checkmark.circle")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                if let leaveBy = leaveByText(for: option) {
+                    Label(leaveBy, systemImage: "clock")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaTeal)
+                }
+
+                Spacer()
+
+                Button {
+                    openURL(option.mapURL)
+                } label: {
+                    Label("Map", systemImage: "map")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaTeal)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 8)
+                        .background(Color.voyaTeal.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(option.id == primaryOption?.id ? Color.voyaTeal.opacity(0.28) : Color.clear, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.04), radius: 12, y: 7)
+    }
+
+    private func metric(_ title: LocalizedStringKey, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(Color.voyaMuted)
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaInk)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func warningsCard(_ warnings: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Notes", systemImage: "exclamationmark.triangle")
+                .font(.headline)
+                .foregroundStyle(Color.voyaInk)
+            ForEach(warnings, id: \.self) { warning in
+                Text(warning)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var primaryOption: MobilityRouteOption? {
+        plan?.recommendedOption
+    }
+
+    private var primaryDetail: String {
+        if let option = primaryOption {
+            return "\(option.mode.displayName) · \(shortDuration(option))"
+        }
+        if let reason = plan?.recommendation?.reason {
+            return reason
+        }
+        return String(localized: "Route timing and alternatives")
+    }
+
+    private func leaveByText(for option: MobilityRouteOption) -> String? {
+        guard let leaveBy = option.leaveBy,
+              let date = MobilityDateFormatter.date(from: leaveBy) else {
+            return nil
+        }
+
+        return String(localized: "Leave \(MobilityDateFormatter.time.string(from: date))")
+    }
+
+    private func shortDuration(_ option: MobilityRouteOption) -> String {
+        if let durationMinutes = option.durationMinutes {
+            return String(localized: "\(durationMinutes) min")
         }
         if let travelMinutes = option.travelMinutes {
             return String(localized: "\(travelMinutes) min")

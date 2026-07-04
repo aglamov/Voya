@@ -74,6 +74,23 @@ type GoogleRoute = {
   duration?: string;
   staticDuration?: string;
   distanceMeters?: number;
+  legs?: GoogleRouteLeg[];
+};
+
+type GoogleRouteLeg = {
+  duration?: string;
+  staticDuration?: string;
+  steps?: GoogleRouteLegStep[];
+};
+
+type GoogleRouteLegStep = {
+  staticDuration?: string;
+  transitDetails?: {
+    stopDetails?: {
+      arrivalTime?: string;
+      departureTime?: string;
+    };
+  };
 };
 
 type GoogleRoutesResponse = {
@@ -148,6 +165,77 @@ function secondsFromDuration(value?: string) {
   return Math.round(Number(match[1]));
 }
 
+function sumDurations(values: Array<string | undefined>) {
+  let total = 0;
+  let hasValue = false;
+
+  for (const value of values) {
+    const seconds = secondsFromDuration(value);
+    if (seconds == null) {
+      continue;
+    }
+
+    total += seconds;
+    hasValue = true;
+  }
+
+  return hasValue ? total : undefined;
+}
+
+function secondsBetween(start?: string, end?: string) {
+  if (!start || !end) {
+    return undefined;
+  }
+
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return undefined;
+  }
+
+  const seconds = Math.round((endDate.getTime() - startDate.getTime()) / 1000);
+  return seconds > 0 ? seconds : undefined;
+}
+
+function transitScheduledSpanSeconds(route: GoogleRoute) {
+  const times = route.legs
+    ?.flatMap((leg) => leg.steps ?? [])
+    .flatMap((step) => {
+      const stopDetails = step.transitDetails?.stopDetails;
+      return [stopDetails?.departureTime, stopDetails?.arrivalTime];
+    })
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value))
+    .filter((value) => !Number.isNaN(value.getTime()));
+
+  if (!times?.length) {
+    return undefined;
+  }
+
+  const first = new Date(Math.min(...times.map((value) => value.getTime())));
+  const last = new Date(Math.max(...times.map((value) => value.getTime())));
+  return secondsBetween(first.toISOString(), last.toISOString());
+}
+
+function travelSecondsFromRoute(route: GoogleRoute, mode: RouteMode) {
+  const candidates = [
+    secondsFromDuration(route.duration),
+    secondsFromDuration(route.staticDuration),
+    sumDurations(route.legs?.map((leg) => leg.duration) ?? []),
+    sumDurations(route.legs?.map((leg) => leg.staticDuration) ?? [])
+  ];
+
+  if (mode === "transit") {
+    candidates.push(
+      sumDurations(route.legs?.flatMap((leg) => leg.steps?.map((step) => step.staticDuration) ?? []) ?? []),
+      transitScheduledSpanSeconds(route)
+    );
+  }
+
+  const usableCandidates = candidates.filter((value): value is number => value != null && value > 0);
+  return usableCandidates.length ? Math.max(...usableCandidates) : undefined;
+}
+
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000);
 }
@@ -196,7 +284,7 @@ async function fetchGoogleRoute(request: MobilityPlanRequest, mode: RouteMode): 
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": "routes.duration,routes.staticDuration,routes.distanceMeters"
+      "X-Goog-FieldMask": "routes.duration,routes.staticDuration,routes.distanceMeters,routes.legs.duration,routes.legs.staticDuration,routes.legs.steps.staticDuration,routes.legs.steps.transitDetails.stopDetails.departureTime,routes.legs.steps.transitDetails.stopDetails.arrivalTime"
     },
     body: JSON.stringify(body)
   });
@@ -308,11 +396,15 @@ function timingFor(request: MobilityPlanRequest, totalMinutes: number) {
 }
 
 function optionFromRoute(request: MobilityPlanRequest, mode: RouteMode, route: GoogleRoute): MobilityRouteOption {
-  const travelSeconds = secondsFromDuration(route.duration) ?? secondsFromDuration(route.staticDuration);
+  const travelSeconds = travelSecondsFromRoute(route, mode);
   const travelMinutes = travelSeconds ? Math.max(1, Math.round(travelSeconds / 60)) : undefined;
   const bufferMinutes = bufferFor(request, mode);
   const durationMinutes = travelMinutes == null ? undefined : travelMinutes + bufferMinutes;
   const timing = durationMinutes == null ? {} : timingFor(request, durationMinutes);
+  const tradeoffs = tradeoffsFor(mode, durationMinutes, bufferMinutes);
+  if (mode === "transit" && (request.arrivalTime || request.departureTime)) {
+    tradeoffs.push("Google Maps may recalculate this route for the time selected after opening the map.");
+  }
 
   return {
     mode,
@@ -332,7 +424,7 @@ function optionFromRoute(request: MobilityPlanRequest, mode: RouteMode, route: G
     summary: durationMinutes == null
       ? "Route available in maps, but no duration was returned."
       : `${durationMinutes} min total${bufferMinutes ? ` including ${bufferMinutes} min buffer` : ""}.`,
-    tradeoffs: tradeoffsFor(mode, durationMinutes, bufferMinutes),
+    tradeoffs,
     tone: "good"
   };
 }
