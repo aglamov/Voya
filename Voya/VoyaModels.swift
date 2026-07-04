@@ -1853,7 +1853,10 @@ struct VercelMobilityService {
             if item.kind == .flight, parts.count < 2 {
                 return nil
             }
-            return parts.last ?? value
+            guard let origin = parts.last ?? value.nilIfEmpty else {
+                return nil
+            }
+            return item.kind == .flight ? airportArrivalsAddress(origin) : origin
         }
 
         return value
@@ -1866,7 +1869,10 @@ struct VercelMobilityService {
         }
 
         if item.kind == .flight || item.kind == .transit {
-            return routeParts(in: value).first ?? value
+            guard let destination = routeParts(in: value).first ?? value.nilIfEmpty else {
+                return nil
+            }
+            return item.kind == .flight ? airportDeparturesAddress(destination) : destination
         }
 
         return value
@@ -1878,6 +1884,22 @@ struct VercelMobilityService {
             .components(separatedBy: " to ")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private static func airportDeparturesAddress(_ value: String) -> String {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.localizedCaseInsensitiveContains("departure") else {
+            return normalized
+        }
+        return "Departures, \(normalized)"
+    }
+
+    private static func airportArrivalsAddress(_ value: String) -> String {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.localizedCaseInsensitiveContains("arrival") else {
+            return normalized
+        }
+        return "Arrivals, \(normalized)"
     }
 
     private static func airportBufferMinutes(for item: ItineraryItem) -> Int {
