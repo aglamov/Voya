@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import ImageIO
 import PDFKit
+import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
 import Vision
@@ -557,7 +558,11 @@ private struct TripsView: View {
         }
 
         do {
-            mobilityPlans[context.id] = try await VercelMobilityService().planTransfer(context: context)
+            let plan = try await VercelMobilityService().planTransfer(context: context)
+            mobilityPlans[context.id] = plan
+            if let option = plan.defaultOption {
+                await VoyaNotificationScheduler.shared.scheduleTransferNotification(context: context, option: option)
+            }
         } catch {
             mobilityPlanErrors[context.id] = String(localized: "Route timing unavailable")
         }
@@ -582,8 +587,8 @@ private struct ImportView: View {
     @EnvironmentObject private var store: VoyaStore
     @Binding var selectedTab: VoyaTab
     @State private var isFileImporterPresented = false
-    @State private var isPhotoImporterPresented = false
     @State private var isPasteImporterPresented = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
 
     private enum ScrollTarget {
         static let recognition = "import-recognition"
@@ -623,14 +628,14 @@ private struct ImportView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
 
-                        LazyVGrid(columns: columns, spacing: 12) {
-                            Button {
-                                isFileImporterPresented = true
-                            } label: {
-                                ImportOption(symbol: "doc.text.magnifyingglass", title: "File", subtitle: "PDF or text", tint: .voyaTeal)
-                            }
-                            .buttonStyle(.plain)
+                        Button {
+                            isFileImporterPresented = true
+                        } label: {
+                            ImportPrimaryDropZone()
+                        }
+                        .buttonStyle(.plain)
 
+                        LazyVGrid(columns: columns, spacing: 12) {
                             Button {
                                 isPasteImporterPresented = true
                             } label: {
@@ -638,9 +643,7 @@ private struct ImportView: View {
                             }
                             .buttonStyle(.plain)
 
-                            Button {
-                                isPhotoImporterPresented = true
-                            } label: {
+                            PhotosPicker(selection: $selectedPhotoItem, matching: .images, photoLibrary: .shared()) {
                                 ImportOption(symbol: "photo.on.rectangle", title: "Photo", subtitle: "OCR from image", tint: .voyaCoral)
                             }
                             .buttonStyle(.plain)
@@ -702,12 +705,8 @@ private struct ImportView: View {
         ) { result in
             handleFileImport(result)
         }
-        .fileImporter(
-            isPresented: $isPhotoImporterPresented,
-            allowedContentTypes: [.image],
-            allowsMultipleSelection: false
-        ) { result in
-            handlePhotoImport(result)
+        .onChange(of: selectedPhotoItem) { _, item in
+            handlePhotoImport(item)
         }
         .sheet(isPresented: $isPasteImporterPresented) {
             PasteConfirmationView()
@@ -750,31 +749,33 @@ private struct ImportView: View {
         }
     }
 
-    private func handlePhotoImport(_ result: Result<[URL], Error>) {
-        guard case .success(let urls) = result, let url = urls.first else { return }
-        let didAccess = url.startAccessingSecurityScopedResource()
-        defer {
-            if didAccess {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
+    private func handlePhotoImport(_ item: PhotosPickerItem?) {
+        guard let item else { return }
 
-        let sourceName = url.lastPathComponent
-        guard let image = UIImage(contentsOfFile: url.path),
-              let cgImage = image.cgImage else {
-            store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
-            return
-        }
+        Task { @MainActor in
+            let sourceName = String(localized: "Photo confirmation")
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self),
+                      let image = UIImage(data: data),
+                      let cgImage = image.cgImage else {
+                    store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
+                    selectedPhotoItem = nil
+                    return
+                }
 
-        do {
-            let text = try recognizeText(in: cgImage, orientation: CGImagePropertyOrientation(image.imageOrientation))
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                let text = try recognizeText(in: cgImage, orientation: CGImagePropertyOrientation(image.imageOrientation))
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
+                    selectedPhotoItem = nil
+                    return
+                }
+
+                store.extract(text: text, sourceName: sourceName)
+                selectedPhotoItem = nil
+            } catch {
                 store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
-                return
+                selectedPhotoItem = nil
             }
-            store.extract(text: text, sourceName: sourceName)
-        } catch {
-            store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
         }
     }
 
@@ -2552,6 +2553,21 @@ private struct TransferDetailView: View {
                 }
             }
 
+            if let steps = option.steps, !steps.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Route steps", systemImage: "list.bullet")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+
+                    ForEach(steps.prefix(6)) { step in
+                        routeStepRow(step)
+                    }
+                }
+                .padding(12)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+
             HStack(spacing: 10) {
                 if let leaveBy = leaveByText(for: option) {
                     Label(leaveBy, systemImage: "clock")
@@ -2583,6 +2599,88 @@ private struct TransferDetailView: View {
                 .stroke(option.id == primaryOption?.id ? Color.voyaTeal.opacity(0.28) : Color.clear, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.04), radius: 12, y: 7)
+    }
+
+    private func routeStepRow(_ step: MobilityRouteStep) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: routeStepSymbol(step))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaTeal)
+                .frame(width: 24, height: 24)
+                .background(Color.voyaTeal.opacity(0.10))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(step.title)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer(minLength: 6)
+
+                    if let timeText = routeStepTimeText(step) {
+                        Text(timeText)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Color.voyaTeal)
+                            .lineLimit(1)
+                    } else if let durationMinutes = step.durationMinutes {
+                        Text("\(durationMinutes) min")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Color.voyaMuted)
+                            .lineLimit(1)
+                    }
+                }
+
+                if let detail = routeStepDetail(step) {
+                    Text(detail)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func routeStepSymbol(_ step: MobilityRouteStep) -> String {
+        switch step.kind {
+        case "transit":
+            return "tram"
+        case "walk":
+            return "figure.walk"
+        case "drive":
+            return "car"
+        default:
+            return "arrow.turn.down.right"
+        }
+    }
+
+    private func routeStepDetail(_ step: MobilityRouteStep) -> String? {
+        if let departureStop = step.departureStop,
+           let arrivalStop = step.arrivalStop {
+            return "\(departureStop) → \(arrivalStop)"
+        }
+
+        return step.detail
+    }
+
+    private func routeStepTimeText(_ step: MobilityRouteStep) -> String? {
+        let departure = step.departureTime.flatMap(MobilityDateFormatter.date(from:))
+        let arrival = step.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
+
+        if let departure, let arrival {
+            return "\(MobilityDateFormatter.time.string(from: departure))-\(MobilityDateFormatter.time.string(from: arrival))"
+        }
+
+        if let departure {
+            return MobilityDateFormatter.time.string(from: departure)
+        }
+
+        if let arrival {
+            return MobilityDateFormatter.time.string(from: arrival)
+        }
+
+        return nil
     }
 
     private func metric(_ title: LocalizedStringKey, _ value: String) -> some View {
@@ -4965,6 +5063,7 @@ private struct ImportPrimaryDropZone: View {
         .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
         .background(Color.voyaMint.opacity(0.62))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.voyaTeal.opacity(0.18), lineWidth: 1)
@@ -5002,6 +5101,7 @@ private struct ImportOption: View {
         .padding(14)
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 

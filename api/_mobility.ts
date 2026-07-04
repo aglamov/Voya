@@ -52,7 +52,22 @@ export type MobilityRouteOption = {
   mapURL: string;
   summary: string;
   tradeoffs: string[];
+  steps?: MobilityRouteStep[];
   tone: RouteTone;
+};
+
+export type MobilityRouteStep = {
+  kind: "walk" | "transit" | "drive" | "other";
+  title: string;
+  detail?: string;
+  durationMinutes?: number;
+  distanceMeters?: number;
+  lineName?: string;
+  vehicleType?: string;
+  departureStop?: string;
+  arrivalStop?: string;
+  departureTime?: string;
+  arrivalTime?: string;
 };
 
 export type MobilityPlanResponse = {
@@ -86,10 +101,32 @@ type GoogleRouteLeg = {
 
 type GoogleRouteLegStep = {
   staticDuration?: string;
+  distanceMeters?: number;
+  navigationInstruction?: {
+    instructions?: string;
+  };
+  localizedValues?: {
+    distance?: { text?: string };
+    staticDuration?: { text?: string };
+  };
   transitDetails?: {
     stopDetails?: {
+      arrivalStop?: {
+        name?: string;
+      };
+      departureStop?: {
+        name?: string;
+      };
       arrivalTime?: string;
       departureTime?: string;
+    };
+    transitLine?: {
+      name?: string;
+      nameShort?: string;
+      vehicle?: {
+        name?: { text?: string };
+        type?: string;
+      };
     };
   };
 };
@@ -365,6 +402,11 @@ function sumDurations(values: Array<string | undefined>) {
   return hasValue ? total : undefined;
 }
 
+function minutesFromDuration(value?: string) {
+  const seconds = secondsFromDuration(value);
+  return seconds == null ? undefined : Math.max(1, Math.round(seconds / 60));
+}
+
 function secondsBetween(start?: string, end?: string) {
   if (!start || !end) {
     return undefined;
@@ -436,6 +478,60 @@ function mapsURL(origin: MobilityPlace, destination: MobilityPlace, mode: RouteM
   return url.toString();
 }
 
+function compactParts(parts: Array<string | undefined>) {
+  return parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part));
+}
+
+function routeStepsFromRoute(route: GoogleRoute, mode: RouteMode): MobilityRouteStep[] | undefined {
+  const steps = route.legs?.flatMap((leg) => leg.steps ?? []) ?? [];
+  if (!steps.length) {
+    return undefined;
+  }
+
+  const routeSteps = steps.map((step): MobilityRouteStep | undefined => {
+    const transit = step.transitDetails;
+    const stopDetails = transit?.stopDetails;
+    const lineName = transit?.transitLine?.nameShort ?? transit?.transitLine?.name;
+    const vehicleType = transit?.transitLine?.vehicle?.name?.text ?? transit?.transitLine?.vehicle?.type;
+    const departureStop = stopDetails?.departureStop?.name;
+    const arrivalStop = stopDetails?.arrivalStop?.name;
+    const durationMinutes = minutesFromDuration(step.staticDuration);
+    const instruction = step.navigationInstruction?.instructions;
+    const distance = step.localizedValues?.distance?.text;
+
+    if (transit) {
+      return {
+        kind: "transit",
+        title: compactParts([vehicleType, lineName]).join(" ") || "Public transport",
+        detail: compactParts([
+          departureStop && arrivalStop ? `${departureStop} → ${arrivalStop}` : undefined,
+          distance
+        ]).join(" · ") || undefined,
+        durationMinutes,
+        distanceMeters: step.distanceMeters,
+        lineName,
+        vehicleType,
+        departureStop,
+        arrivalStop,
+        departureTime: stopDetails?.departureTime,
+        arrivalTime: stopDetails?.arrivalTime
+      };
+    }
+
+    return {
+      kind: mode === "drive" || mode === "taxi" ? "drive" : mode === "walk" ? "walk" : "other",
+      title: instruction || routeTitle(mode),
+      detail: distance,
+      durationMinutes,
+      distanceMeters: step.distanceMeters
+    };
+  }).filter((step): step is MobilityRouteStep => Boolean(step));
+
+  return routeSteps.length ? routeSteps : undefined;
+}
+
 async function fetchGoogleRoute(request: MobilityPlanRequest, mode: RouteMode): Promise<GoogleRoute | undefined> {
   const apiKey = mapsApiKey();
   if (!apiKey) {
@@ -467,7 +563,25 @@ async function fetchGoogleRoute(request: MobilityPlanRequest, mode: RouteMode): 
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": "routes.duration,routes.staticDuration,routes.distanceMeters,routes.legs.duration,routes.legs.staticDuration,routes.legs.steps.staticDuration,routes.legs.steps.transitDetails.stopDetails.departureTime,routes.legs.steps.transitDetails.stopDetails.arrivalTime"
+      "X-Goog-FieldMask": [
+        "routes.duration",
+        "routes.staticDuration",
+        "routes.distanceMeters",
+        "routes.legs.duration",
+        "routes.legs.staticDuration",
+        "routes.legs.steps.staticDuration",
+        "routes.legs.steps.distanceMeters",
+        "routes.legs.steps.navigationInstruction.instructions",
+        "routes.legs.steps.localizedValues.distance.text",
+        "routes.legs.steps.transitDetails.stopDetails.departureTime",
+        "routes.legs.steps.transitDetails.stopDetails.arrivalTime",
+        "routes.legs.steps.transitDetails.stopDetails.departureStop.name",
+        "routes.legs.steps.transitDetails.stopDetails.arrivalStop.name",
+        "routes.legs.steps.transitDetails.transitLine.name",
+        "routes.legs.steps.transitDetails.transitLine.nameShort",
+        "routes.legs.steps.transitDetails.transitLine.vehicle.name.text",
+        "routes.legs.steps.transitDetails.transitLine.vehicle.type"
+      ].join(",")
     },
     body: JSON.stringify(body)
   });
@@ -585,6 +699,7 @@ function optionFromRoute(request: MobilityPlanRequest, mode: RouteMode, route: G
   const durationMinutes = travelMinutes == null ? undefined : travelMinutes + bufferMinutes;
   const timing = durationMinutes == null ? {} : timingFor(request, durationMinutes);
   const tradeoffs = tradeoffsFor(mode, durationMinutes, bufferMinutes);
+  const steps = routeStepsFromRoute(route, mode);
   if (mode === "transit" && (request.arrivalTime || request.departureTime)) {
     tradeoffs.push("Google Maps may recalculate this route for the time selected after opening the map.");
   }
@@ -608,6 +723,7 @@ function optionFromRoute(request: MobilityPlanRequest, mode: RouteMode, route: G
       ? "Route available in maps, but no duration was returned."
       : `${durationMinutes} min total${bufferMinutes ? ` including ${bufferMinutes} min buffer` : ""}.`,
     tradeoffs,
+    steps,
     tone: "good"
   };
 }

@@ -96,6 +96,51 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
     }
 
+    func scheduleTransferNotification(
+        context: MobilityTransferContext,
+        option: MobilityRouteOption,
+        now: Date = Date()
+    ) async {
+        guard let leaveBy = option.leaveBy,
+              let triggerDate = Self.date(from: leaveBy),
+              triggerDate > now.addingTimeInterval(60),
+              await requestAuthorizationIfNeeded() else {
+            return
+        }
+
+        let identifier = "\(identifierPrefix)transfer.\(context.id)"
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "Time to leave")
+        content.subtitle = option.title
+        content.body = String(localized: "Open the route and start moving to \(context.destination).")
+        content.sound = .default
+        content.threadIdentifier = context.id
+        content.userInfo = [
+            "transferID": context.id,
+            "kind": "transfer",
+            "mode": option.mode.rawValue
+        ]
+
+        let trigger = UNCalendarNotificationTrigger(
+            dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: triggerDate),
+            repeats: false
+        )
+
+        do {
+            try await center.add(
+                UNNotificationRequest(
+                    identifier: identifier,
+                    content: content,
+                    trigger: trigger
+                )
+            )
+        } catch {
+            return
+        }
+    }
+
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
@@ -142,6 +187,17 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
                 trigger: trigger
             )
         ]
+    }
+
+    private static func date(from value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 
     private func notificationRequests(for item: VoyaNotificationItem, in trip: VoyaNotificationTrip, now: Date) -> [UNNotificationRequest] {

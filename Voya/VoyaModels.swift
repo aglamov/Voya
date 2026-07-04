@@ -1723,7 +1723,26 @@ struct MobilityRouteOption: Decodable, Identifiable {
     var mapURL: URL
     var summary: String
     var tradeoffs: [String]
+    var steps: [MobilityRouteStep]?
     var tone: String
+}
+
+struct MobilityRouteStep: Decodable, Identifiable {
+    var id: String {
+        "\(kind)-\(title)-\(departureStop ?? "")-\(arrivalStop ?? "")-\(departureTime ?? "")-\(arrivalTime ?? "")"
+    }
+
+    var kind: String
+    var title: String
+    var detail: String?
+    var durationMinutes: Int?
+    var distanceMeters: Int?
+    var lineName: String?
+    var vehicleType: String?
+    var departureStop: String?
+    var arrivalStop: String?
+    var departureTime: String?
+    var arrivalTime: String?
 }
 
 struct MobilityRecommendation: Decodable {
@@ -2448,7 +2467,7 @@ enum ConfirmationParser {
 
     private static func inferredFlightSegmentCount(flightNumberCount: Int, routeCount: Int) -> Int {
         guard routeCount > 0 else {
-            return min(flightNumberCount, 1)
+            return flightNumberCount
         }
 
         if flightNumberCount == 2, routeCount == 1 {
