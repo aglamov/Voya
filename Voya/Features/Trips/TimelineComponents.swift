@@ -215,9 +215,7 @@ struct TransferRecommendationCard: View {
                         .foregroundStyle(phase.titleColor)
                         .lineLimit(2)
 
-                    if let transitOption {
-                        transitCallout(transitOption)
-                    } else {
+                    if transitOption == nil {
                         Text(primaryDetail)
                             .font(.caption.weight(.medium))
                             .foregroundStyle(phase.secondaryColor)
@@ -275,6 +273,7 @@ struct TransferRecommendationCard: View {
                             }
                         }
                     }
+
                 }
             }
         }
@@ -359,29 +358,35 @@ struct TransferRecommendationCard: View {
     private func optionPreviewTile(_ option: MobilityRouteOption, isProminent: Bool) -> some View {
         Group {
             if isProminent {
-                HStack(alignment: .center, spacing: 9) {
-                    optionIcon(option, size: 28)
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(alignment: .center, spacing: 9) {
+                        optionIcon(option, size: 28)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(option.mode.displayName)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(option.mode.displayName)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(phase.titleColor)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.82)
+
+                            Text(routeTimeRangeText(for: option) ?? String(localized: "Open route"))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(phase.secondaryColor)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.82)
+                        }
+
+                        Spacer(minLength: 4)
+
+                        Text(shortDuration(option))
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(phase.titleColor)
+                            .foregroundStyle(phase.accent)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.82)
-
-                        Text(routeTimeRangeText(for: option) ?? String(localized: "Open route"))
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(phase.secondaryColor)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.82)
                     }
 
-                    Spacer(minLength: 4)
-
-                    Text(shortDuration(option))
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(phase.accent)
-                        .lineLimit(1)
+                    if let steps = transitSteps(for: option), !steps.isEmpty {
+                        transitLegsView(steps)
+                    }
                 }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
@@ -417,38 +422,6 @@ struct TransferRecommendationCard: View {
             .frame(width: size, height: size)
             .background(phase.metricBackground)
             .clipShape(Circle())
-    }
-
-    private func transitCallout(_ option: MobilityRouteOption) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            optionIcon(option, size: 22)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(option.mode.displayName)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(phase.titleColor)
-
-                Text(shortTransitRoute(for: option) ?? primaryDetail)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(phase.secondaryColor)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.78)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 4)
-
-            if let timeText = routeTimeRangeText(for: option) {
-                Text(timeText)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(phase.accent)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 8)
-        .background(phase.metricBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 
     private func compactOptionDetail(_ option: MobilityRouteOption) -> String {
@@ -494,23 +467,97 @@ struct TransferRecommendationCard: View {
         return option.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
     }
 
-    private func shortTransitRoute(for option: MobilityRouteOption) -> String? {
-        guard let step = option.steps?.first(where: { $0.kind == "transit" }) else {
+    private func transitSteps(for option: MobilityRouteOption) -> [MobilityRouteStep]? {
+        guard let steps = option.steps else {
             return nil
         }
 
-        let line = step.lineName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-            ?? step.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        let from = step.departureStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        let to = step.arrivalStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let transitSteps = steps.filter { $0.kind == "transit" }
+        let routeSteps = transitSteps.isEmpty ? steps.filter { $0.kind != "walk" } : transitSteps
+        return routeSteps.isEmpty ? nil : routeSteps
+    }
 
-        if let line, let from, let to {
-            return "\(line): \(from) -> \(to)"
+    private func transitLegsView(_ steps: [MobilityRouteStep]) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Label("Transit legs", systemImage: "tram")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(phase.titleColor)
+
+            ForEach(steps.prefix(3)) { step in
+                transitLegRow(step)
+            }
         }
-        if let from, let to {
-            return "\(from) -> \(to)"
+        .padding(.top, 2)
+    }
+
+    private func transitLegRow(_ step: MobilityRouteStep) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "tram")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(phase.accent)
+                .frame(width: 22, height: 22)
+                .background(phase.metricBackground)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(transitLegTitle(step))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(phase.titleColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Spacer(minLength: 4)
+
+                    if let timeText = transitLegTimeText(step) {
+                        Text(timeText)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(phase.accent)
+                            .lineLimit(1)
+                    }
+                }
+
+                if let detail = transitLegDetail(step) {
+                    Text(detail)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(phase.secondaryColor)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.78)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
-        return line
+    }
+
+    private func transitLegTitle(_ step: MobilityRouteStep) -> String {
+        step.lineName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? step.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? String(localized: "Public transport")
+    }
+
+    private func transitLegDetail(_ step: MobilityRouteStep) -> String? {
+        if let departureStop = step.departureStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+           let arrivalStop = step.arrivalStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            return "\(departureStop) -> \(arrivalStop)"
+        }
+
+        return step.detail?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    private func transitLegTimeText(_ step: MobilityRouteStep) -> String? {
+        let departure = step.departureTime.flatMap(MobilityDateFormatter.date(from:))
+        let arrival = step.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
+
+        if let departure, let arrival {
+            return "\(MobilityDateFormatter.time.string(from: departure))-\(MobilityDateFormatter.time.string(from: arrival))"
+        }
+        if let departure {
+            return MobilityDateFormatter.time.string(from: departure)
+        }
+        if let arrival {
+            return MobilityDateFormatter.time.string(from: arrival)
+        }
+        return nil
     }
 
     private func transitInstruction(for option: MobilityRouteOption) -> String? {
