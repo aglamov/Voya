@@ -3,6 +3,7 @@ import SwiftData
 import ImageIO
 import PDFKit
 import PhotosUI
+import QuickLook
 import UniformTypeIdentifiers
 import UIKit
 import Vision
@@ -425,6 +426,7 @@ private struct TripsView: View {
     @State private var mobilityPlans: [String: MobilityPlan] = [:]
     @State private var loadingMobilityPlanIDs: Set<String> = []
     @State private var mobilityPlanErrors: [String: String] = [:]
+    @State private var sourcePreviewURL: URL?
 
     private enum TripListMode: String, CaseIterable, Identifiable {
         case upcoming = "Upcoming"
@@ -497,7 +499,9 @@ private struct TripsView: View {
                     }
 
                     let itinerary = store.itinerary(for: trip)
-                    TripOperationsCard(trip: trip, itinerary: itinerary)
+                    TripOperationsCard(trip: trip, itinerary: itinerary) { sourceFile in
+                        sourcePreviewURL = SourceDocumentPreviewer.temporaryURL(for: sourceFile)
+                    }
 
                     HStack {
                         Text("Timeline")
@@ -705,6 +709,7 @@ private struct TripsView: View {
                 await loadMobilityPlan(context: context)
             }
         }
+        .quickLookPreview($sourcePreviewURL)
     }
 
     private var emptySubtitle: String {
@@ -779,6 +784,7 @@ private struct ImportView: View {
     @State private var isFileImporterPresented = false
     @State private var isPasteImporterPresented = false
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var sourcePreviewURL: URL?
 
     private enum ScrollTarget {
         static let recognition = "import-recognition"
@@ -859,7 +865,12 @@ private struct ImportView: View {
                     }
 
                     if let preview = store.extractedPreview {
-                        ExtractionReview(preview: preview, isConfirming: store.isConfirmingExtraction) { item, draft in
+                        ExtractionReview(
+                            preview: preview,
+                            isConfirming: store.isConfirmingExtraction,
+                            statusMessage: store.importMessage,
+                            onOpenSource: openSourceDocument
+                        ) { item, draft in
                             store.updatePreviewItem(item, with: draft)
                         } onAddItem: {
                             store.addPreviewItem()
@@ -897,6 +908,7 @@ private struct ImportView: View {
             PasteConfirmationView()
                 .environmentObject(store)
         }
+        .quickLookPreview($sourcePreviewURL)
     }
 
     private func scroll(to target: String, with proxy: ScrollViewProxy) {
@@ -917,18 +929,26 @@ private struct ImportView: View {
         }
 
         let sourceName = url.lastPathComponent
+        let sourceData = try? Data(contentsOf: url)
+        let sourceFile = sourceData.map {
+            SourceDocumentFile(
+                fileName: sourceName,
+                contentType: UTType(filenameExtension: url.pathExtension)?.identifier ?? "application/octet-stream",
+                data: $0
+            )
+        }
         if url.pathExtension.localizedCaseInsensitiveCompare("pdf") == .orderedSame {
             guard let text = readPDFText(from: url), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
                 return
             }
-            store.extract(text: text, sourceName: sourceName)
+            store.extract(text: text, sourceName: sourceName, sourceFile: sourceFile)
             return
         }
 
         do {
             let text = try String(contentsOf: url, encoding: .utf8)
-            store.extract(text: text, sourceName: sourceName)
+            store.extract(text: text, sourceName: sourceName, sourceFile: sourceFile)
         } catch {
             store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
         }
@@ -955,7 +975,8 @@ private struct ImportView: View {
                     return
                 }
 
-                store.extract(text: text, sourceName: sourceName)
+                let sourceFile = SourceDocumentFile(fileName: "Photo confirmation.jpg", contentType: UTType.jpeg.identifier, data: data)
+                store.extract(text: text, sourceName: sourceName, sourceFile: sourceFile)
                 selectedPhotoItem = nil
             } catch {
                 store.importMessage = ImportErrorMessage.unreadableFile(sourceName).message
@@ -985,6 +1006,10 @@ private struct ImportView: View {
         return (0..<document.pageCount)
             .compactMap { document.page(at: $0)?.string }
             .joined(separator: "\n")
+    }
+
+    private func openSourceDocument(_ sourceFile: SourceDocumentFile) {
+        sourcePreviewURL = SourceDocumentPreviewer.temporaryURL(for: sourceFile)
     }
 }
 
@@ -1758,6 +1783,7 @@ private struct EmptyTripsCard: View {
 private struct TripOperationsCard: View {
     let trip: Trip
     let itinerary: [ItineraryItem]
+    let onOpenSource: (SourceDocumentFile) -> Void
 
     private var sortedItems: [ItineraryItem] {
         itinerary.sorted { first, second in
@@ -1790,6 +1816,10 @@ private struct TripOperationsCard: View {
 
     private var lastTimedItem: ItineraryItem? {
         sortedItems.last { $0.startsAt != nil || $0.endsAt != nil }
+    }
+
+    private var sourceFile: SourceDocumentFile? {
+        SourceDocumentFile.stored(in: trip.rawData)
     }
 
     var body: some View {
@@ -1846,6 +1876,41 @@ private struct TripOperationsCard: View {
                 .padding(12)
                 .background(Color.voyaSurface)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+
+            if let sourceFile {
+                Button {
+                    onOpenSource(sourceFile)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "doc.viewfinder")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.voyaTeal)
+                            .frame(width: 34, height: 34)
+                            .background(Color.voyaTeal.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Source file")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.voyaMuted)
+                            Text(sourceFile.fileName)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.voyaInk)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 0)
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.voyaMuted)
+                    }
+                    .padding(12)
+                    .background(Color.voyaSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(16)
@@ -3604,6 +3669,17 @@ struct ItineraryItemDraft {
     var displayTime: String {
         effectiveStartsAt.map { ItineraryDateFormatter.displayTime(start: $0, end: effectiveEndsAt) } ?? String(localized: "Date needed")
     }
+
+    func matches(_ other: ItineraryItemDraft) -> Bool {
+        kind == other.kind
+            && title == other.title
+            && hasStartDate == other.hasStartDate
+            && startsAt == other.startsAt
+            && endsAt == other.endsAt
+            && hasEndDate == other.hasEndDate
+            && location == other.location
+            && status == other.status
+    }
 }
 
 private enum LocationLinkResolver {
@@ -4457,6 +4533,32 @@ private enum MomentDateFormatter {
         formatter.dateFormat = "HH:mm"
         return formatter
     }()
+}
+
+private enum SourceDocumentPreviewer {
+    static func temporaryURL(for sourceFile: SourceDocumentFile) -> URL? {
+        guard let data = sourceFile.data else {
+            return nil
+        }
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VoyaSourceDocuments", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let safeFileName = sourceFile.fileName
+                .components(separatedBy: CharacterSet(charactersIn: "/:"))
+                .joined(separator: "-")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty ?? "Source document"
+            let url = directory.appendingPathComponent(safeFileName)
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
 }
 
 private struct MomentMetric: View {
@@ -5437,6 +5539,8 @@ private struct TripDraft {
 private struct EditTripView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: TripDraft
+    @State private var sourcePreviewURL: URL?
+    let trip: Trip
     let onSave: (TripDraft) -> Void
     let onDelete: () -> Void
 
@@ -5446,6 +5550,7 @@ private struct EditTripView: View {
         onDelete: @escaping () -> Void
     ) {
         _draft = State(initialValue: TripDraft(trip: trip))
+        self.trip = trip
         self.onSave = onSave
         self.onDelete = onDelete
     }
@@ -5494,6 +5599,49 @@ private struct EditTripView: View {
                     .foregroundStyle(Color.voyaInk)
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+
+                    if let sourceFile = SourceDocumentFile.stored(in: trip.rawData) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "doc.viewfinder")
+                                    .font(.headline.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 42, height: 42)
+                                    .background(Color.voyaTeal)
+                                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Source file")
+                                        .font(.headline)
+                                        .foregroundStyle(Color.voyaInk)
+                                    Text(sourceFile.fileName)
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(Color.voyaMuted)
+                                        .lineLimit(1)
+                                }
+
+                                Spacer()
+                            }
+
+                            Button {
+                                sourcePreviewURL = SourceDocumentPreviewer.temporaryURL(for: sourceFile)
+                            } label: {
+                                Label("Open source", systemImage: "doc.viewfinder")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                                    .foregroundStyle(.white)
+                                    .background(Color.voyaInk)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(18)
+                        .background(.white)
+                        .foregroundStyle(Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+                    }
 
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(spacing: 12) {
@@ -5604,6 +5752,7 @@ private struct EditTripView: View {
             .padding(.bottom, 10)
             .background(.ultraThinMaterial)
         }
+        .quickLookPreview($sourcePreviewURL)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
@@ -5961,6 +6110,8 @@ private struct ImportSuccessAnimationCard: View {
 private struct ExtractionReview: View {
     let preview: ExtractionPreview
     let isConfirming: Bool
+    let statusMessage: String?
+    let onOpenSource: (SourceDocumentFile) -> Void
     let onItemChange: (ItineraryItem, ItineraryItemDraft) -> Void
     let onAddItem: () -> Void
     let onDeleteItem: (ItineraryItem) -> Void
@@ -5982,6 +6133,13 @@ private struct ExtractionReview: View {
 
                 ProgressRing(value: preview.confidence)
             }
+
+            ImportRecognitionStatusCard(
+                preview: preview,
+                isConfirming: isConfirming,
+                statusMessage: statusMessage,
+                onOpenSource: onOpenSource
+            )
 
             if !preview.warnings.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -6060,8 +6218,93 @@ private struct ExtractionReview: View {
     }
 }
 
+private struct ImportRecognitionStatusCard: View {
+    let preview: ExtractionPreview
+    let isConfirming: Bool
+    let statusMessage: String?
+    let onOpenSource: (SourceDocumentFile) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: isConfirming ? "waveform.path.ecg" : "doc.text.magnifyingglass")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(isConfirming ? Color.voyaTeal : Color.voyaInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isConfirming ? "Checking imported details" : "Filled from source")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text(detailText)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) {
+                SourceStepPill(title: "Source", symbol: "doc.text", isActive: true)
+                SourceStepPill(title: "Recognition", symbol: "text.viewfinder", isActive: true)
+                SourceStepPill(title: "Tracking", symbol: "antenna.radiowaves.left.and.right", isActive: isConfirming)
+            }
+
+            if let sourceFile = preview.sourceFile {
+                Button {
+                    onOpenSource(sourceFile)
+                } label: {
+                    Label("Open source", systemImage: "doc.viewfinder")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .foregroundStyle(Color.voyaInk)
+                        .background(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .background(Color.voyaTeal.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var detailText: String {
+        if let statusMessage, !statusMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return statusMessage
+        }
+
+        return String(localized: "Filled from source. Not enough details yet, checking tracking services.")
+    }
+}
+
+private struct SourceStepPill: View {
+    let title: LocalizedStringKey
+    let symbol: String
+    let isActive: Bool
+
+    var body: some View {
+        Label(title, systemImage: symbol)
+            .font(.caption.weight(.bold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+            .foregroundStyle(isActive ? Color.voyaInk : Color.voyaMuted)
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            .frame(maxWidth: .infinity)
+            .background(isActive ? .white : Color.voyaSurface.opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
 private struct EditableItineraryItem: View {
     @State private var draft: ItineraryItemDraft
+    @State private var isApplyingExternalItemUpdate = false
+    let item: ItineraryItem
     let onChange: (ItineraryItemDraft) -> Void
     let onDelete: () -> Void
 
@@ -6071,6 +6314,7 @@ private struct EditableItineraryItem: View {
         onDelete: @escaping () -> Void
     ) {
         _draft = State(initialValue: ItineraryItemDraft(item: item))
+        self.item = item
         self.onChange = onChange
         self.onDelete = onDelete
     }
@@ -6151,6 +6395,7 @@ private struct EditableItineraryItem: View {
             commitDraft()
         }
         .onChange(of: draft.endsAt) { _, _ in commitDraft() }
+        .onChange(of: item.updatedAt) { _, _ in syncDraftFromItem() }
     }
 
     private func dateTimePickerRow(
@@ -6193,7 +6438,24 @@ private struct EditableItineraryItem: View {
     }
 
     private func commitDraft() {
+        guard !isApplyingExternalItemUpdate else {
+            return
+        }
+
         onChange(draft)
+    }
+
+    private func syncDraftFromItem() {
+        let updatedDraft = ItineraryItemDraft(item: item)
+        guard !draft.matches(updatedDraft) else {
+            return
+        }
+
+        isApplyingExternalItemUpdate = true
+        draft = updatedDraft
+        DispatchQueue.main.async {
+            isApplyingExternalItemUpdate = false
+        }
     }
 }
 

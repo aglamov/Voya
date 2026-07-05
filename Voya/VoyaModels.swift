@@ -248,6 +248,45 @@ struct ImportedDocument: Identifiable {
     var name: String
     var text: String
     var importedAt: Date
+    var sourceFile: SourceDocumentFile?
+}
+
+struct SourceDocumentFile: Codable, Equatable {
+    private static let storageKind = "voya.source-document"
+
+    var kind = Self.storageKind
+    var fileName: String
+    var contentType: String
+    var dataBase64: String
+
+    init(fileName: String, contentType: String, data: Data) {
+        self.fileName = fileName
+        self.contentType = contentType
+        self.dataBase64 = data.base64EncodedString()
+    }
+
+    var data: Data? {
+        Data(base64Encoded: dataBase64)
+    }
+
+    var storageString: String? {
+        guard let data = try? JSONEncoder().encode(self) else {
+            return nil
+        }
+
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func stored(in rawData: String?) -> SourceDocumentFile? {
+        guard let rawData,
+              let data = rawData.data(using: .utf8),
+              let source = try? JSONDecoder().decode(SourceDocumentFile.self, from: data),
+              source.kind == storageKind else {
+            return nil
+        }
+
+        return source
+    }
 }
 
 struct ExtractedField: Identifiable {
@@ -259,6 +298,7 @@ struct ExtractedField: Identifiable {
 struct ExtractionPreview: Identifiable {
     let id = UUID()
     var sourceName: String
+    var sourceFile: SourceDocumentFile?
     var type: String
     var title: String
     var normalizedDestination: String?
@@ -782,7 +822,7 @@ final class VoyaStore: ObservableObject {
         extract(text: importText, sourceName: Self.pastedConfirmationSourceName)
     }
 
-    func extract(text: String, sourceName: String) {
+    func extract(text: String, sourceName: String, sourceFile: SourceDocumentFile? = nil) {
         let cleanedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedText.isEmpty else {
             importMessage = ImportErrorMessage.emptyInput.message
@@ -790,7 +830,7 @@ final class VoyaStore: ObservableObject {
         }
 
         importSuccess = nil
-        let document = ImportedDocument(name: sourceName, text: cleanedText, importedAt: Date())
+        let document = ImportedDocument(name: sourceName, text: cleanedText, importedAt: Date(), sourceFile: sourceFile)
         importedDocuments.insert(document, at: 0)
 
         Task {
@@ -867,7 +907,7 @@ final class VoyaStore: ObservableObject {
         }
 
         isConfirmingExtraction = true
-        importMessage = String(localized: "Checking flight details...")
+        importMessage = String(localized: "Filled from source. Not enough details yet, checking tracking services.")
         defer {
             isConfirmingExtraction = false
         }
@@ -876,8 +916,6 @@ final class VoyaStore: ObservableObject {
         if enrichedCount > 0 {
             refreshPreviewFields()
             importMessage = String(localized: "Updated \(enrichedCount) flight item\(enrichedCount == 1 ? "" : "s") from live schedules.")
-        } else if importMessage == String(localized: "Checking flight details...") {
-            importMessage = String(localized: "Review the recognized confirmation before saving.")
         }
     }
 
@@ -893,6 +931,9 @@ final class VoyaStore: ObservableObject {
             trip.dates = tripDates(for: trip.items, fallback: trip.dates)
             trip.summary = summaryText(for: trip)
             trip.sourceName = combinedSourceName(trip.sourceName, preview.sourceName)
+            if let sourceFileStorage = preview.sourceFile?.storageString {
+                trip.rawData = sourceFileStorage
+            }
             trip.destination = tripTitle(for: trip.items, fallback: trip.title, preferredDestination: preview.normalizedDestination)
             trip.destinationImageURL = nil
             trip.destinationImageCredit = nil
@@ -920,7 +961,8 @@ final class VoyaStore: ObservableObject {
                 summary: summaryText(itemCount: items.count, sourceName: preview.sourceName),
                 destination: preview.normalizedDestination,
                 items: items,
-                sourceName: preview.sourceName
+                sourceName: preview.sourceName,
+                rawData: preview.sourceFile?.storageString
             )
             modelContext?.insert(trip)
             deleteItems(deduplicated.duplicates)
@@ -1247,7 +1289,9 @@ final class VoyaStore: ObservableObject {
 
     private func refreshPreviewFields() {
         guard let preview = extractedPreview else { return }
-        extractedPreview?.fields = ConfirmationParser.fields(for: preview.items, sourceName: preview.sourceName)
+        var updatedPreview = preview
+        updatedPreview.fields = ConfirmationParser.fields(for: preview.items, sourceName: preview.sourceName)
+        extractedPreview = updatedPreview
     }
 
     private func tripIndexForMerge(with incomingItems: [ItineraryItem]) -> Int? {
@@ -1733,6 +1777,7 @@ private struct VercelConfirmationExtractor {
 
         return ExtractionPreview(
             sourceName: document.name,
+            sourceFile: document.sourceFile,
             type: decoded.type,
             title: decoded.title,
             normalizedDestination: decoded.normalizedDestination,
@@ -2581,6 +2626,7 @@ enum ConfirmationParser {
 
         return ExtractionPreview(
             sourceName: document.name,
+            sourceFile: document.sourceFile,
             type: typeLabel(for: items),
             title: title,
             normalizedDestination: normalizedDestination(from: items),
@@ -2626,7 +2672,7 @@ enum ConfirmationParser {
                 kind: .flight,
                 title: title,
                 location: location,
-                status: String(localized: "Needs terminal check"),
+                status: String(localized: "Filled from source. Not enough details yet, checking tracking services."),
                 startsAt: startsAt,
                 endsAt: endsAt
             )
