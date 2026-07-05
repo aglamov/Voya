@@ -45,6 +45,29 @@ Primary app modules:
 - Live Assistant
 - Profile and Preferences
 
+Current iOS source organization:
+
+- `App`: app entry point and root tab shell
+- `Core/Models`: SwiftData and shared domain models
+- `Core/Services`: reusable domain services
+- `Core/Utilities`: date/string helpers and other small shared utilities
+- `Core/DesignSystem`: shared visual components, colors, and app chrome
+- `Data`: app store, API clients, cache, and fixtures
+- `Features`: screen-level feature modules such as Inspire, Trips, Import, and Assistant
+- `Notifications`: local notification scheduling and reminder logic
+
+`VoyaStore` is intentionally kept as a thin observable state container. Its behavior is split into focused extensions under `Data/Store`:
+
+- persistence and notification sync
+- hero image loading
+- import, extraction, and flight enrichment
+- trip and itinerary editing
+- merge and deduplication rules
+- itinerary sorting
+- trip title/date/summary metadata
+
+Large SwiftUI screens should follow the same pattern: keep the screen container focused on state and actions, and move reusable cards, panels, and renderers into neighboring feature component files.
+
 ## Backend
 
 The backend should exist from the beginning. It keeps API keys off device, runs background monitoring, handles AI extraction, stores source files, and normalizes third-party provider responses.
