@@ -240,15 +240,9 @@ struct TransferDetailView: View {
             }
 
             HStack(spacing: 8) {
-                metric("Total", shortDuration(option))
-                metric("Travel", option.travelMinutes.map { "\($0) min" } ?? "—")
-                metric("Buffer", option.bufferMinutes > 0 ? "\(option.bufferMinutes) min" : "—")
-            }
-
-            HStack(spacing: 8) {
-                metric("Cost", option.costLevel.capitalized)
-                metric("Comfort", option.comfortLevel.capitalized)
-                metric("Emissions", option.emissionsLevel.capitalized)
+                metric("Depart", departureTimeText(for: option) ?? "—")
+                metric("Arrive", arrivalTimeText(for: option) ?? "—")
+                metric("Travel", travelDurationText(option))
             }
 
             if option.mode == .transit, !option.tradeoffs.isEmpty {
@@ -278,8 +272,8 @@ struct TransferDetailView: View {
             }
 
             HStack(spacing: 10) {
-                if let leaveBy = leaveByText(for: option) {
-                    Label(leaveBy, systemImage: "clock")
+                if let routeTime = routeTimeRangeText(for: option) {
+                    Label(routeTime, systemImage: "clock")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(Color.voyaTeal)
                 }
@@ -385,13 +379,13 @@ struct TransferDetailView: View {
     private func optionSummary(_ option: MobilityRouteOption) -> String {
         switch option.mode {
         case .taxi:
-            return String(localized: "Taxi · \(shortDuration(option)). No route notes needed; open the map when you are ready.")
+            return String(localized: "Taxi · \(travelDurationText(option)). Open the map when you are ready.")
         case .drive:
-            return String(localized: "Own car · \(shortDuration(option)). Keep leave time visible and use the map for navigation.")
+            return String(localized: "Own car · \(travelDurationText(option)). Keep leave time visible and use the map for navigation.")
         case .transit:
             return transitInstruction(for: option) ?? option.summary
         case .walk, .bike:
-            return String(localized: "\(option.mode.displayName) · \(shortDuration(option)).")
+            return String(localized: "\(option.mode.displayName) · \(travelDurationText(option)).")
         }
     }
 
@@ -406,11 +400,20 @@ struct TransferDetailView: View {
         let departure = step.departureTime
             .flatMap(MobilityDateFormatter.date(from:))
             .map { MobilityDateFormatter.time.string(from: $0) }
+        let arrival = step.arrivalTime
+            .flatMap(MobilityDateFormatter.date(from:))
+            .map { MobilityDateFormatter.time.string(from: $0) }
         let from = step.departureStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         let to = step.arrivalStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
 
+        if let departure, let arrival, let from, let to {
+            return String(localized: "Take \(line) at \(departure) from \(from); arrive \(arrival) at \(to).")
+        }
         if let departure, let from, let to {
             return String(localized: "Take \(line) at \(departure) from \(from); get off at \(to).")
+        }
+        if let departure, let arrival, let to {
+            return String(localized: "Take \(line) at \(departure); arrive \(arrival) at \(to).")
         }
         if let departure, let to {
             return String(localized: "Take \(line) at \(departure); get off at \(to).")
@@ -480,7 +483,7 @@ struct TransferDetailView: View {
 
     private var primaryDetail: String {
         if let option = primaryOption {
-            return "\(option.mode.displayName) · \(shortDuration(option))"
+            return "\(option.mode.displayName) · \(travelDurationText(option))"
         }
         if let recommendation = plan?.recommendation,
            recommendation.mode == primaryOption?.mode {
@@ -489,21 +492,67 @@ struct TransferDetailView: View {
         return String(localized: "Public transport timing and alternatives")
     }
 
-    private func leaveByText(for option: MobilityRouteOption) -> String? {
-        guard let leaveBy = option.leaveBy,
-              let date = MobilityDateFormatter.date(from: leaveBy) else {
-            return nil
+    private func departureTimeText(for option: MobilityRouteOption) -> String? {
+        routeDepartureDate(for: option)
+            .map { MobilityDateFormatter.time.string(from: $0) }
+    }
+
+    private func arrivalTimeText(for option: MobilityRouteOption) -> String? {
+        routeArrivalDate(for: option)
+            .map { MobilityDateFormatter.time.string(from: $0) }
+    }
+
+    private func routeTimeRangeText(for option: MobilityRouteOption) -> String? {
+        guard let departure = departureTimeText(for: option) else {
+            return arrivalTimeText(for: option).map { String(localized: "Arrive \($0)") }
         }
 
-        return String(localized: "Leave \(MobilityDateFormatter.time.string(from: date))")
+        if let arrival = arrivalTimeText(for: option) {
+            return "\(departure)-\(arrival)"
+        }
+        return String(localized: "Leave \(departure)")
+    }
+
+    private func routeDepartureDate(for option: MobilityRouteOption) -> Date? {
+        earliestStepDate(option.steps?.compactMap { $0.departureTime.flatMap(MobilityDateFormatter.date(from:)) } ?? [])
+            ?? option.departureTime.flatMap(MobilityDateFormatter.date(from:))
+            ?? option.leaveBy.flatMap(MobilityDateFormatter.date(from:))
+    }
+
+    private func routeArrivalDate(for option: MobilityRouteOption) -> Date? {
+        if let stepArrival = latestStepDate(option.steps?.compactMap { $0.arrivalTime.flatMap(MobilityDateFormatter.date(from:)) } ?? []) {
+            return stepArrival
+        }
+
+        if let departure = routeDepartureDate(for: option),
+           let travelMinutes = option.travelMinutes {
+            return departure.addingTimeInterval(TimeInterval(travelMinutes * 60))
+        }
+
+        return option.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
+    }
+
+    private func earliestStepDate(_ dates: [Date]) -> Date? {
+        dates.min()
+    }
+
+    private func latestStepDate(_ dates: [Date]) -> Date? {
+        dates.max()
+    }
+
+    private func travelDurationText(_ option: MobilityRouteOption) -> String {
+        if let travelMinutes = option.travelMinutes {
+            return String(localized: "\(travelMinutes) min")
+        }
+        return shortDuration(option)
     }
 
     private func shortDuration(_ option: MobilityRouteOption) -> String {
-        if let durationMinutes = option.durationMinutes {
-            return String(localized: "\(durationMinutes) min")
-        }
         if let travelMinutes = option.travelMinutes {
             return String(localized: "\(travelMinutes) min")
+        }
+        if let durationMinutes = option.durationMinutes {
+            return String(localized: "\(durationMinutes) min")
         }
         return String(localized: "Open route")
     }

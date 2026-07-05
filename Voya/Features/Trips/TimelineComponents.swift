@@ -210,30 +210,6 @@ struct TransferRecommendationCard: View {
                     .opacity(phase.iconOpacity)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 7) {
-                        Text("Transfer")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(phase.accent)
-
-                        if let primaryOption {
-                            Text(primaryOption.mode.displayName)
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(phase.accent)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(phase.accent.opacity(phase.kindBadgeOpacity))
-                                .clipShape(Capsule())
-                        }
-
-                        Text(phase.label)
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(phase.accent)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(phase.badgeBackground)
-                            .clipShape(Capsule())
-                    }
-
                     Text(routeTitle)
                         .font(.headline)
                         .foregroundStyle(phase.titleColor)
@@ -281,39 +257,19 @@ struct TransferRecommendationCard: View {
                     .foregroundStyle(Color.voyaCoral)
             }
 
-            if let primaryOption {
-                HStack(spacing: 10) {
-                    Label(leaveByText(for: primaryOption), systemImage: "clock")
-                    Spacer(minLength: 8)
-                    Label(shortDuration(primaryOption), systemImage: "map")
-                }
-                .font(.caption.weight(.bold))
-                .foregroundStyle(phase.accent)
-                .padding(12)
-                .background(phase.metricBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
+            if !visibleOptions.isEmpty {
+                VStack(spacing: 8) {
+                    if let transitOption {
+                        optionPreviewTile(transitOption, isProminent: true)
+                    }
 
-            if !alternativeOptions.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(alternativeOptions.prefix(2)) { option in
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack(spacing: 5) {
-                                Image(systemName: option.mode.symbol)
-                                Text(option.mode.displayName)
+                    let compactOptions = visibleOptions.filter { $0.mode != .transit }
+                    if !compactOptions.isEmpty {
+                        HStack(spacing: 8) {
+                            ForEach(compactOptions.prefix(2)) { option in
+                                optionPreviewTile(option, isProminent: false)
                             }
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(phase.titleColor)
-
-                            Text(shortDuration(option))
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(phase.secondaryColor)
-                                .lineLimit(1)
                         }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.voyaSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
             }
@@ -344,13 +300,20 @@ struct TransferRecommendationCard: View {
         plan?.defaultOption
     }
 
-    private var alternativeOptions: [MobilityRouteOption] {
+    private var transitOption: MobilityRouteOption? {
+        visibleOptions.first { $0.mode == .transit }
+    }
+
+    private var visibleOptions: [MobilityRouteOption] {
         guard let plan else {
-            return []
+            return primaryOption.map { [$0] } ?? []
         }
 
-        return plan.options.filter { option in
-            option.id != primaryOption?.id && option.durationMinutes != nil
+        let orderedModes: [MobilityRouteMode] = [.transit, .taxi, .drive]
+        return orderedModes.compactMap { mode in
+            plan.options.first { option in
+                option.mode == mode && (option.travelMinutes != nil || option.durationMinutes != nil)
+            }
         }
     }
 
@@ -369,9 +332,9 @@ struct TransferRecommendationCard: View {
     private func conciseGuidance(for option: MobilityRouteOption) -> String {
         switch option.mode {
         case .taxi:
-            return String(localized: "Book a taxi around \(leaveTimeOnly(for: option) ?? "departure time"); Voya keeps the timing and buffer visible.")
+            return String(localized: "Book a taxi around \(departureTimeText(for: option) ?? "departure time"); open the map when you are ready.")
         case .drive:
-            return String(localized: "Drive timing is enough here: leave \(leaveTimeOnly(for: option) ?? "on time") and open the map when you go.")
+            return String(localized: "Drive timing is enough here: leave \(departureTimeText(for: option) ?? "on time") and open the map when you go.")
         case .transit:
             return transitInstruction(for: option) ?? option.summary
         case .walk, .bike:
@@ -379,29 +342,86 @@ struct TransferRecommendationCard: View {
         }
     }
 
-    private func leaveByText(for option: MobilityRouteOption) -> String {
-        guard let leaveBy = option.leaveBy,
-              let date = MobilityDateFormatter.date(from: leaveBy) else {
-            return shortDuration(option)
-        }
-
-        return String(localized: "Leave \(MobilityDateFormatter.time.string(from: date))")
-    }
-
     private func shortDuration(_ option: MobilityRouteOption) -> String {
-        if let durationMinutes = option.durationMinutes {
-            return String(localized: "\(durationMinutes) min total")
-        }
         if let travelMinutes = option.travelMinutes {
             return String(localized: "\(travelMinutes) min")
+        }
+        if let durationMinutes = option.durationMinutes {
+            return String(localized: "\(durationMinutes) min")
         }
         return String(localized: "Open route")
     }
 
-    private func leaveTimeOnly(for option: MobilityRouteOption) -> String? {
-        option.leaveBy
-            .flatMap(MobilityDateFormatter.date(from:))
+    private func optionPreviewTile(_ option: MobilityRouteOption, isProminent: Bool) -> some View {
+        HStack(alignment: .center, spacing: 9) {
+            Image(systemName: option.mode.symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(phase.accent)
+                .frame(width: isProminent ? 28 : 24, height: isProminent ? 28 : 24)
+                .background(phase.metricBackground)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(option.mode.displayName)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(phase.titleColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+
+                Text(routeTimeRangeText(for: option) ?? String(localized: "Open route"))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(phase.secondaryColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+
+            Spacer(minLength: 4)
+
+            Text(shortDuration(option))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(phase.accent)
+                .lineLimit(1)
+        }
+        .padding(isProminent ? 11 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isProminent ? phase.metricBackground : Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func departureTimeText(for option: MobilityRouteOption) -> String? {
+        routeDepartureDate(for: option)
             .map { MobilityDateFormatter.time.string(from: $0) }
+    }
+
+    private func routeTimeRangeText(for option: MobilityRouteOption) -> String? {
+        guard let departure = routeDepartureDate(for: option) else {
+            return routeArrivalDate(for: option)
+                .map { String(localized: "Arrive \(MobilityDateFormatter.time.string(from: $0))") }
+        }
+
+        if let arrival = routeArrivalDate(for: option) {
+            return "\(MobilityDateFormatter.time.string(from: departure))-\(MobilityDateFormatter.time.string(from: arrival))"
+        }
+        return String(localized: "Leave \(MobilityDateFormatter.time.string(from: departure))")
+    }
+
+    private func routeDepartureDate(for option: MobilityRouteOption) -> Date? {
+        (option.steps?.compactMap { $0.departureTime.flatMap(MobilityDateFormatter.date(from:)) } ?? []).min()
+            ?? option.departureTime.flatMap(MobilityDateFormatter.date(from:))
+            ?? option.leaveBy.flatMap(MobilityDateFormatter.date(from:))
+    }
+
+    private func routeArrivalDate(for option: MobilityRouteOption) -> Date? {
+        if let stepArrival = (option.steps?.compactMap { $0.arrivalTime.flatMap(MobilityDateFormatter.date(from:)) } ?? []).max() {
+            return stepArrival
+        }
+
+        if let departure = routeDepartureDate(for: option),
+           let travelMinutes = option.travelMinutes {
+            return departure.addingTimeInterval(TimeInterval(travelMinutes * 60))
+        }
+
+        return option.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
     }
 
     private func transitInstruction(for option: MobilityRouteOption) -> String? {
@@ -415,11 +435,20 @@ struct TransferRecommendationCard: View {
         let departure = step.departureTime
             .flatMap(MobilityDateFormatter.date(from:))
             .map { MobilityDateFormatter.time.string(from: $0) }
+        let arrival = step.arrivalTime
+            .flatMap(MobilityDateFormatter.date(from:))
+            .map { MobilityDateFormatter.time.string(from: $0) }
         let from = step.departureStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         let to = step.arrivalStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
 
+        if let departure, let arrival, let from, let to {
+            return String(localized: "Take \(line) at \(departure) from \(from); arrive \(arrival) at \(to).")
+        }
         if let departure, let from, let to {
             return String(localized: "Take \(line) at \(departure) from \(from); get off at \(to).")
+        }
+        if let departure, let arrival, let to {
+            return String(localized: "Take \(line) at \(departure); arrive \(arrival) at \(to).")
         }
         if let departure, let to {
             return String(localized: "Take \(line) at \(departure); get off at \(to).")
