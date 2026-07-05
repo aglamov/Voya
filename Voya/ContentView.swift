@@ -73,6 +73,8 @@ private enum VoyaTab: String, CaseIterable, Identifiable {
 
 private struct InspireView: View {
     @EnvironmentObject private var store: VoyaStore
+    @State private var didSearch = false
+    @State private var comparisonRecommendation: TripRecommendation?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -129,6 +131,9 @@ private struct InspireView: View {
                         }
 
                         Button {
+                            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                                didSearch = true
+                            }
                         } label: {
                             HStack {
                                 Text("Find strong options")
@@ -153,22 +158,34 @@ private struct InspireView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .shadow(color: .black.opacity(0.08), radius: 24, y: 14)
 
+                if didSearch {
+                    InspirationBriefCard(intent: store.inspirationText, mood: store.selectedMood)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
                 SectionHeader(title: "Best matches", action: "See all")
 
                 VStack(spacing: 14) {
                     ForEach(store.recommendations) { recommendation in
-                        RecommendationCard(recommendation: recommendation)
+                        RecommendationCard(recommendation: recommendation) {
+                            comparisonRecommendation = recommendation
+                        }
                     }
                 }
             }
             .padding(.horizontal, 18)
             .padding(.top, 18)
         }
+        .sheet(item: $comparisonRecommendation) { recommendation in
+            RecommendationComparisonView(recommendation: recommendation)
+        }
     }
 }
 
 private struct RecommendationCard: View {
+    @Environment(\.openURL) private var openURL
     let recommendation: TripRecommendation
+    let onCompare: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -211,8 +228,12 @@ private struct RecommendationCard: View {
             }
 
             HStack(spacing: 12) {
-                IconTextButton(title: "Compare", symbol: "slider.horizontal.3", style: .secondary)
-                IconTextButton(title: "Booking links", symbol: "safari", style: .primary)
+                IconTextButton(title: "Compare", symbol: "slider.horizontal.3", style: .secondary, action: onCompare)
+                IconTextButton(title: "Booking links", symbol: "safari", style: .primary) {
+                    if let url = bookingSearchURL {
+                        openURL(url)
+                    }
+                }
             }
         }
         .padding(16)
@@ -220,6 +241,175 @@ private struct RecommendationCard: View {
         .foregroundStyle(Color.voyaInk)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private var bookingSearchURL: URL? {
+        let query = "\(recommendation.destination) flights hotels events \(recommendation.dates)"
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return nil
+        }
+        return URL(string: "https://www.google.com/search?q=\(encoded)")
+    }
+}
+
+private struct InspirationBriefCard: View {
+    let intent: String
+    let mood: TripMood
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 10) {
+                Image(systemName: "checklist.checked")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Color.voyaTeal)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Search brief")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text(intent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? String(localized: "Flexible trip") : intent)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                InspirationSignal(title: "Style", value: mood.displayName, symbol: "sparkles")
+                InspirationSignal(title: "Compare", value: "Full trip", symbol: "slider.horizontal.3")
+                InspirationSignal(title: "Booking", value: "External", symbol: "safari")
+            }
+        }
+        .padding(16)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+}
+
+private struct InspirationSignal: View {
+    let title: LocalizedStringKey
+    let value: String
+    let symbol: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaTeal)
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaInk)
+                .lineLimit(1)
+                .minimumScaleFactor(0.76)
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(Color.voyaMuted)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+}
+
+private struct RecommendationComparisonView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    let recommendation: TripRecommendation
+
+    var body: some View {
+        ZStack {
+            AppBackground()
+                .ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(recommendation.destination)
+                                .font(.system(size: 30, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.voyaInk)
+                            Text("\(recommendation.dates) · \(recommendation.fit)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.voyaMuted)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                                .frame(width: 42, height: 42)
+                                .background(.white)
+                                .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Trip fit")
+                            .font(.headline)
+                            .foregroundStyle(Color.voyaInk)
+
+                        ForEach(recommendation.details, id: \.self) { detail in
+                            Label(detail, systemImage: "checkmark.circle.fill")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.voyaInk)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Divider()
+
+                        HStack(spacing: 8) {
+                            MomentMetric(title: "Estimate", value: recommendation.estimatedCost, symbol: "creditcard", tint: recommendation.accent)
+                            MomentMetric(title: "Booking", value: "External", symbol: "safari", tint: Color.voyaTeal)
+                        }
+
+                        Button {
+                            if let url = bookingSearchURL {
+                                openURL(url)
+                            }
+                        } label: {
+                            Label("Open booking search", systemImage: "safari")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 52)
+                                .foregroundStyle(.white)
+                                .background(Color.voyaInk)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(18)
+                    .background(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 30)
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var bookingSearchURL: URL? {
+        let query = "\(recommendation.destination) flights hotels events \(recommendation.dates)"
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return nil
+        }
+        return URL(string: "https://www.google.com/search?q=\(encoded)")
     }
 }
 
@@ -595,11 +785,6 @@ private struct ImportView: View {
         static let review = "import-review"
     }
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
-    ]
-
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
@@ -628,23 +813,23 @@ private struct ImportView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
 
-                        Button {
-                            isFileImporterPresented = true
-                        } label: {
-                            ImportPrimaryDropZone()
-                        }
-                        .buttonStyle(.plain)
+                        HStack(spacing: 10) {
+                            Button {
+                                isFileImporterPresented = true
+                            } label: {
+                                ImportActionTile(symbol: "doc.text.magnifyingglass", title: "File", subtitle: "PDF or text", tint: .voyaTeal)
+                            }
+                            .buttonStyle(.plain)
 
-                        LazyVGrid(columns: columns, spacing: 12) {
                             Button {
                                 isPasteImporterPresented = true
                             } label: {
-                                ImportOption(symbol: "text.alignleft", title: "Paste", subtitle: "Booking text", tint: .voyaGold)
+                                ImportActionTile(symbol: "text.alignleft", title: "Paste", subtitle: "Booking text", tint: .voyaGold)
                             }
                             .buttonStyle(.plain)
 
                             PhotosPicker(selection: $selectedPhotoItem, matching: .images, photoLibrary: .shared()) {
-                                ImportOption(symbol: "photo.on.rectangle", title: "Photo", subtitle: "OCR from image", tint: .voyaCoral)
+                                ImportActionTile(symbol: "photo.on.rectangle", title: "Photo", subtitle: "OCR image", tint: .voyaCoral)
                             }
                             .buttonStyle(.plain)
                         }
@@ -674,7 +859,7 @@ private struct ImportView: View {
                     }
 
                     if let preview = store.extractedPreview {
-                        ExtractionReview(preview: preview) { item, draft in
+                        ExtractionReview(preview: preview, isConfirming: store.isConfirmingExtraction) { item, draft in
                             store.updatePreviewItem(item, with: draft)
                         } onAddItem: {
                             store.addPreviewItem()
@@ -917,44 +1102,80 @@ private struct AssistantView: View {
     @EnvironmentObject private var store: VoyaStore
     @AppStorage(VoyaPreferenceKey.homeLocationName) private var homeLocationName = "Home"
     @AppStorage(VoyaPreferenceKey.homeLocationAddress) private var homeLocationAddress = ""
+    @State private var itemBeingViewed: ItineraryItem?
+    @State private var assistantQuestion = String(localized: "What if my flight is delayed?")
+    @State private var assistantAnswer: String?
+
+    private var trip: Trip? {
+        store.currentOrUpcomingTrip ?? store.selectedTrip
+    }
+
+    private var itinerary: [ItineraryItem] {
+        trip.map { store.itinerary(for: $0) } ?? []
+    }
+
+    private var nextItem: ItineraryItem? {
+        let now = Date()
+        return itinerary.first { item in
+            guard let start = item.startsAt else { return false }
+            return (item.endsAt ?? start) >= now
+        } ?? itinerary.first
+    }
+
+    private var attentionItems: [ItineraryItem] {
+        itinerary.filter { item in
+            item.startsAt == nil
+                || item.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || item.location.localizedCaseInsensitiveContains("needed")
+                || item.status.localizedCaseInsensitiveContains("needs")
+        }
+    }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
                 HeaderBar(title: "Assistant", subtitle: "Live support")
 
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Trip looks calm.")
-                                .font(.system(size: 30, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                            Text("Voya is watching timing, route changes, and flight updates.")
-                                .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.72))
-                        }
+                AssistantStatusCard(
+                    trip: trip,
+                    nextItem: nextItem,
+                    alertCount: store.alerts.count,
+                    attentionCount: attentionItems.count
+                )
 
-                        Spacer()
-
-                        Image(systemName: "shield.checkered")
-                            .font(.title2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 56, height: 56)
-                            .background(Color.voyaTeal)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                if let nextItem {
+                    Button {
+                        itemBeingViewed = nextItem
+                    } label: {
+                        AssistantNextActionCard(item: nextItem)
                     }
-
-                    HStack(spacing: 10) {
-                        MetricPill(title: "Alerts", value: "3")
-                        MetricPill(title: "Risk", value: "Low")
-                        MetricPill(title: "Next", value: "06:50")
-                    }
-                    .foregroundStyle(.white)
+                    .buttonStyle(.plain)
+                } else {
+                    EmptyTripsCard(
+                        title: "No trip to watch",
+                        message: "Import a confirmation and Voya will turn itinerary timing, alerts, and routes into assistant actions.",
+                        symbol: "message.badge"
+                    )
                 }
-                .padding(18)
-                .background(Color.voyaInk)
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                .shadow(color: .black.opacity(0.10), radius: 22, y: 14)
+
+                if !attentionItems.isEmpty {
+                    AssistantAttentionCard(items: Array(attentionItems.prefix(3))) { item in
+                        itemBeingViewed = item
+                    }
+                }
+
+                AssistantQuestionCard(
+                    question: $assistantQuestion,
+                    answer: assistantAnswer,
+                    prompts: quickPrompts,
+                    onPrompt: { prompt in
+                        assistantQuestion = prompt
+                        assistantAnswer = answer(for: prompt)
+                    },
+                    onSend: {
+                        assistantAnswer = answer(for: assistantQuestion)
+                    }
+                )
 
                 VStack(spacing: 12) {
                     ForEach(store.alerts) { alert in
@@ -966,31 +1187,310 @@ private struct AssistantView: View {
                     homeLocationName: $homeLocationName,
                     homeLocationAddress: $homeLocationAddress
                 )
-
-                HStack(spacing: 12) {
-                    Text("What if my flight is delayed?")
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(Color.voyaMuted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .frame(height: 52)
-                        .background(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                    Button {
-                    } label: {
-                        Image(systemName: "paperplane.fill")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(width: 52, height: 52)
-                            .background(Color.voyaCoral)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    }
-                }
             }
             .padding(.horizontal, 18)
             .padding(.top, 18)
         }
+        .sheet(item: $itemBeingViewed) { item in
+            ItineraryItemDetailView(item: item) { draft in
+                store.updateItineraryItem(
+                    item,
+                    kind: draft.kind,
+                    title: draft.title,
+                    startsAt: draft.effectiveStartsAt,
+                    endsAt: draft.effectiveEndsAt,
+                    location: draft.location,
+                    status: draft.status
+                )
+            } onDelete: {
+                store.deleteItineraryItem(item)
+            }
+        }
+    }
+
+    private var quickPrompts: [String] {
+        [
+            String(localized: "What should I do next?"),
+            String(localized: "When should I leave?"),
+            String(localized: "What if my flight is delayed?")
+        ]
+    }
+
+    private func answer(for question: String) -> String {
+        let normalized = question.lowercased()
+        guard let trip else {
+            return String(localized: "Import a confirmation first. After that I can watch timing, route choices, flight status, and missing booking fields.")
+        }
+
+        if normalized.contains("delay") || normalized.contains("flight") {
+            if let flight = itinerary.first(where: { $0.kind == .flight && ItineraryPhase(item: $0) != .past }) {
+                return String(localized: "Keep \(flight.title) open in the trip. If the provider reports a delay, Voya compares the new arrival with the next item and keeps the booking source handy for airline support.")
+            }
+            return String(localized: "There is no upcoming flight in \(trip.title). I will focus on route timing and check-in reminders instead.")
+        }
+
+        if normalized.contains("leave") || normalized.contains("route") {
+            if let nextItem {
+                return String(localized: "For \(nextItem.title), use the transfer card in Trips for live timing. Taxi and car stay concise; public transit shows the line, departure time, and stop to get off.")
+            }
+            return String(localized: "Add a timed itinerary item and route guidance will appear around it.")
+        }
+
+        if let nextItem {
+            return String(localized: "Next: \(nextItem.title) at \(nextItem.displayTime). Check the place, route, and status fields; if anything is uncertain, open the item and correct it before travel day.")
+        }
+
+        return String(localized: "\(trip.title) is saved, but it needs timed itinerary items before I can produce useful live guidance.")
+    }
+}
+
+private struct AssistantStatusCard: View {
+    let trip: Trip?
+    let nextItem: ItineraryItem?
+    let alertCount: Int
+    let attentionCount: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.72))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Image(systemName: attentionCount == 0 ? "shield.checkered" : "exclamationmark.triangle.fill")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 56, height: 56)
+                    .background(attentionCount == 0 ? Color.voyaTeal : Color.voyaCoral)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+
+            HStack(spacing: 10) {
+                MetricPill(title: "Alerts", value: "\(alertCount)")
+                MetricPill(title: "Risk", value: attentionCount == 0 ? "Low" : "Review")
+                MetricPill(title: "Next", value: nextItem?.startsAt.map { MomentDateFormatter.time.string(from: $0) } ?? "Set")
+            }
+            .foregroundStyle(.white)
+        }
+        .padding(18)
+        .background(Color.voyaInk)
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .shadow(color: .black.opacity(0.10), radius: 22, y: 14)
+    }
+
+    private var title: String {
+        guard let trip else {
+            return String(localized: "No active trip")
+        }
+
+        return attentionCount == 0 ? String(localized: "\(trip.title) looks calm.") : String(localized: "\(trip.title) needs review.")
+    }
+
+    private var subtitle: String {
+        if let nextItem {
+            return String(localized: "Watching \(nextItem.title), route timing, and provider updates.")
+        }
+
+        return String(localized: "Import or add itinerary items to activate live trip support.")
+    }
+}
+
+private struct AssistantNextActionCard: View {
+    let item: ItineraryItem
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 13) {
+            Image(systemName: item.kind.symbol)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(item.kind.timelineAccent)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Next action")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(item.kind.timelineAccent)
+                Text(item.title)
+                    .font(.headline)
+                    .foregroundStyle(Color.voyaInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(actionText)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaMuted)
+        }
+        .padding(16)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private var actionText: String {
+        switch item.kind {
+        case .flight:
+            return String(localized: "Keep status, terminal, gate, and airport transfer visible.")
+        case .hotel:
+            return String(localized: "Check arrival route and check-in timing.")
+        case .event:
+            return String(localized: "Keep venue route, ticket, and start buffer ready.")
+        case .transit:
+            return String(localized: "Use the route card for line, departure time, and stop.")
+        }
+    }
+}
+
+private struct AssistantAttentionCard: View {
+    let items: [ItineraryItem]
+    let onOpen: (ItineraryItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Review before travel", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+                .foregroundStyle(Color.voyaInk)
+
+            ForEach(items) { item in
+                Button {
+                    onOpen(item)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: item.kind.symbol)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.voyaCoral)
+                            .frame(width: 30, height: 30)
+                            .background(Color.voyaCoral.opacity(0.10))
+                            .clipShape(Circle())
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                                .lineLimit(1)
+                            Text(issueText(for: item))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                                .lineLimit(2)
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.voyaMuted)
+                    }
+                    .padding(12)
+                    .background(Color.voyaSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private func issueText(for item: ItineraryItem) -> String {
+        if item.startsAt == nil {
+            return String(localized: "Time is missing")
+        }
+        if item.location.localizedCaseInsensitiveContains("needed") || item.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(localized: "Place needs confirmation")
+        }
+        return String(localized: "Status needs review")
+    }
+}
+
+private struct AssistantQuestionCard: View {
+    @Binding var question: String
+    let answer: String?
+    let prompts: [String]
+    let onPrompt: (String) -> Void
+    let onSend: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Ask Voya", systemImage: "message.badge")
+                    .font(.headline)
+                    .foregroundStyle(Color.voyaInk)
+                Spacer()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(prompts, id: \.self) { prompt in
+                        Button {
+                            onPrompt(prompt)
+                        } label: {
+                            Text(prompt)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                                .padding(.horizontal, 11)
+                                .frame(height: 34)
+                                .background(Color.voyaSurface)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            HStack(spacing: 12) {
+                TextField("Ask about this trip", text: $question, axis: .vertical)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(Color.voyaInk)
+                    .lineLimit(1...3)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 52)
+                    .background(Color.voyaSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                Button(action: onSend) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(width: 52, height: 52)
+                        .background(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.voyaMuted : Color.voyaCoral)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let answer {
+                Text(answer)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.voyaInk)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.voyaMint.opacity(0.72))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
     }
 }
 
@@ -1451,10 +1951,10 @@ private struct IconTextButton: View {
     let title: String
     let symbol: String
     let style: ButtonChrome
+    let action: () -> Void
 
     var body: some View {
-        Button {
-        } label: {
+        Button(action: action) {
             Label(title, systemImage: symbol)
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
@@ -2136,21 +2636,24 @@ private struct TransferRecommendationCard: View {
     }
 
     private var primaryDetail: String {
-        if let recommendation = plan?.recommendation,
-           recommendation.mode == primaryOption?.mode {
-            return recommendation.reason
+        if let primaryOption {
+            return conciseGuidance(for: primaryOption)
         }
 
         return String(localized: "Public transport is shown first, with taxi and car alternatives kept for comparison.")
     }
 
-    private func primaryOptionSummary(_ option: MobilityRouteOption) -> String {
-        let travel = option.travelMinutes.map { String(localized: "\($0) min travel") }
-        let buffer = option.bufferMinutes > 0 ? String(localized: "\(option.bufferMinutes) min buffer") : nil
-        let summary = [travel, buffer]
-            .compactMap { $0 }
-            .joined(separator: " + ")
-        return summary.isEmpty ? option.summary : summary
+    private func conciseGuidance(for option: MobilityRouteOption) -> String {
+        switch option.mode {
+        case .taxi:
+            return String(localized: "Book a taxi around \(leaveTimeOnly(for: option) ?? "departure time"); Voya keeps the timing and buffer visible.")
+        case .drive:
+            return String(localized: "Drive timing is enough here: leave \(leaveTimeOnly(for: option) ?? "on time") and open the map when you go.")
+        case .transit:
+            return transitInstruction(for: option) ?? option.summary
+        case .walk, .bike:
+            return String(localized: "\(option.mode.displayName) · \(shortDuration(option)). Open the map for turn-by-turn details.")
+        }
     }
 
     private func leaveByText(for option: MobilityRouteOption) -> String {
@@ -2170,6 +2673,38 @@ private struct TransferRecommendationCard: View {
             return String(localized: "\(travelMinutes) min")
         }
         return String(localized: "Open route")
+    }
+
+    private func leaveTimeOnly(for option: MobilityRouteOption) -> String? {
+        option.leaveBy
+            .flatMap(MobilityDateFormatter.date(from:))
+            .map { MobilityDateFormatter.time.string(from: $0) }
+    }
+
+    private func transitInstruction(for option: MobilityRouteOption) -> String? {
+        guard let step = option.steps?.first(where: { $0.kind == "transit" }) else {
+            return nil
+        }
+
+        let line = step.lineName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? step.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? String(localized: "public transport")
+        let departure = step.departureTime
+            .flatMap(MobilityDateFormatter.date(from:))
+            .map { MobilityDateFormatter.time.string(from: $0) }
+        let from = step.departureStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let to = step.arrivalStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+
+        if let departure, let from, let to {
+            return String(localized: "Take \(line) at \(departure) from \(from); get off at \(to).")
+        }
+        if let departure, let to {
+            return String(localized: "Take \(line) at \(departure); get off at \(to).")
+        }
+        if let to {
+            return String(localized: "Take \(line); get off at \(to).")
+        }
+        return String(localized: "Take \(line).")
     }
 
     private func shortPlace(_ value: String) -> String {
@@ -2521,7 +3056,7 @@ private struct TransferDetailView: View {
                     Text(option.title)
                         .font(.headline)
                         .foregroundStyle(Color.voyaInk)
-                    Text(option.summary)
+                    Text(optionSummary(option))
                         .font(.subheadline)
                         .foregroundStyle(Color.voyaMuted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2542,7 +3077,7 @@ private struct TransferDetailView: View {
                 metric("Emissions", option.emissionsLevel.capitalized)
             }
 
-            if !option.tradeoffs.isEmpty {
+            if option.mode == .transit, !option.tradeoffs.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(option.tradeoffs.prefix(3), id: \.self) { tradeoff in
                         Label(tradeoff, systemImage: "checkmark.circle")
@@ -2553,13 +3088,13 @@ private struct TransferDetailView: View {
                 }
             }
 
-            if let steps = option.steps, !steps.isEmpty {
+            if option.mode == .transit, let steps = publicTransitSteps(for: option), !steps.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Route steps", systemImage: "list.bullet")
+                    Label("Transit legs", systemImage: "tram")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(Color.voyaInk)
 
-                    ForEach(steps.prefix(6)) { step in
+                    ForEach(steps.prefix(3)) { step in
                         routeStepRow(step)
                     }
                 }
@@ -2662,6 +3197,54 @@ private struct TransferDetailView: View {
         }
 
         return step.detail
+    }
+
+    private func publicTransitSteps(for option: MobilityRouteOption) -> [MobilityRouteStep]? {
+        guard let steps = option.steps else {
+            return nil
+        }
+
+        let transitSteps = steps.filter { $0.kind == "transit" }
+        return transitSteps.isEmpty ? steps.filter { $0.kind != "walk" } : transitSteps
+    }
+
+    private func optionSummary(_ option: MobilityRouteOption) -> String {
+        switch option.mode {
+        case .taxi:
+            return String(localized: "Taxi · \(shortDuration(option)). No route notes needed; open the map when you are ready.")
+        case .drive:
+            return String(localized: "Own car · \(shortDuration(option)). Keep leave time visible and use the map for navigation.")
+        case .transit:
+            return transitInstruction(for: option) ?? option.summary
+        case .walk, .bike:
+            return String(localized: "\(option.mode.displayName) · \(shortDuration(option)).")
+        }
+    }
+
+    private func transitInstruction(for option: MobilityRouteOption) -> String? {
+        guard let step = option.steps?.first(where: { $0.kind == "transit" }) else {
+            return nil
+        }
+
+        let line = step.lineName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? step.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? String(localized: "public transport")
+        let departure = step.departureTime
+            .flatMap(MobilityDateFormatter.date(from:))
+            .map { MobilityDateFormatter.time.string(from: $0) }
+        let from = step.departureStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let to = step.arrivalStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+
+        if let departure, let from, let to {
+            return String(localized: "Take \(line) at \(departure) from \(from); get off at \(to).")
+        }
+        if let departure, let to {
+            return String(localized: "Take \(line) at \(departure); get off at \(to).")
+        }
+        if let to {
+            return String(localized: "Take \(line); get off at \(to).")
+        }
+        return String(localized: "Take \(line).")
     }
 
     private func routeStepTimeText(_ step: MobilityRouteStep) -> String? {
@@ -5105,6 +5688,48 @@ private struct ImportOption: View {
     }
 }
 
+private struct ImportActionTile: View {
+    let symbol: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
+    let tint: Color
+
+    var body: some View {
+        VStack(spacing: 9) {
+            Image(systemName: symbol)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(tint)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.voyaInk)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                Text(subtitle)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.voyaMuted)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.76)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 104)
+        .padding(.horizontal, 8)
+        .background(tint.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tint.opacity(0.18), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
 private extension CGImagePropertyOrientation {
     init(_ orientation: UIImage.Orientation) {
         switch orientation {
@@ -5335,6 +5960,7 @@ private struct ImportSuccessAnimationCard: View {
 
 private struct ExtractionReview: View {
     let preview: ExtractionPreview
+    let isConfirming: Bool
     let onItemChange: (ItineraryItem, ItineraryItemDraft) -> Void
     let onAddItem: () -> Void
     let onDeleteItem: (ItineraryItem) -> Void
@@ -5413,18 +6039,18 @@ private struct ExtractionReview: View {
             .buttonStyle(.plain)
 
             Button(action: onConfirm) {
-                Label("Save to trip", systemImage: "checkmark")
+                Label(isConfirming ? "Checking flights" : "Save to trip", systemImage: isConfirming ? "airplane.circle" : "checkmark")
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
                     .foregroundStyle(.white)
-                    .background(preview.items.isEmpty ? Color.voyaMuted : Color.voyaInk)
+                    .background(preview.items.isEmpty || isConfirming ? Color.voyaMuted : Color.voyaInk)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(preview.items.isEmpty)
+            .disabled(preview.items.isEmpty || isConfirming)
         }
         .padding(18)
         .background(.white)
@@ -5733,6 +6359,12 @@ private extension ItineraryKind {
         case .event: Color.voyaCoral
         case .transit: Color.voyaTeal
         }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

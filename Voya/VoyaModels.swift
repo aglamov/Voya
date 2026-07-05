@@ -555,6 +555,7 @@ final class VoyaStore: ObservableObject {
     @Published var importMessage: String?
     @Published var importSuccess: ImportSuccess?
     @Published var isExtractingConfirmation = false
+    @Published var isConfirmingExtraction = false
 
     var selectedTrip: Trip? {
         guard let selectedTripID else { return trips.first }
@@ -809,6 +810,7 @@ final class VoyaStore: ObservableObject {
             importMessage = aiExtractionFailureMessage(for: error)
         }
 
+        await enrichExtractedPreviewFlights()
         isExtractingConfirmation = false
     }
 
@@ -855,6 +857,31 @@ final class VoyaStore: ObservableObject {
             importMessage = String(localized: "Add at least one trip item before saving.")
             return
         }
+
+        saveConfirmedExtraction(preview)
+    }
+
+    private func enrichExtractedPreviewFlights() async {
+        guard let preview = extractedPreview, !preview.items.isEmpty else {
+            return
+        }
+
+        isConfirmingExtraction = true
+        importMessage = String(localized: "Checking flight details...")
+        defer {
+            isConfirmingExtraction = false
+        }
+
+        let enrichedCount = await enrichImportedFlights(preview: preview)
+        if enrichedCount > 0 {
+            refreshPreviewFields()
+            importMessage = String(localized: "Updated \(enrichedCount) flight item\(enrichedCount == 1 ? "" : "s") from live schedules.")
+        } else if importMessage == String(localized: "Checking flight details...") {
+            importMessage = String(localized: "Review the recognized confirmation before saving.")
+        }
+    }
+
+    private func saveConfirmedExtraction(_ preview: ExtractionPreview) {
         normalizePreviewItemsForStorage(preview.items)
         preparePreviewItemsForStorage(preview.items, sourceName: preview.sourceName)
 
@@ -910,6 +937,138 @@ final class VoyaStore: ObservableObject {
 
         saveTrips()
         extractedPreview = nil
+    }
+
+    private func enrichImportedFlights(preview: ExtractionPreview) async -> Int {
+        var updatedCount = 0
+        let service = VercelFlightLookupService()
+
+        for (index, item) in preview.items.enumerated() where item.kind == .flight {
+            guard let flightNumber = firstFlightNumber(in: "\(item.title) \(item.location)") else {
+                continue
+            }
+
+            let route = airportRouteCodes(in: item.location)
+            let referenceDate = item.startsAt ?? nearbyFlightDate(for: index, in: preview.items)
+
+            do {
+                let response = try await service.lookup(
+                    flightNumber: flightNumber,
+                    date: referenceDate,
+                    originAirport: route?.origin,
+                    destinationAirport: route?.destination
+                )
+
+                guard let candidate = response.candidate else {
+                    continue
+                }
+
+                if apply(candidate, toImportedFlight: item) {
+                    updatedCount += 1
+                }
+            } catch {
+                continue
+            }
+        }
+
+        return updatedCount
+    }
+
+    private func apply(_ candidate: FlightLookupCandidate, toImportedFlight item: ItineraryItem) -> Bool {
+        var didChange = false
+
+        if item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || item.title.localizedCaseInsensitiveContains("destination")
+            || item.title.localizedCaseInsensitiveContains(candidate.flightNumber) {
+            let title = candidate.titleText
+            if !title.isEmpty, item.title != title {
+                item.title = title
+                didChange = true
+            }
+        }
+
+        if !candidate.routeText.isEmpty, item.location != candidate.routeText {
+            item.location = candidate.routeText
+            didChange = true
+        }
+
+        if let departure = candidate.parsedDepartureAt,
+           item.startsAt == nil || abs(departure.timeIntervalSince(item.startsAt ?? departure)) > 60 {
+            item.startsAt = departure
+            didChange = true
+        }
+
+        if let arrival = candidate.parsedArrivalAt,
+           item.endsAt == nil || abs(arrival.timeIntervalSince(item.endsAt ?? arrival)) > 60 {
+            item.endsAt = arrival
+            didChange = true
+        }
+
+        let status = enrichedFlightStatus(from: candidate)
+        if item.status.localizedCaseInsensitiveContains("needs")
+            || item.status.localizedCaseInsensitiveContains("terminal")
+            || item.status.localizedCaseInsensitiveContains("confirmed") {
+            if item.status != status {
+                item.status = status
+                didChange = true
+            }
+        }
+
+        if didChange {
+            item.updatedAt = Date()
+        }
+
+        return didChange
+    }
+
+    private func enrichedFlightStatus(from candidate: FlightLookupCandidate) -> String {
+        var parts = [candidate.statusText]
+
+        if let terminal = candidate.departureTerminal?.trimmingCharacters(in: .whitespacesAndNewlines), !terminal.isEmpty {
+            parts.append(String(localized: "Terminal \(terminal)"))
+        }
+
+        if let gate = candidate.departureGate?.trimmingCharacters(in: .whitespacesAndNewlines), !gate.isEmpty {
+            parts.append(String(localized: "Gate \(gate)"))
+        }
+
+        if let baggage = candidate.baggageClaim?.trimmingCharacters(in: .whitespacesAndNewlines), !baggage.isEmpty {
+            parts.append(String(localized: "Bags \(baggage)"))
+        }
+
+        return parts.joined(separator: " · ")
+    }
+
+    private func nearbyFlightDate(for index: Int, in items: [ItineraryItem]) -> Date? {
+        let nearbyIndices = [index - 1, index + 1]
+        for nearbyIndex in nearbyIndices where items.indices.contains(nearbyIndex) {
+            if let date = items[nearbyIndex].startsAt ?? items[nearbyIndex].endsAt {
+                return date
+            }
+        }
+
+        return items.compactMap { $0.startsAt ?? $0.endsAt }.min()
+    }
+
+    private func firstFlightNumber(in value: String) -> String? {
+        guard let match = value.firstMatch(of: /[A-Z0-9]{2,3}\s?\d{1,4}[A-Z]?/) else {
+            return nil
+        }
+
+        return String(match.output).replacingOccurrences(of: " ", with: "").uppercased()
+    }
+
+    private func airportRouteCodes(in value: String) -> (origin: String, destination: String)? {
+        let codes = value
+            .uppercased()
+            .matches(of: /\b[A-Z]{3,4}\b/)
+            .map { String($0.output) }
+
+        guard codes.count >= 2 else {
+            return nil
+        }
+
+        return (codes[0], codes[1])
     }
 
     func deleteItineraryItem(_ item: ItineraryItem) {
@@ -2252,7 +2411,12 @@ struct VercelFlightLookupService {
         self.baseURL = baseURL
     }
 
-    func lookup(flightNumber: String, date: Date) async throws -> FlightLookupResponse {
+    func lookup(
+        flightNumber: String,
+        date: Date?,
+        originAirport: String? = nil,
+        destinationAirport: String? = nil
+    ) async throws -> FlightLookupResponse {
         guard let baseURL else {
             throw VercelExtractionError.notConfigured
         }
@@ -2266,7 +2430,9 @@ struct VercelFlightLookupService {
         request.httpBody = try JSONEncoder().encode(
             FlightLookupRequest(
                 flightNumber: flightNumber.trimmingCharacters(in: .whitespacesAndNewlines),
-                date: Self.flightDateFormatter.string(from: date)
+                date: date.map { Self.flightDateFormatter.string(from: $0) },
+                originAirport: originAirport?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                destinationAirport: destinationAirport?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             )
         )
 
@@ -2305,7 +2471,9 @@ struct VercelFlightLookupService {
 
 private struct FlightLookupRequest: Encodable {
     var flightNumber: String
-    var date: String
+    var date: String?
+    var originAirport: String?
+    var destinationAirport: String?
 }
 
 private struct ItemEnrichmentRequest: Encodable {
