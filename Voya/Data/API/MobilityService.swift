@@ -309,7 +309,7 @@ struct VercelMobilityService {
         guard !normalized.localizedCaseInsensitiveContains("departure") else {
             return normalized
         }
-        return "Departures, \(normalized)"
+        return airportPointAddress(normalized, point: "Departures")
     }
 
     private static func airportArrivalsAddress(_ value: String) -> String {
@@ -317,7 +317,12 @@ struct VercelMobilityService {
         guard !normalized.localizedCaseInsensitiveContains("arrival") else {
             return normalized
         }
-        return "Arrivals, \(normalized)"
+        return airportPointAddress(normalized, point: "Arrivals")
+    }
+
+    private static func airportPointAddress(_ value: String, point: String) -> String {
+        let airportName = value.localizedCaseInsensitiveContains("airport") ? value : "\(value) Airport"
+        return "\(airportName) \(point)"
     }
 
     private static func airportBufferMinutes(for item: ItineraryItem) -> Int {

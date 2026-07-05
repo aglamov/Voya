@@ -11,7 +11,6 @@ import Vision
 struct EditTripView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: TripDraft
-    @State private var sourcePreviewURL: URL?
     let trip: Trip
     let onSave: (TripDraft) -> Void
     let onDelete: () -> Void
@@ -71,49 +70,6 @@ struct EditTripView: View {
                     .foregroundStyle(Color.voyaInk)
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
-
-                    if let sourceFile = SourceDocumentFile.stored(in: trip.rawData) {
-                        VStack(alignment: .leading, spacing: 14) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "doc.viewfinder")
-                                    .font(.headline.weight(.bold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 42, height: 42)
-                                    .background(Color.voyaTeal)
-                                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("Source file")
-                                        .font(.headline)
-                                        .foregroundStyle(Color.voyaInk)
-                                    Text(sourceFile.fileName)
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(Color.voyaMuted)
-                                        .lineLimit(1)
-                                }
-
-                                Spacer()
-                            }
-
-                            Button {
-                                sourcePreviewURL = SourceDocumentPreviewer.temporaryURL(for: sourceFile)
-                            } label: {
-                                Label("Open source", systemImage: "doc.viewfinder")
-                                    .font(.subheadline.weight(.semibold))
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 44)
-                                    .foregroundStyle(.white)
-                                    .background(Color.voyaInk)
-                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(18)
-                        .background(.white)
-                        .foregroundStyle(Color.voyaInk)
-                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
-                    }
 
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(spacing: 12) {
@@ -224,7 +180,6 @@ struct EditTripView: View {
             .padding(.bottom, 10)
             .background(.ultraThinMaterial)
         }
-        .quickLookPreview($sourcePreviewURL)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }

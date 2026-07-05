@@ -17,16 +17,20 @@ struct ItineraryItemDetailView: View {
     @State private var didCopyLocation = false
     @State private var enrichment: ItemEnrichment?
     @State private var isLoadingEnrichment = false
+    @State private var sourcePreviewURL: URL?
     let item: ItineraryItem
+    let sourceDocument: SourceDocument?
     let onSave: (ItineraryItemDraft) -> Void
     let onDelete: () -> Void
 
     init(
         item: ItineraryItem,
+        sourceDocument: SourceDocument? = nil,
         onSave: @escaping (ItineraryItemDraft) -> Void,
         onDelete: @escaping () -> Void
     ) {
         self.item = item
+        self.sourceDocument = sourceDocument
         _draft = State(initialValue: ItineraryItemDraft(item: item))
         self.onSave = onSave
         self.onDelete = onDelete
@@ -60,6 +64,10 @@ struct ItineraryItemDetailView: View {
                             }
                         }
                     )
+
+                    if sourceDocument != nil || item.sourceName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                        sourceCard
+                    }
 
                     DisclosureGroup {
                         itemFormCard
@@ -96,6 +104,7 @@ struct ItineraryItemDetailView: View {
                 editorActions
             }
         }
+        .quickLookPreview($sourcePreviewURL)
         .task(id: item.id) {
             await loadEnrichment()
         }
@@ -217,6 +226,47 @@ struct ItineraryItemDetailView: View {
         .foregroundStyle(Color.voyaInk)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private var sourceCard: some View {
+        Button {
+            guard let sourceDocument else { return }
+            sourcePreviewURL = SourceDocumentPreviewer.temporaryURL(for: sourceDocument.sourceFile)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "doc.viewfinder")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(Color.voyaTeal)
+                    .frame(width: 42, height: 42)
+                    .background(Color.voyaTeal.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Source file")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaMuted)
+                    Text(sourceDocument?.fileName ?? item.sourceName ?? String(localized: "Manual entry"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.voyaInk)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+
+                if sourceDocument != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: .black.opacity(0.04), radius: 12, y: 7)
+        }
+        .buttonStyle(.plain)
+        .disabled(sourceDocument == nil)
     }
 
     private var locationActions: some View {

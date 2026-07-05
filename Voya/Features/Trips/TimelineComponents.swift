@@ -431,11 +431,15 @@ struct TransferRecommendationCard: View {
     }
 
     private func shortPlace(_ value: String) -> String {
-        let shortened = value
+        let parts = value
             .components(separatedBy: ",")
-            .first?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            ?? ""
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if parts.count >= 2,
+           ["arrivals", "departures"].contains(parts[0].lowercased()) {
+            return "\(parts[0]) \(parts[1])"
+        }
+        let shortened = parts.first ?? ""
         return shortened.isEmpty ? value : shortened
     }
 }

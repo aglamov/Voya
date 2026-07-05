@@ -56,6 +56,35 @@ enum ItineraryKind: String, CaseIterable, Codable, Sendable {
 }
 
 @Model
+final class SourceDocument: Identifiable {
+    @Attribute(.unique) var id: UUID
+    var sourceName: String
+    var fileName: String
+    var contentType: String
+    var dataBase64: String
+    var importedAt: Date
+    var createdAt: Date
+
+    init(
+        id: UUID = UUID(),
+        sourceName: String,
+        fileName: String,
+        contentType: String,
+        dataBase64: String,
+        importedAt: Date = Date(),
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.sourceName = sourceName
+        self.fileName = fileName
+        self.contentType = contentType
+        self.dataBase64 = dataBase64
+        self.importedAt = importedAt
+        self.createdAt = createdAt
+    }
+}
+
+@Model
 final class ItineraryItem: Identifiable {
     @Attribute(.unique) var id: UUID
     var kind: ItineraryKind
@@ -136,6 +165,7 @@ final class Trip: Identifiable {
     var createdAt: Date
     var updatedAt: Date
     @Relationship(deleteRule: .cascade) var items: [ItineraryItem]
+    @Relationship(deleteRule: .cascade) var sourceDocuments: [SourceDocument]
     var sourceName: String
     var destinationImageURL: URL?
     var destinationImageCredit: String?
@@ -157,6 +187,7 @@ final class Trip: Identifiable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         items: [ItineraryItem],
+        sourceDocuments: [SourceDocument] = [],
         sourceName: String,
         destinationImageURL: URL? = nil,
         destinationImageCredit: String? = nil,
@@ -177,6 +208,7 @@ final class Trip: Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.items = items
+        self.sourceDocuments = sourceDocuments
         self.sourceName = sourceName
         self.destinationImageURL = destinationImageURL
         self.destinationImageCredit = destinationImageCredit

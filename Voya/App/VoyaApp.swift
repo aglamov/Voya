@@ -9,7 +9,7 @@ struct VoyaApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
-                .modelContainer(for: [Trip.self, ItineraryItem.self])
+                .modelContainer(for: [Trip.self, ItineraryItem.self, SourceDocument.self])
         }
     }
 }

@@ -24,6 +24,12 @@ struct SourceDocumentFile: Codable, Equatable {
         self.dataBase64 = data.base64EncodedString()
     }
 
+    init(fileName: String, contentType: String, dataBase64: String) {
+        self.fileName = fileName
+        self.contentType = contentType
+        self.dataBase64 = dataBase64
+    }
+
     var data: Data? {
         Data(base64Encoded: dataBase64)
     }
@@ -45,6 +51,28 @@ struct SourceDocumentFile: Codable, Equatable {
         }
 
         return source
+    }
+}
+
+extension SourceDocument {
+    convenience init(sourceName: String, sourceFile: SourceDocumentFile, importedAt: Date = Date()) {
+        self.init(
+            sourceName: sourceName,
+            fileName: sourceFile.fileName,
+            contentType: sourceFile.contentType,
+            dataBase64: sourceFile.dataBase64,
+            importedAt: importedAt
+        )
+    }
+
+    var sourceFile: SourceDocumentFile {
+        SourceDocumentFile(fileName: fileName, contentType: contentType, dataBase64: dataBase64)
+    }
+
+    func matches(_ sourceFile: SourceDocumentFile) -> Bool {
+        fileName == sourceFile.fileName
+            && contentType == sourceFile.contentType
+            && dataBase64 == sourceFile.dataBase64
     }
 }
 

@@ -107,19 +107,31 @@ extension VoyaStore {
 
     func saveConfirmedExtraction(_ preview: ExtractionPreview) {
         normalizePreviewItemsForStorage(preview.items)
-        preparePreviewItemsForStorage(preview.items, sourceName: preview.sourceName)
 
         if let matchingTripIndex = tripIndexForMerge(with: preview.items) {
             let trip = trips[matchingTripIndex]
+            let sourceDocument: SourceDocument?
+            if let sourceFile = preview.sourceFile {
+                sourceDocument = self.sourceDocument(for: sourceFile, sourceName: preview.sourceName, in: trip)
+            } else {
+                sourceDocument = nil
+            }
+            if let sourceDocument {
+                attachSourceDocument(sourceDocument, to: trip)
+            }
+            preparePreviewItemsForStorage(preview.items, sourceName: preview.sourceName, sourceDocumentID: sourceDocument?.id)
             let previousItemCount = trip.items.count
             let deduplicated = deduplicatedItems(from: trip.items + preview.items)
             trip.items = sortedItinerary(deduplicated.unique)
+            if let sourceDocument {
+                for item in trip.items where item.sourceDocumentID == nil && item.sourceName == preview.sourceName {
+                    item.sourceDocumentID = sourceDocument.id
+                }
+            }
             trip.dates = tripDates(for: trip.items, fallback: trip.dates)
             trip.summary = summaryText(for: trip)
             trip.sourceName = combinedSourceName(trip.sourceName, preview.sourceName)
-            if let sourceFileStorage = preview.sourceFile?.storageString {
-                trip.rawData = sourceFileStorage
-            }
+            trip.rawData = nil
             trip.destination = tripTitle(for: trip.items, fallback: trip.title, preferredDestination: preview.normalizedDestination)
             trip.destinationImageURL = nil
             trip.destinationImageCredit = nil
@@ -135,6 +147,13 @@ extension VoyaStore {
                 didCreateTrip: false
             )
         } else {
+            let sourceDocument: SourceDocument?
+            if let sourceFile = preview.sourceFile {
+                sourceDocument = self.sourceDocument(for: sourceFile, sourceName: preview.sourceName, in: nil)
+            } else {
+                sourceDocument = nil
+            }
+            preparePreviewItemsForStorage(preview.items, sourceName: preview.sourceName, sourceDocumentID: sourceDocument?.id)
             let deduplicated = deduplicatedItems(from: preview.items)
             let items = sortedItinerary(deduplicated.unique)
             let trip = Trip(
@@ -147,8 +166,9 @@ extension VoyaStore {
                 summary: summaryText(itemCount: items.count, sourceName: preview.sourceName),
                 destination: preview.normalizedDestination,
                 items: items,
+                sourceDocuments: sourceDocument.map { [$0] } ?? [],
                 sourceName: preview.sourceName,
-                rawData: preview.sourceFile?.storageString
+                rawData: nil
             )
             modelContext?.insert(trip)
             deleteItems(deduplicated.duplicates)

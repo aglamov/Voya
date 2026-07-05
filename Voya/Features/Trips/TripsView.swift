@@ -20,7 +20,6 @@ struct TripsView: View {
     @State private var mobilityPlans: [String: MobilityPlan] = [:]
     @State private var loadingMobilityPlanIDs: Set<String> = []
     @State private var mobilityPlanErrors: [String: String] = [:]
-    @State private var sourcePreviewURL: URL?
 
     private enum TripListMode: String, CaseIterable, Identifiable {
         case upcoming = "Upcoming"
@@ -93,9 +92,7 @@ struct TripsView: View {
                     }
 
                     let itinerary = store.itinerary(for: trip)
-                    TripOperationsCard(trip: trip, itinerary: itinerary) { sourceFile in
-                        sourcePreviewURL = SourceDocumentPreviewer.temporaryURL(for: sourceFile)
-                    }
+                    TripOperationsCard(trip: trip, itinerary: itinerary)
 
                     HStack {
                         Text("Timeline")
@@ -273,7 +270,7 @@ struct TripsView: View {
             }
         }
         .sheet(item: $itemBeingViewed) { item in
-            ItineraryItemDetailView(item: item) { draft in
+            ItineraryItemDetailView(item: item, sourceDocument: store.sourceDocument(for: item)) { draft in
                 store.updateItineraryItem(
                     item,
                     kind: draft.kind,
@@ -303,7 +300,6 @@ struct TripsView: View {
                 await loadMobilityPlan(context: context)
             }
         }
-        .quickLookPreview($sourcePreviewURL)
     }
 
     private var emptySubtitle: String {

@@ -102,7 +102,7 @@ struct AssistantView: View {
             .padding(.top, 18)
         }
         .sheet(item: $itemBeingViewed) { item in
-            ItineraryItemDetailView(item: item) { draft in
+            ItineraryItemDetailView(item: item, sourceDocument: store.sourceDocument(for: item)) { draft in
                 store.updateItineraryItem(
                     item,
                     kind: draft.kind,

@@ -152,10 +152,11 @@ extension VoyaStore {
         value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? String(localized: "Needs review")
     }
 
-    func preparePreviewItemsForStorage(_ items: [ItineraryItem], sourceName: String) {
+    func preparePreviewItemsForStorage(_ items: [ItineraryItem], sourceName: String, sourceDocumentID: UUID? = nil) {
         let now = Date()
         for item in items {
             item.sourceName = sourceName
+            item.sourceDocumentID = sourceDocumentID
             item.updatedAt = now
             modelContext?.insert(item)
         }

@@ -469,6 +469,19 @@ function subtractMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() - minutes * 60_000);
 }
 
+function providerArrivalTimeForRoute(request: MobilityPlanRequest, mode: RouteMode) {
+  if (!request.arrivalTime || mode !== "transit") {
+    return request.arrivalTime;
+  }
+
+  const arrivalTime = new Date(request.arrivalTime);
+  if (Number.isNaN(arrivalTime.getTime())) {
+    return request.arrivalTime;
+  }
+
+  return subtractMinutes(arrivalTime, request.airportBufferMinutes ?? 0).toISOString();
+}
+
 function mapsURL(origin: MobilityPlace, destination: MobilityPlace, mode: RouteMode) {
   const url = new URL("https://www.google.com/maps/dir/");
   url.searchParams.set("api", "1");
@@ -554,8 +567,9 @@ async function fetchGoogleRoute(request: MobilityPlanRequest, mode: RouteMode): 
     body.departureTime = request.departureTime;
   }
 
-  if (request.arrivalTime && mode === "transit") {
-    body.arrivalTime = request.arrivalTime;
+  const providerArrivalTime = providerArrivalTimeForRoute(request, mode);
+  if (providerArrivalTime && mode === "transit") {
+    body.arrivalTime = providerArrivalTime;
   }
 
   const response = await fetch(googleRoutesEndpoint, {

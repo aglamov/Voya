@@ -153,7 +153,6 @@ struct EmptyTripsCard: View {
 struct TripOperationsCard: View {
     let trip: Trip
     let itinerary: [ItineraryItem]
-    let onOpenSource: (SourceDocumentFile) -> Void
 
     private var sortedItems: [ItineraryItem] {
         itinerary.sorted { first, second in
@@ -186,10 +185,6 @@ struct TripOperationsCard: View {
 
     private var lastTimedItem: ItineraryItem? {
         sortedItems.last { $0.startsAt != nil || $0.endsAt != nil }
-    }
-
-    private var sourceFile: SourceDocumentFile? {
-        SourceDocumentFile.stored(in: trip.rawData)
     }
 
     var body: some View {
@@ -248,40 +243,6 @@ struct TripOperationsCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
-            if let sourceFile {
-                Button {
-                    onOpenSource(sourceFile)
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "doc.viewfinder")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(Color.voyaTeal)
-                            .frame(width: 34, height: 34)
-                            .background(Color.voyaTeal.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Source file")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(Color.voyaMuted)
-                            Text(sourceFile.fileName)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Color.voyaInk)
-                                .lineLimit(1)
-                        }
-
-                        Spacer(minLength: 0)
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(Color.voyaMuted)
-                    }
-                    .padding(12)
-                    .background(Color.voyaSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
         }
         .padding(16)
         .background(.white)
