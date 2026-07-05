@@ -172,6 +172,7 @@ extension VoyaStore {
     func prepareForNextImport() {
         importSuccess = nil
         importMessage = nil
+        importPreparationStatus = nil
     }
 
     func prepareForNextPastedImport() {

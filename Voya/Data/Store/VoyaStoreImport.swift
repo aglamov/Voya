@@ -11,11 +11,21 @@ extension VoyaStore {
     func extract(text: String, sourceName: String, sourceFile: SourceDocumentFile? = nil) {
         let cleanedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedText.isEmpty else {
+            beginImportPreparation(sourceName: sourceName, sourceDetail: String(localized: "No source text found"))
             importMessage = ImportErrorMessage.emptyInput.message
+            failImportPreparation(with: ImportErrorMessage.emptyInput.message)
             return
         }
 
         importSuccess = nil
+        if importPreparationStatus?.sourceName != sourceName {
+            beginImportPreparation(sourceName: sourceName, sourceDetail: String(localized: "Reading source text"))
+        }
+        updateImportPreparationStep(
+            .source,
+            state: .completed,
+            detail: String(localized: "Text is ready for recognition")
+        )
         let document = ImportedDocument(name: sourceName, text: cleanedText, importedAt: Date(), sourceFile: sourceFile)
         importedDocuments.insert(document, at: 0)
 
@@ -25,18 +35,48 @@ extension VoyaStore {
     }
 
     func extract(document: ImportedDocument) async {
+        if importPreparationStatus?.sourceName != document.name {
+            beginImportPreparation(sourceName: document.name, sourceDetail: String(localized: "Reading source text"))
+            updateImportPreparationStep(
+                .source,
+                state: .completed,
+                detail: String(localized: "Text is ready for recognition")
+            )
+        }
+
         isExtractingConfirmation = true
         importMessage = String(localized: "Recognizing \(document.name)...")
+        updateImportPreparationStep(
+            .recognition,
+            state: .running,
+            detail: String(localized: "Looking for dates, routes, stays, and events")
+        )
 
         do {
             extractedPreview = try await VercelConfirmationExtractor().extract(from: document)
             importMessage = String(localized: "AI recognized \(document.name)")
+            updateImportPreparationStep(
+                .recognition,
+                state: .completed,
+                detail: String(localized: "AI recognized the confirmation")
+            )
         } catch {
             extractedPreview = ConfirmationParser.extract(from: document)
             importMessage = aiExtractionFailureMessage(for: error)
+            updateImportPreparationStep(
+                .recognition,
+                state: .completed,
+                detail: String(localized: "Local recognition prepared the preview")
+            )
         }
 
         await enrichExtractedPreviewFlights()
+        updateImportPreparationStep(
+            .preview,
+            state: .completed,
+            detail: String(localized: "Ready for review and edits")
+        )
+        updateImportPreparationSummary(String(localized: "Preview ready"))
         isExtractingConfirmation = false
     }
 
@@ -89,11 +129,31 @@ extension VoyaStore {
 
     func enrichExtractedPreviewFlights() async {
         guard let preview = extractedPreview, !preview.items.isEmpty else {
+            updateImportPreparationStep(
+                .flightAware,
+                state: .skipped,
+                detail: String(localized: "Nothing to verify")
+            )
+            return
+        }
+
+        let flightCount = preview.items.filter { $0.kind == .flight }.count
+        guard flightCount > 0 else {
+            updateImportPreparationStep(
+                .flightAware,
+                state: .skipped,
+                detail: String(localized: "No flights in this confirmation")
+            )
             return
         }
 
         isConfirmingExtraction = true
-        importMessage = String(localized: "Filled from source. Not enough details yet, checking tracking services.")
+        importMessage = String(localized: "Filled from source. Checking FlightAware for live schedules.")
+        updateImportPreparationStep(
+            .flightAware,
+            state: .running,
+            detail: String(localized: "Checking \(flightCount) flight item\(flightCount == 1 ? "" : "s")")
+        )
         defer {
             isConfirmingExtraction = false
         }
@@ -102,7 +162,97 @@ extension VoyaStore {
         if enrichedCount > 0 {
             refreshPreviewFields()
             importMessage = String(localized: "Updated \(enrichedCount) flight item\(enrichedCount == 1 ? "" : "s") from live schedules.")
+            updateImportPreparationStep(
+                .flightAware,
+                state: .completed,
+                detail: String(localized: "Updated \(enrichedCount) flight item\(enrichedCount == 1 ? "" : "s")")
+            )
+        } else {
+            importMessage = String(localized: "Preview ready. FlightAware did not return new schedule details.")
+            updateImportPreparationStep(
+                .flightAware,
+                state: .completed,
+                detail: String(localized: "No schedule updates needed")
+            )
         }
+    }
+
+    func beginImportPreparation(sourceName: String, sourceDetail: String) {
+        importPreparationStatus = ImportPreparationStatus(
+            sourceName: sourceName,
+            summary: String(localized: "Preparing \(sourceName)"),
+            steps: [
+                ImportPreparationStep(kind: .source, detail: sourceDetail, state: .running),
+                ImportPreparationStep(kind: .recognition, detail: String(localized: "Queued"), state: .pending),
+                ImportPreparationStep(kind: .flightAware, detail: String(localized: "Waiting for recognized flights"), state: .pending),
+                ImportPreparationStep(kind: .preview, detail: String(localized: "Waiting for checks"), state: .pending)
+            ]
+        )
+    }
+
+    func failImportPreparation(with message: String) {
+        var status = importPreparationStatus ?? ImportPreparationStatus(
+            sourceName: String(localized: "Import"),
+            summary: message,
+            steps: [
+                ImportPreparationStep(kind: .source, detail: message, state: .failed),
+                ImportPreparationStep(kind: .recognition, detail: String(localized: "Not started"), state: .pending),
+                ImportPreparationStep(kind: .flightAware, detail: String(localized: "Not started"), state: .pending),
+                ImportPreparationStep(kind: .preview, detail: String(localized: "Not started"), state: .pending)
+            ]
+        )
+
+        if let runningIndex = status.steps.firstIndex(where: { $0.state == .running }) {
+            status.steps[runningIndex].state = .failed
+            status.steps[runningIndex].detail = message
+        } else if let sourceIndex = status.steps.firstIndex(where: { $0.id == .source }) {
+            status.steps[sourceIndex].state = .failed
+            status.steps[sourceIndex].detail = message
+        }
+
+        status.summary = message
+        importPreparationStatus = status
+    }
+
+    func updateImportPreparationStep(
+        _ kind: ImportPreparationStepKind,
+        state: ImportPreparationStepState,
+        detail: String
+    ) {
+        guard var status = importPreparationStatus,
+              let index = status.steps.firstIndex(where: { $0.id == kind }) else {
+            return
+        }
+
+        status.steps[index].state = state
+        status.steps[index].detail = detail
+        status.summary = summary(for: status)
+        importPreparationStatus = status
+    }
+
+    func updateImportPreparationSummary(_ summary: String) {
+        guard var status = importPreparationStatus else {
+            return
+        }
+
+        status.summary = summary
+        importPreparationStatus = status
+    }
+
+    func summary(for status: ImportPreparationStatus) -> String {
+        if let failedStep = status.steps.first(where: { $0.state == .failed }) {
+            return failedStep.detail
+        }
+
+        if let runningStep = status.steps.first(where: { $0.state == .running }) {
+            return runningStep.title
+        }
+
+        if status.steps.allSatisfy({ $0.state == .completed || $0.state == .skipped }) {
+            return String(localized: "Preview ready")
+        }
+
+        return String(localized: "Preparing \(status.sourceName)")
     }
 
     func saveConfirmedExtraction(_ preview: ExtractionPreview) {

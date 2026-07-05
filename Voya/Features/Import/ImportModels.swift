@@ -104,6 +104,87 @@ struct ImportSuccess: Identifiable {
     var didCreateTrip: Bool
 }
 
+enum ImportPreparationStepState: Equatable {
+    case pending
+    case running
+    case completed
+    case skipped
+    case failed
+}
+
+enum ImportPreparationStepKind: String, CaseIterable, Identifiable {
+    case source
+    case recognition
+    case flightAware
+    case preview
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .source:
+            String(localized: "Source loaded")
+        case .recognition:
+            String(localized: "Recognition")
+        case .flightAware:
+            String(localized: "FlightAware check")
+        case .preview:
+            String(localized: "Preview prepared")
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .source:
+            "doc.text"
+        case .recognition:
+            "text.viewfinder"
+        case .flightAware:
+            "antenna.radiowaves.left.and.right"
+        case .preview:
+            "checklist.checked"
+        }
+    }
+}
+
+struct ImportPreparationStep: Identifiable, Equatable {
+    let id: ImportPreparationStepKind
+    var title: String
+    var detail: String
+    var state: ImportPreparationStepState
+
+    init(kind: ImportPreparationStepKind, detail: String, state: ImportPreparationStepState = .pending) {
+        self.id = kind
+        self.title = kind.title
+        self.detail = detail
+        self.state = state
+    }
+}
+
+struct ImportPreparationStatus: Identifiable, Equatable {
+    let id = UUID()
+    var sourceName: String
+    var summary: String
+    var steps: [ImportPreparationStep]
+
+    var completedStepCount: Int {
+        steps.filter { $0.state == .completed || $0.state == .skipped }.count
+    }
+
+    var progress: Double {
+        guard !steps.isEmpty else { return 0 }
+        return Double(completedStepCount) / Double(steps.count)
+    }
+
+    var isActive: Bool {
+        steps.contains { $0.state == .running || $0.state == .pending }
+    }
+
+    var hasFailure: Bool {
+        steps.contains { $0.state == .failed }
+    }
+}
+
 enum ImportErrorMessage: Identifiable {
     case emptyInput
     case unreadableFile(String)

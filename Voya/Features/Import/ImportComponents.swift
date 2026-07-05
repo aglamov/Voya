@@ -178,6 +178,252 @@ struct ImportMessageLabel: View {
     }
 }
 
+struct ImportPreparationStatusPanel: View {
+    let status: ImportPreparationStatus
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 13) {
+                    HStack(alignment: .center, spacing: 12) {
+                        ImportPreparationOrb(isActive: status.isActive && !status.hasFailure)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Preparing preview")
+                                .font(.headline)
+                                .foregroundStyle(Color.voyaInk)
+                            Text(status.sourceName)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.voyaMuted)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Text("\(status.completedStepCount)/\(status.steps.count)")
+                            .font(.caption.bold())
+                            .foregroundStyle(status.hasFailure ? Color.voyaCoral : Color.voyaTeal)
+                            .frame(width: 42, height: 30)
+                            .background((status.hasFailure ? Color.voyaCoral : Color.voyaTeal).opacity(0.10))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+
+                    ImportPreparationProgressBar(progress: status.progress, hasFailure: status.hasFailure)
+
+                    VStack(spacing: 9) {
+                        ForEach(status.steps) { step in
+                            ImportPreparationStepRow(step: step)
+                        }
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity)
+                .background(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .shadow(color: .black.opacity(0.12), radius: 22, y: 12)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            Button {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: status.hasFailure ? "exclamationmark.triangle.fill" : "wand.and.stars")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(status.hasFailure ? Color.voyaCoral : Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(status.summary)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                            .lineLimit(1)
+                        Text(status.hasFailure ? "Needs attention" : "Tap for details")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.voyaMuted)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(Color.voyaMuted)
+                        .frame(width: 26, height: 26)
+                        .background(Color.voyaSurface)
+                        .clipShape(Circle())
+                }
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity)
+                .frame(height: 58)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(.white.opacity(0.82), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.14), radius: 18, y: 10)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+struct ImportPreparationStepRow: View {
+    let step: ImportPreparationStep
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            ImportPreparationStepIndicator(state: step.state)
+
+            Image(systemName: step.id.symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(iconColor)
+                .frame(width: 28, height: 28)
+                .background(iconColor.opacity(0.11))
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaInk)
+                    .lineLimit(1)
+                Text(step.detail)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.voyaMuted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(9)
+        .background(rowBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .animation(.easeInOut(duration: 0.24), value: step.state)
+    }
+
+    private var iconColor: Color {
+        switch step.state {
+        case .completed:
+            Color.voyaTeal
+        case .running:
+            Color.voyaSky
+        case .failed:
+            Color.voyaCoral
+        case .skipped:
+            Color.voyaGold
+        case .pending:
+            Color.voyaMuted
+        }
+    }
+
+    private var rowBackground: Color {
+        switch step.state {
+        case .running:
+            Color.voyaSky.opacity(0.08)
+        case .completed:
+            Color.voyaTeal.opacity(0.08)
+        case .failed:
+            Color.voyaCoral.opacity(0.09)
+        case .skipped:
+            Color.voyaGold.opacity(0.08)
+        case .pending:
+            Color.voyaSurface
+        }
+    }
+}
+
+struct ImportPreparationStepIndicator: View {
+    let state: ImportPreparationStepState
+
+    var body: some View {
+        switch state {
+        case .running:
+            TimelineView(.animation) { timeline in
+                let rotation = timeline.date.timeIntervalSinceReferenceDate * 210
+                Circle()
+                    .trim(from: 0.12, to: 0.82)
+                    .stroke(Color.voyaSky, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(rotation))
+                    .frame(width: 20, height: 20)
+            }
+        case .completed:
+            Image(systemName: "checkmark.square.fill")
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(Color.voyaTeal)
+        case .skipped:
+            Image(systemName: "minus.square.fill")
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(Color.voyaGold)
+        case .failed:
+            Image(systemName: "exclamationmark.square.fill")
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(Color.voyaCoral)
+        case .pending:
+            Image(systemName: "square")
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(Color.voyaMuted.opacity(0.62))
+        }
+    }
+}
+
+struct ImportPreparationProgressBar: View {
+    let progress: Double
+    let hasFailure: Bool
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.voyaSurface)
+
+                Capsule()
+                    .fill(hasFailure ? Color.voyaCoral : Color.voyaTeal)
+                    .frame(width: max(8, geometry.size.width * progress))
+            }
+        }
+        .frame(height: 6)
+        .animation(.spring(response: 0.32, dampingFraction: 0.88), value: progress)
+    }
+}
+
+struct ImportPreparationOrb: View {
+    let isActive: Bool
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let phase = timeline.date.timeIntervalSinceReferenceDate
+            let scale = isActive ? 1 + sin(phase * 4.5) * 0.08 : 1
+
+            ZStack {
+                Circle()
+                    .fill(Color.voyaTeal.opacity(isActive ? 0.16 : 0.09))
+                    .frame(width: 48, height: 48)
+                    .scaleEffect(scale)
+
+                Circle()
+                    .stroke(Color.voyaTeal.opacity(0.24), lineWidth: 2)
+                    .frame(width: 39, height: 39)
+
+                Image(systemName: isActive ? "sparkles" : "checkmark")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(.white)
+                    .frame(width: 31, height: 31)
+                    .background(isActive ? Color.voyaTeal : Color.voyaInk)
+                    .clipShape(Circle())
+            }
+        }
+        .frame(width: 50, height: 50)
+    }
+}
+
 struct RecognitionAnimationCard: View {
     let message: String
 
