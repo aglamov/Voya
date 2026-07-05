@@ -215,10 +215,14 @@ struct TransferRecommendationCard: View {
                         .foregroundStyle(phase.titleColor)
                         .lineLimit(2)
 
-                    Text(primaryDetail)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(phase.secondaryColor)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let transitOption {
+                        transitCallout(transitOption)
+                    } else {
+                        Text(primaryDetail)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(phase.secondaryColor)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 Spacer(minLength: 8)
@@ -353,39 +357,105 @@ struct TransferRecommendationCard: View {
     }
 
     private func optionPreviewTile(_ option: MobilityRouteOption, isProminent: Bool) -> some View {
-        HStack(alignment: .center, spacing: 9) {
-            Image(systemName: option.mode.symbol)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(phase.accent)
-                .frame(width: isProminent ? 28 : 24, height: isProminent ? 28 : 24)
-                .background(phase.metricBackground)
-                .clipShape(Circle())
+        Group {
+            if isProminent {
+                HStack(alignment: .center, spacing: 9) {
+                    optionIcon(option, size: 28)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(option.mode.displayName)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(phase.titleColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(option.mode.displayName)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(phase.titleColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
 
-                Text(routeTimeRangeText(for: option) ?? String(localized: "Open route"))
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(phase.secondaryColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
+                        Text(routeTimeRangeText(for: option) ?? String(localized: "Open route"))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(phase.secondaryColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Text(shortDuration(option))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(phase.accent)
+                        .lineLimit(1)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 7) {
+                        optionIcon(option, size: 22)
+
+                        Text(option.mode.displayName)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(phase.titleColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
+
+                    Text(compactOptionDetail(option))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(phase.secondaryColor)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.74)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-
-            Spacer(minLength: 4)
-
-            Text(shortDuration(option))
-                .font(.caption.weight(.bold))
-                .foregroundStyle(phase.accent)
-                .lineLimit(1)
         }
         .padding(isProminent ? 11 : 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isProminent ? phase.metricBackground : Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func optionIcon(_ option: MobilityRouteOption, size: CGFloat) -> some View {
+        Image(systemName: option.mode.symbol)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(phase.accent)
+            .frame(width: size, height: size)
+            .background(phase.metricBackground)
+            .clipShape(Circle())
+    }
+
+    private func transitCallout(_ option: MobilityRouteOption) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            optionIcon(option, size: 22)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(option.mode.displayName)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(phase.titleColor)
+
+                Text(shortTransitRoute(for: option) ?? primaryDetail)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(phase.secondaryColor)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 4)
+
+            if let timeText = routeTimeRangeText(for: option) {
+                Text(timeText)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(phase.accent)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .background(phase.metricBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private func compactOptionDetail(_ option: MobilityRouteOption) -> String {
+        if let timeText = routeTimeRangeText(for: option) {
+            return "\(timeText) · \(shortDuration(option))"
+        }
+        return shortDuration(option)
     }
 
     private func departureTimeText(for option: MobilityRouteOption) -> String? {
@@ -422,6 +492,25 @@ struct TransferRecommendationCard: View {
         }
 
         return option.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
+    }
+
+    private func shortTransitRoute(for option: MobilityRouteOption) -> String? {
+        guard let step = option.steps?.first(where: { $0.kind == "transit" }) else {
+            return nil
+        }
+
+        let line = step.lineName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? step.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let from = step.departureStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let to = step.arrivalStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+
+        if let line, let from, let to {
+            return "\(line): \(from) -> \(to)"
+        }
+        if let from, let to {
+            return "\(from) -> \(to)"
+        }
+        return line
     }
 
     private func transitInstruction(for option: MobilityRouteOption) -> String? {
