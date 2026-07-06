@@ -48,10 +48,10 @@ struct ItemInsightPanel: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Signals")
+                    Text("AI brief")
                         .font(.headline)
                         .foregroundStyle(Color.voyaInk)
-                    Text("Live context and next actions for this item.")
+                    Text("What matters now for this item.")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Color.voyaMuted)
                 }
@@ -74,17 +74,29 @@ struct ItemInsightPanel: View {
                 .accessibilityLabel("Refresh trip intelligence")
             }
 
-            VStack(spacing: 10) {
-                ForEach(guidanceRows) { row in
-                    if let actionURL = row.actionURL {
-                        Button {
-                            openURL(actionURL)
-                        } label: {
+            Text(aiBriefText)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.voyaInk)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            if !guidanceRows.isEmpty {
+                VStack(spacing: 10) {
+                    ForEach(guidanceRows) { row in
+                        if let actionURL = row.actionURL {
+                            Button {
+                                openURL(actionURL)
+                            } label: {
+                                AssistantGuidanceRow(row: row)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
                             AssistantGuidanceRow(row: row)
                         }
-                        .buttonStyle(.plain)
-                    } else {
-                        AssistantGuidanceRow(row: row)
                     }
                 }
             }
@@ -111,21 +123,8 @@ struct ItemInsightPanel: View {
             )
         }
 
-        if let enrichment, !enrichment.routeLegs.isEmpty {
-            rows.append(contentsOf: enrichment.routeLegs.prefix(3).map { leg in
-                AssistantGuidance(
-                    title: leg.title,
-                    value: routeValue(for: leg),
-                    detail: leg.guidance,
-                    symbol: "map",
-                    tint: Color.voyaTeal,
-                    actionURL: leg.mapURL
-                )
-            })
-        }
-
         if let enrichment, !enrichment.actions.isEmpty {
-            rows.append(contentsOf: enrichment.actions.prefix(3).map { action in
+            rows.append(contentsOf: enrichment.actions.prefix(2).map { action in
                 AssistantGuidance(
                     title: actionTitle(for: action),
                     value: action.title,
@@ -137,27 +136,55 @@ struct ItemInsightPanel: View {
             })
         }
 
-        if let enrichment, !enrichment.cards.isEmpty {
-            let supportingCards = enrichment.cards.filter { card in
-                !["maps", "warning"].contains(card.kind)
-            }
-            rows.append(contentsOf: supportingCards.prefix(3).map { card in
+        if rows.count < 2,
+           let leg = enrichment?.routeLegs.first {
+            rows.append(
                 AssistantGuidance(
-                    title: guidanceTitle(for: card),
-                    value: card.value,
-                    detail: card.detail,
-                    symbol: symbol(for: card.kind),
-                    tint: tint(for: card.kind),
-                    actionURL: card.actionURL
+                    title: String(localized: "Route"),
+                    value: routeValue(for: leg),
+                    detail: leg.guidance,
+                    symbol: "map",
+                    tint: Color.voyaTeal,
+                    actionURL: leg.mapURL
                 )
-            })
+            )
         }
 
-        if rows.isEmpty {
-            rows.append(contentsOf: fallbackRows)
+        if rows.isEmpty,
+           let fallback = fallbackRows.first {
+            rows.append(fallback)
         }
 
-        return rows
+        return Array(rows.prefix(3))
+    }
+
+    private var aiBriefText: String {
+        if let warning = enrichment?.warnings.first?.trimmingCharacters(in: .whitespacesAndNewlines), !warning.isEmpty {
+            return conciseText([primaryNextMove, warning].joined(separator: " "))
+        }
+
+        if let enrichment {
+            let brief = enrichment.briefMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !brief.isEmpty {
+                return conciseText(plainText(fromMarkdown: brief))
+            }
+
+            let sectionText = enrichment.sections
+                .prefix(2)
+                .map(\.body)
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sectionText.isEmpty {
+                return conciseText(sectionText)
+            }
+
+            let summary = enrichment.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !summary.isEmpty {
+                return conciseText(summary)
+            }
+        }
+
+        return conciseText([primaryNextMove, primaryNextMoveDetail].joined(separator: " "))
     }
 
     private func routeValue(for leg: TravelRouteLeg) -> String {
@@ -311,6 +338,21 @@ struct ItemInsightPanel: View {
         default:
             return Color.voyaGold
         }
+    }
+
+    private func plainText(fromMarkdown value: String) -> String {
+        value
+            .replacingOccurrences(of: #"(?m)^#{1,6}\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?m)^\s*[-*]\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\*\*([^*]+)\*\*"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
+    }
+
+    private func conciseText(_ value: String) -> String {
+        let trimmed = value
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count > 420 ? "\(trimmed.prefix(417))..." : trimmed
     }
 }
 

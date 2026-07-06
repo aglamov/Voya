@@ -16,8 +16,11 @@ struct TransferDetailView: View {
     let errorMessage: String?
     let isLoading: Bool
     let onRefresh: () -> Void
+    let onUpdateBuffer: (Int) -> Void
+    let onDelete: () -> Void
     @State private var displayOrigin = ""
     @State private var displayDestination = ""
+    @State private var draftBufferMinutes: Int?
 
     var body: some View {
         ZStack {
@@ -28,6 +31,7 @@ struct TransferDetailView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     header
                     routeMapCard
+                    bufferControlCard
 
                     if isLoading && plan == nil {
                         loadingCard
@@ -106,6 +110,20 @@ struct TransferDetailView: View {
                 .buttonStyle(.plain)
                 .disabled(isLoading)
 
+                Button(role: .destructive) {
+                    onDelete()
+                    dismiss()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(Color.voyaCoral)
+                        .frame(width: 42, height: 42)
+                        .background(.white)
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
+                }
+                .buttonStyle(.plain)
+
                 Button {
                     dismiss()
                 } label: {
@@ -120,6 +138,43 @@ struct TransferDetailView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var bufferControlCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Buffer", systemImage: "timer")
+                    .font(.headline)
+                    .foregroundStyle(Color.voyaInk)
+
+                Spacer()
+
+                Text("\(effectiveBufferMinutes) min")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(Color.voyaTeal)
+            }
+
+            Stepper(
+                value: Binding(
+                    get: { effectiveBufferMinutes },
+                    set: { newValue in
+                        let boundedValue = min(max(newValue, 0), 240)
+                        draftBufferMinutes = boundedValue
+                        onUpdateBuffer(boundedValue)
+                    }
+                ),
+                in: 0...240,
+                step: 5
+            ) {
+                Text("Extra time before arrival or departure")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 12, y: 7)
     }
 
     private var routeMapCard: some View {
@@ -258,10 +313,6 @@ struct TransferDetailView: View {
 
             if option.mode == .transit, let steps = publicTransitSteps(for: option), !steps.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Transit legs", systemImage: "tram")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Color.voyaInk)
-
                     ForEach(steps.prefix(3)) { step in
                         routeStepRow(step)
                     }
@@ -305,14 +356,7 @@ struct TransferDetailView: View {
     }
 
     private func routeStepRow(_ step: MobilityRouteStep) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: routeStepSymbol(step))
-                .font(.caption.weight(.bold))
-                .foregroundStyle(Color.voyaTeal)
-                .frame(width: 24, height: 24)
-                .background(Color.voyaTeal.opacity(0.10))
-                .clipShape(Circle())
-
+        HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(step.title)
@@ -342,19 +386,6 @@ struct TransferDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-        }
-    }
-
-    private func routeStepSymbol(_ step: MobilityRouteStep) -> String {
-        switch step.kind {
-        case "transit":
-            return "tram"
-        case "walk":
-            return "figure.walk"
-        case "drive":
-            return "car"
-        default:
-            return "arrow.turn.down.right"
         }
     }
 
@@ -479,6 +510,10 @@ struct TransferDetailView: View {
 
     private var primaryOption: MobilityRouteOption? {
         plan?.defaultOption
+    }
+
+    private var effectiveBufferMinutes: Int {
+        draftBufferMinutes ?? context.airportBufferMinutes
     }
 
     private var primaryDetail: String {

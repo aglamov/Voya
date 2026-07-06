@@ -212,7 +212,7 @@ struct TripOperationsCard: View {
 
             HStack(spacing: 8) {
                 TripMetricTile(title: "Items", value: "\(itinerary.count)", symbol: "checklist")
-                TripMetricTile(title: "Next", value: nextItem?.displayTime ?? "Review", symbol: "clock")
+                TripMetricTile(title: "Next", value: nextMetricText, symbol: "clock")
                 TripMetricTile(title: "Transfers", value: transferCountText, symbol: "tram")
             }
 
@@ -270,6 +270,27 @@ struct TripOperationsCard: View {
         let transferCount = max(itinerary.count - 1, 0)
         return "\(transferCount)"
     }
+
+    private var nextMetricText: String {
+        guard let nextItem else {
+            return String(localized: "Review")
+        }
+
+        guard let startsAt = nextItem.startsAt else {
+            return String(localized: "Set time")
+        }
+
+        return TripCommandDateFormatter.time.string(from: startsAt)
+    }
+}
+
+enum TripCommandDateFormatter {
+    static let time: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
 }
 
 struct TripMetricTile: View {

@@ -331,6 +331,20 @@ struct ItemCompanionCard: View {
             return nil
         }
 
+        if item.kind == .hotel {
+            let nights = Calendar.current.dateComponents(
+                [.day],
+                from: Calendar.current.startOfDay(for: startsAt),
+                to: Calendar.current.startOfDay(for: endsAt)
+            ).day ?? 0
+
+            guard nights > 0 else {
+                return nil
+            }
+
+            return nights == 1 ? String(localized: "1 night") : String(localized: "\(nights) nights")
+        }
+
         let minutes = max(0, Int(endsAt.timeIntervalSince(startsAt) / 60))
         guard minutes > 0 else {
             return nil

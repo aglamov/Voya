@@ -479,10 +479,6 @@ struct TransferRecommendationCard: View {
 
     private func transitLegsView(_ steps: [MobilityRouteStep]) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Label("Transit legs", systemImage: "tram")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(phase.titleColor)
-
             ForEach(steps.prefix(3)) { step in
                 transitLegRow(step)
             }
@@ -492,13 +488,6 @@ struct TransferRecommendationCard: View {
 
     private func transitLegRow(_ step: MobilityRouteStep) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "tram")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(phase.accent)
-                .frame(width: 22, height: 22)
-                .background(phase.metricBackground)
-                .clipShape(Circle())
-
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(transitLegTitle(step))

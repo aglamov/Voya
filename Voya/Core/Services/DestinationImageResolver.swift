@@ -5,6 +5,8 @@ import SwiftUI
 enum VoyaPreferenceKey {
     static let homeLocationName = "voya.homeLocationName"
     static let homeLocationAddress = "voya.homeLocationAddress"
+    static let hiddenTransferIDs = "voya.hiddenTransferIDs"
+    static let transferBufferOverrides = "voya.transferBufferOverrides"
 }
 
 struct DestinationHeroImage {
