@@ -13,6 +13,9 @@ struct VoyaNotificationItem: Sendable {
     let title: String
     let location: String
     let status: String
+    let sourceName: String?
+    let confirmationCode: String?
+    let providerName: String?
     let startsAt: Date?
     let endsAt: Date?
 }
@@ -216,7 +219,8 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
             content.userInfo = [
                 "tripID": trip.id.uuidString,
                 "itemID": item.id.uuidString,
-                "kind": item.kind.rawValue
+                "kind": item.kind.rawValue,
+                "checkInURL": FlightCheckInAction.checkInURL(for: item)?.absoluteString ?? ""
             ]
 
             let trigger = UNCalendarNotificationTrigger(
@@ -290,6 +294,9 @@ private enum ItineraryReminderSpec {
             if id == "transit-leave" {
                 return String(localized: "Time to leave")
             }
+            if id == "flight-24h" {
+                return String(localized: "Online check-in opens")
+            }
             return String(localized: "\(item.kind.displayName) in \(Self.displayLeadTime(minutes))")
         case .atStart:
             return startTitle(for: item)
@@ -310,8 +317,26 @@ private enum ItineraryReminderSpec {
                 ? String(localized: "Open the route and start moving.")
                 : String(localized: "Open the route and start moving to \(secondPart).")
         }
+        if case .beforeStart(let id, _) = self, id == "flight-24h" {
+            return flightCheckInBody(for: item, fallbackTitle: firstPart)
+        }
 
         return secondPart.isEmpty ? firstPart : "\(firstPart) · \(secondPart)"
+    }
+
+    private func flightCheckInBody(for item: VoyaNotificationItem, fallbackTitle: String) -> String {
+        let booking = item.confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let provider = item.providerName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let checkInURL = FlightCheckInAction.checkInURL(for: item)?.absoluteString
+
+        var parts = [String]()
+        parts.append(provider.map { String(localized: "Use \($0) check-in for \(fallbackTitle).") } ?? String(localized: "Use airline check-in for \(fallbackTitle)."))
+        parts.append(booking.map { String(localized: "PNR: \($0).") } ?? String(localized: "Have your PNR ready."))
+        parts.append(String(localized: "You may need passenger last name and passport/ID."))
+        if let checkInURL {
+            parts.append(checkInURL)
+        }
+        return parts.joined(separator: " ")
     }
 
     private func startTitle(for item: VoyaNotificationItem) -> String {

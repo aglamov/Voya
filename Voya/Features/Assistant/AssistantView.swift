@@ -9,12 +9,17 @@ import UIKit
 import Vision
 
 struct AssistantView: View {
+    @Environment(\.openURL) private var openURL
     @EnvironmentObject private var store: VoyaStore
     @AppStorage(VoyaPreferenceKey.homeLocationName) private var homeLocationName = "Home"
     @AppStorage(VoyaPreferenceKey.homeLocationAddress) private var homeLocationAddress = ""
     @State private var itemBeingViewed: ItineraryItem?
     @State private var assistantQuestion = String(localized: "What if my flight is delayed?")
     @State private var assistantAnswer: String?
+    @State private var isBoardingPassImporterPresented = false
+    @State private var boardingPassTarget: ItineraryItem?
+    @State private var boardingPassPreviewURL: URL?
+    @State private var boardingPassImportMessage: String?
 
     private var trip: Trip? {
         store.currentOrUpcomingTrip ?? store.selectedTrip
@@ -41,6 +46,30 @@ struct AssistantView: View {
         }
     }
 
+    private var checkInActions: [FlightCheckInAction] {
+        let now = Date()
+        return itinerary.compactMap { FlightCheckInAction(item: $0, now: now) }
+    }
+
+    private var boardingPassEntries: [AssistantBoardingPassEntry] {
+        let now = Date()
+        let soon = now.addingTimeInterval(48 * 60 * 60)
+        return Array(itinerary.compactMap { item in
+            guard item.kind == .flight,
+                  let departsAt = item.startsAt,
+                  departsAt > now else {
+                return nil
+            }
+
+            let document = store.boardingPassDocument(for: item)
+            guard document != nil || departsAt <= soon else {
+                return nil
+            }
+
+            return AssistantBoardingPassEntry(item: item, document: document)
+        }.prefix(3))
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
@@ -65,6 +94,30 @@ struct AssistantView: View {
                         title: "No trip to watch",
                         message: "Import a confirmation and Voya will turn itinerary timing, alerts, and routes into assistant actions.",
                         symbol: "message.badge"
+                    )
+                }
+
+                if !checkInActions.isEmpty {
+                    AssistantCheckInCard(actions: checkInActions) { action in
+                        openURL(action.checkInURL)
+                    }
+                }
+
+                if !boardingPassEntries.isEmpty {
+                    AssistantBoardingPassCard(
+                        entries: boardingPassEntries,
+                        message: boardingPassImportMessage,
+                        onAdd: { item in
+                            boardingPassImportMessage = nil
+                            boardingPassTarget = item
+                            isBoardingPassImporterPresented = true
+                        },
+                        onOpen: { document in
+                            boardingPassPreviewURL = SourceDocumentPreviewer.temporaryURL(for: document.sourceFile)
+                        },
+                        onOpenFlight: { item in
+                            itemBeingViewed = item
+                        }
                     )
                 }
 
@@ -110,12 +163,22 @@ struct AssistantView: View {
                     startsAt: draft.effectiveStartsAt,
                     endsAt: draft.effectiveEndsAt,
                     location: draft.location,
-                    status: draft.status
+                    status: draft.status,
+                    confirmationCode: draft.confirmationCode,
+                    providerName: draft.providerName
                 )
             } onDelete: {
                 store.deleteItineraryItem(item)
             }
         }
+        .fileImporter(
+            isPresented: $isBoardingPassImporterPresented,
+            allowedContentTypes: [.pdf, .image],
+            allowsMultipleSelection: false
+        ) { result in
+            handleBoardingPassImport(result)
+        }
+        .quickLookPreview($boardingPassPreviewURL)
     }
 
     private var quickPrompts: [String] {
@@ -134,6 +197,10 @@ struct AssistantView: View {
 
         if normalized.contains("delay") || normalized.contains("flight") {
             if let flight = itinerary.first(where: { $0.kind == .flight && ItineraryPhase(item: $0) != .past }) {
+                if let checkInAction = FlightCheckInAction(item: flight) {
+                    let booking = checkInAction.confirmationCode.map { String(localized: "Use booking reference \($0) and the passenger last name.") } ?? String(localized: "Have the booking reference / PNR and passenger last name ready.")
+                    return String(localized: "Online check-in should be open for \(checkInAction.flightNumber). \(booking) Use the check-in card in Assistant for the airline link.")
+                }
                 return String(localized: "Keep \(flight.title) open in the trip. If the provider reports a delay, Voya compares the new arrival with the next item and keeps the booking source handy for airline support.")
             }
             return String(localized: "There is no upcoming flight in \(trip.title). I will focus on route timing and check-in reminders instead.")
@@ -152,6 +219,28 @@ struct AssistantView: View {
 
         return String(localized: "\(trip.title) is saved, but it needs timed itinerary items before I can produce useful live guidance.")
     }
+
+    private func handleBoardingPassImport(_ result: Result<[URL], Error>) {
+        guard let boardingPassTarget,
+              case .success(let urls) = result,
+              let url = urls.first else {
+            return
+        }
+
+        do {
+            let sourceFile = try SourceDocumentFile.imported(from: url)
+            store.attachBoardingPass(sourceFile, to: boardingPassTarget)
+            boardingPassImportMessage = nil
+        } catch {
+            boardingPassImportMessage = String(localized: "Could not attach this boarding pass.")
+        }
+    }
+}
+
+struct AssistantBoardingPassEntry: Identifiable {
+    var id: UUID { item.id }
+    let item: ItineraryItem
+    let document: SourceDocument?
 }
 
 struct AssistantStatusCard: View {
@@ -262,6 +351,259 @@ struct AssistantNextActionCard: View {
         case .transit:
             return String(localized: "Use the route card for line, departure time, and stop.")
         }
+    }
+}
+
+struct AssistantCheckInCard: View {
+    let actions: [FlightCheckInAction]
+    let onOpen: (FlightCheckInAction) -> Void
+    @State private var copiedBookingActionID: UUID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Color.voyaTeal)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Online check-in")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text("Registration should be open 24 hours before departure.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+
+            ForEach(actions) { action in
+                VStack(alignment: .leading, spacing: 11) {
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(action.flightNumber)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                            Text(action.item.displayTime)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        if let airlineName = action.airlineName {
+                            Text(airlineName)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.voyaTeal)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let confirmationCode = action.confirmationCode {
+                            HStack(spacing: 8) {
+                                Label(String(localized: "Booking reference: \(confirmationCode)"), systemImage: "doc.text")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Color.voyaMuted)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                Spacer(minLength: 8)
+
+                                Button {
+                                    copyBookingReference(confirmationCode, for: action)
+                                } label: {
+                                    Label(copiedBookingActionID == action.id ? "Copied" : "Copy", systemImage: copiedBookingActionID == action.id ? "checkmark" : "doc.on.doc")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(Color.voyaInk)
+                                        .padding(.horizontal, 9)
+                                        .frame(height: 30)
+                                        .background(.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        } else {
+                            Label("Booking reference / PNR", systemImage: "doc.text")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        ForEach(action.requiredDetails.dropFirst(), id: \.self) { detail in
+                            Label(detail, systemImage: "doc.text")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    Button {
+                        onOpen(action)
+                    } label: {
+                        Label("Open airline check-in", systemImage: "safari")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .foregroundStyle(.white)
+                            .background(Color.voyaInk)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(14)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private func copyBookingReference(_ value: String, for action: FlightCheckInAction) {
+        UIPasteboard.general.string = value
+        withAnimation(.easeInOut(duration: 0.18)) {
+            copiedBookingActionID = action.id
+        }
+    }
+}
+
+struct AssistantBoardingPassCard: View {
+    let entries: [AssistantBoardingPassEntry]
+    let message: String?
+    let onAdd: (ItineraryItem) -> Void
+    let onOpen: (SourceDocument) -> Void
+    let onOpenFlight: (ItineraryItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Color.voyaCoral)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Boarding pass")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text("Keep the airport document attached to its flight.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if let message {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.voyaCoral)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(entries) { entry in
+                VStack(alignment: .leading, spacing: 11) {
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(flightTitle(for: entry.item))
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                                .lineLimit(2)
+                            Text(entry.item.displayTime)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Text(entry.document == nil ? "Missing" : "Ready")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(entry.document == nil ? Color.voyaCoral : Color.voyaTeal)
+                            .padding(.horizontal, 9)
+                            .frame(height: 28)
+                            .background((entry.document == nil ? Color.voyaCoral : Color.voyaTeal).opacity(0.10))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+
+                    if let document = entry.document {
+                        Text(document.fileName)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else {
+                        Text("Add it now so the QR or barcode is one tap away before boarding.")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    HStack(spacing: 10) {
+                        if let document = entry.document {
+                            Button {
+                                onOpen(document)
+                            } label: {
+                                Label("Show", systemImage: "rectangle.portrait.and.arrow.right")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 42)
+                                    .foregroundStyle(.white)
+                                    .background(Color.voyaInk)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Button {
+                                onAdd(entry.item)
+                            } label: {
+                                Label("Add", systemImage: "plus")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 42)
+                                    .foregroundStyle(.white)
+                                    .background(Color.voyaInk)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button {
+                            onOpenFlight(entry.item)
+                        } label: {
+                            Image(systemName: "airplane")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                                .frame(width: 42, height: 42)
+                                .background(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open flight")
+                    }
+                }
+                .padding(14)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private func flightTitle(for item: ItineraryItem) -> String {
+        item.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? String(localized: "Flight")
     }
 }
 

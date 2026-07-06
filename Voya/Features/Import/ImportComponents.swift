@@ -856,6 +856,10 @@ struct EditableItineraryItem: View {
             ClearableTextField("Title", text: $draft.title, prompt: "Flight BA2490, hotel stay, dinner reservation")
             ClearableTextField("Place / map link", text: $draft.location, prompt: "Hotel name, airport, venue, address, or Google Maps link")
             ClearableTextField("Status", text: $draft.status, prompt: "Confirmed, needs review, ticket saved")
+            if draft.kind == .flight {
+                ClearableTextField("Booking reference / PNR", text: $draft.confirmationCode, prompt: "ABC123")
+                ClearableTextField("Airline / provider", text: $draft.providerName, prompt: "British Airways")
+            }
 
             Button(role: .destructive, action: onDelete) {
                 Label("Remove from import", systemImage: "minus.circle")
@@ -873,6 +877,8 @@ struct EditableItineraryItem: View {
         .onChange(of: draft.title) { _, _ in commitDraft() }
         .onChange(of: draft.location) { _, _ in commitDraft() }
         .onChange(of: draft.status) { _, _ in commitDraft() }
+        .onChange(of: draft.confirmationCode) { _, _ in commitDraft() }
+        .onChange(of: draft.providerName) { _, _ in commitDraft() }
         .onChange(of: draft.hasStartDate) { _, value in
             if !value {
                 draft.hasEndDate = false

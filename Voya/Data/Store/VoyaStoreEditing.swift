@@ -71,7 +71,9 @@ extension VoyaStore {
         startsAt: Date?,
         endsAt: Date?,
         location: String,
-        status: String
+        status: String,
+        confirmationCode: String? = nil,
+        providerName: String? = nil
     ) {
         let item = ItineraryItem(
             kind: kind,
@@ -80,7 +82,9 @@ extension VoyaStore {
             status: normalizedStatus(status),
             startsAt: startsAt,
             endsAt: endsAt,
-            sourceName: trip.sourceName
+            sourceName: trip.sourceName,
+            confirmationCode: confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            providerName: providerName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         )
         modelContext?.insert(item)
         trip.items.append(item)
@@ -98,7 +102,9 @@ extension VoyaStore {
         startsAt: Date?,
         endsAt: Date?,
         location: String,
-        status: String
+        status: String,
+        confirmationCode: String? = nil,
+        providerName: String? = nil
     ) {
         guard let trip = trips.first(where: { trip in
             trip.items.contains(where: { $0.id == item.id })
@@ -112,11 +118,59 @@ extension VoyaStore {
         item.endsAt = endsAt
         item.location = normalizedLocation(location)
         item.status = normalizedStatus(status)
+        item.confirmationCode = confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        item.providerName = providerName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         item.updatedAt = Date()
 
         trip.items = sortedItinerary(trip.items)
         trip.summary = summaryText(for: trip)
         trip.dates = tripDates(for: trip.items, fallback: trip.dates)
+        trip.updatedAt = Date()
+        saveTrips()
+    }
+
+    func attachBoardingPass(_ sourceFile: SourceDocumentFile, to item: ItineraryItem) {
+        guard item.kind == .flight,
+              let trip = trips.first(where: { trip in
+                  trip.items.contains(where: { $0.id == item.id })
+              }) else {
+            return
+        }
+
+        let document = SourceDocument(
+            sourceName: String(localized: "Boarding pass"),
+            sourceFile: sourceFile
+        )
+        if let existingDocumentID = item.boardingPassDocumentID,
+           let existingDocument = trip.sourceDocuments.first(where: { $0.id == existingDocumentID }) {
+            modelContext?.delete(existingDocument)
+            trip.sourceDocuments.removeAll { $0.id == existingDocumentID }
+        }
+
+        modelContext?.insert(document)
+        trip.sourceDocuments.append(document)
+        item.boardingPassDocumentID = document.id
+        item.status = String(localized: "Checked in")
+        item.updatedAt = Date()
+        trip.updatedAt = Date()
+        saveTrips()
+    }
+
+    func removeBoardingPass(from item: ItineraryItem) {
+        guard let documentID = item.boardingPassDocumentID,
+              let trip = trips.first(where: { trip in
+                  trip.items.contains(where: { $0.id == item.id })
+              }) else {
+            return
+        }
+
+        if let document = trip.sourceDocuments.first(where: { $0.id == documentID }) {
+            modelContext?.delete(document)
+        }
+
+        trip.sourceDocuments.removeAll { $0.id == documentID }
+        item.boardingPassDocumentID = nil
+        item.updatedAt = Date()
         trip.updatedAt = Date()
         saveTrips()
     }
@@ -128,6 +182,8 @@ extension VoyaStore {
         item.endsAt = draft.effectiveEndsAt
         item.location = draft.location
         item.status = draft.status
+        item.confirmationCode = draft.confirmationCode.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        item.providerName = draft.providerName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         item.updatedAt = Date()
     }
 

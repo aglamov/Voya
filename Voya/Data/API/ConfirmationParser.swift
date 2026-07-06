@@ -28,6 +28,8 @@ struct VercelItineraryItem: Decodable {
     let endsAt: String?
     let location: String
     let status: String
+    let confirmationCode: String?
+    let providerName: String?
 
     var itineraryItem: ItineraryItem {
         let parsedStartsAt = ItineraryDateParser.startDate(from: startsAt) ?? ItineraryDateParser.startDate(from: time)
@@ -38,7 +40,9 @@ struct VercelItineraryItem: Decodable {
             location: location,
             status: status,
             startsAt: parsedStartsAt,
-            endsAt: parsedEndsAt
+            endsAt: parsedEndsAt,
+            confirmationCode: confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            providerName: providerName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         )
     }
 
@@ -113,6 +117,12 @@ enum ConfirmationParser {
             fields.append(ExtractedField(label: item.kind.displayName, value: item.title))
             fields.append(ExtractedField(label: String(localized: "Time"), value: item.displayTime))
             fields.append(ExtractedField(label: String(localized: "Place"), value: item.location))
+            if item.kind == .flight, let confirmationCode = item.confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+                fields.append(ExtractedField(label: String(localized: "Booking reference"), value: confirmationCode))
+            }
+            if item.kind == .flight, let providerName = item.providerName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+                fields.append(ExtractedField(label: String(localized: "Provider"), value: providerName))
+            }
         }
         return fields
     }
@@ -126,6 +136,7 @@ enum ConfirmationParser {
         let departures = departureDateTimes(in: text)
         let arrivals = arrivalDateTimes(in: text)
         let segmentCount = inferredFlightSegmentCount(flightNumberCount: flightNumbers.count, routeCount: routes.count)
+        let confirmationCode = bookingReference(in: text)
 
         return flightNumbers.prefix(segmentCount).enumerated().map { index, flightNumber in
             let route = routeForFlight(at: index, flightCount: flightNumbers.count, routes: routes)
@@ -143,9 +154,31 @@ enum ConfirmationParser {
                 location: location,
                 status: String(localized: "Filled from source. Not enough details yet, checking tracking services."),
                 startsAt: startsAt,
-                endsAt: endsAt
+                endsAt: endsAt,
+                confirmationCode: confirmationCode,
+                providerName: FlightCheckInAction.airlineName(in: flightNumber)
             )
         }
+    }
+
+    static func bookingReference(in text: String) -> String? {
+        let patterns = [
+            #"(?i)\b(?:booking reference|booking ref|record locator|reservation code|confirmation code|pnr)\s*[:#-]?\s*([A-Z0-9]{5,8})\b"#,
+            #"(?i)\b(?:airline confirmation|confirmation)\s*[:#-]?\s*([A-Z0-9]{5,8})\b"#
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            guard let match = regex.firstMatch(in: text, range: range),
+                  match.numberOfRanges > 1,
+                  let matchRange = Range(match.range(at: 1), in: text) else {
+                continue
+            }
+            return String(text[matchRange]).uppercased()
+        }
+
+        return nil
     }
 
     private static func inferredFlightSegmentCount(flightNumberCount: Int, routeCount: Int) -> Int {

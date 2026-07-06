@@ -123,6 +123,10 @@ struct EditItineraryItemView: View {
 
                         ClearableTextField("Place / map link", text: $draft.location, prompt: "Hotel name, airport, venue, address, or Google Maps link")
                         ClearableTextField("Status", text: $draft.status, prompt: "Confirmed, needs review, ticket saved")
+                        if draft.kind == .flight {
+                            ClearableTextField("Booking reference / PNR", text: $draft.confirmationCode, prompt: "ABC123")
+                            ClearableTextField("Airline / provider", text: $draft.providerName, prompt: "British Airways")
+                        }
                     }
                     .padding(18)
                     .background(.white)

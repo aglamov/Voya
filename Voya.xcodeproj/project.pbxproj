@@ -11,6 +11,7 @@
 		D00000000000000000000022 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000002 /* ContentView.swift */; };
 		D00000000000000000000023 /* TripModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000003 /* TripModels.swift */; };
 		D00000000000000000000024 /* TravelAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000004 /* TravelAlert.swift */; };
+		D0000000000000000000006C /* FlightCheckInAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006B /* FlightCheckInAction.swift */; };
 		D00000000000000000000025 /* DestinationImageResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000005 /* DestinationImageResolver.swift */; };
 		D00000000000000000000026 /* DateFormatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000006 /* DateFormatters.swift */; };
 		D00000000000000000000027 /* AppChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000007 /* AppChrome.swift */; };
@@ -59,6 +60,7 @@
 		D00000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D00000000000000000000003 /* TripModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripModels.swift; sourceTree = "<group>"; };
 		D00000000000000000000004 /* TravelAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelAlert.swift; sourceTree = "<group>"; };
+		D0000000000000000000006B /* FlightCheckInAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightCheckInAction.swift; sourceTree = "<group>"; };
 		D00000000000000000000005 /* DestinationImageResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DestinationImageResolver.swift; sourceTree = "<group>"; };
 		D00000000000000000000006 /* DateFormatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateFormatters.swift; sourceTree = "<group>"; };
 		D00000000000000000000007 /* AppChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppChrome.swift; sourceTree = "<group>"; };
@@ -163,6 +165,7 @@
 			children = (
 				D00000000000000000000003 /* TripModels.swift */,
 				D00000000000000000000004 /* TravelAlert.swift */,
+				D0000000000000000000006B /* FlightCheckInAction.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -396,6 +399,7 @@
 				D00000000000000000000022 /* ContentView.swift in Sources */,
 				D00000000000000000000023 /* TripModels.swift in Sources */,
 				D00000000000000000000024 /* TravelAlert.swift in Sources */,
+				D0000000000000000000006C /* FlightCheckInAction.swift in Sources */,
 				D00000000000000000000025 /* DestinationImageResolver.swift in Sources */,
 				D00000000000000000000026 /* DateFormatters.swift in Sources */,
 				D00000000000000000000055 /* StringHelpers.swift in Sources */,

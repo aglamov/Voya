@@ -10,7 +10,9 @@ const itemSchema = z.object({
   startsAt: z.string().datetime({ offset: true }).nullable().optional().describe("The actual itinerary start date-time, not a booking, payment, issue, print, or cancellation date."),
   endsAt: z.string().datetime({ offset: true }).nullable().optional().describe("The actual itinerary end date-time, not a booking, payment, issue, print, or cancellation date."),
   location: z.string().min(1),
-  status: z.string().min(1)
+  status: z.string().min(1),
+  confirmationCode: z.string().nullable().optional().describe("Passenger booking reference, PNR, record locator, reservation code, or airline confirmation code exactly as shown. Use null if not visible."),
+  providerName: z.string().nullable().optional().describe("Airline, hotel, train operator, OTA, or booking provider name exactly as shown. Use null if not visible.")
 });
 
 const extractionSchema = z.object({
@@ -60,7 +62,7 @@ const schemaInstructions = [
   '  "primaryTime": "Aug 12, 09:40",',
   '  "confidence": 0.91,',
   '  "items": [',
-  '    {"kind":"flight","title":"BA2490 to Rome Fiumicino","startsAt":"2026-08-12T09:40:00+01:00","endsAt":"2026-08-12T13:10:00+02:00","location":"London Heathrow to Rome Fiumicino","status":"Confirmed"}',
+  '    {"kind":"flight","title":"BA2490 to Rome Fiumicino","startsAt":"2026-08-12T09:40:00+01:00","endsAt":"2026-08-12T13:10:00+02:00","location":"London Heathrow to Rome Fiumicino","status":"Confirmed","confirmationCode":"ABC123","providerName":"British Airways"}',
   "  ],",
   '  "warnings": []',
   "}",
@@ -68,6 +70,8 @@ const schemaInstructions = [
   "For each item, startsAt and endsAt must be ISO 8601 date-time strings when the source has those values. Use null only when the value is not visible.",
   "Use the local timezone offset for the departure, arrival, check-in, check-out, or venue location. Do not use Z/UTC unless the source explicitly says the time is UTC.",
   "For flight items, startsAt is departure and endsAt is arrival when arrival is visible.",
+  "For flight items, confirmationCode should be the passenger booking reference / PNR / record locator / reservation code when visible, not the flight number, ticket number, seat number, or document number.",
+  "For flight items, providerName should be the marketing or operating airline name when visible.",
   "If a booking contains connecting flights or multiple flight legs, return one flight item per leg. Do not merge connections into a single origin-to-final-destination flight.",
   "For hotel items, startsAt is the check-in date/time and endsAt is the check-out date/time for the stay.",
   "Do not use booking dates, reservation dates, payment dates, cancellation deadlines, invoice dates, print dates, or email dates as startsAt or endsAt.",

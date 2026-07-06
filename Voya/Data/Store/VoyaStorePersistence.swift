@@ -1,4 +1,5 @@
 import Foundation
+import PDFKit
 import SwiftData
 import SwiftUI
 
@@ -35,6 +36,7 @@ extension VoyaStore {
             trips = try modelContext.fetch(descriptor)
             migrateLegacyTripSourceDocuments()
             removeDuplicateItemsFromLoadedTrips()
+            backfillFlightBookingDetailsFromSources()
             if let selectedTripID, !trips.contains(where: { $0.id == selectedTripID }) {
                 self.selectedTripID = trips.first?.id
             } else if selectedTripID == nil {
@@ -120,6 +122,16 @@ extension VoyaStore {
             .first { $0.id == sourceDocumentID }
     }
 
+    func boardingPassDocument(for item: ItineraryItem) -> SourceDocument? {
+        guard let boardingPassDocumentID = item.boardingPassDocumentID else {
+            return nil
+        }
+
+        return trips.lazy
+            .flatMap(\.sourceDocuments)
+            .first { $0.id == boardingPassDocumentID }
+    }
+
     func sourceDocument(for sourceFile: SourceDocumentFile, sourceName: String, in trip: Trip?) -> SourceDocument {
         if let existing = trip?.sourceDocuments.first(where: { $0.matches(sourceFile) }) {
             return existing
@@ -199,6 +211,98 @@ extension VoyaStore {
         }
     }
 
+    func backfillFlightBookingDetailsFromSources() {
+        guard let modelContext else { return }
+
+        var didChange = false
+        var sourceTextCache: [UUID: String] = [:]
+
+        for trip in trips {
+            for item in trip.items where item.kind == .flight {
+                if item.providerName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty == nil,
+                   let airlineName = FlightCheckInAction.airlineName(in: "\(item.title) \(item.location)") {
+                    item.providerName = airlineName
+                    item.updatedAt = Date()
+                    didChange = true
+                }
+
+                guard item.confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty == nil,
+                      let sourceDocument = sourceDocument(for: item, in: trip) else {
+                    continue
+                }
+
+                let sourceText: String
+                if let cachedText = sourceTextCache[sourceDocument.id] {
+                    sourceText = cachedText
+                } else {
+                    guard let extractedText = text(from: sourceDocument) else {
+                        continue
+                    }
+                    sourceTextCache[sourceDocument.id] = extractedText
+                    sourceText = extractedText
+                }
+
+                if let confirmationCode = ConfirmationParser.bookingReference(in: sourceText) {
+                    item.confirmationCode = confirmationCode
+                    item.updatedAt = Date()
+                    didChange = true
+                }
+            }
+        }
+
+        guard didChange else { return }
+
+        do {
+            try modelContext.save()
+        } catch {
+            importMessage = String(localized: "Could not update flight booking details")
+        }
+    }
+
+    private func sourceDocument(for item: ItineraryItem, in trip: Trip) -> SourceDocument? {
+        if let sourceDocumentID = item.sourceDocumentID,
+           let sourceDocument = trip.sourceDocuments.first(where: { $0.id == sourceDocumentID }) {
+            return sourceDocument
+        }
+
+        if let sourceName = item.sourceName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+           let sourceDocument = trip.sourceDocuments.first(where: { $0.sourceName == sourceName }) {
+            return sourceDocument
+        }
+
+        return trip.sourceDocuments.count == 1 ? trip.sourceDocuments.first : nil
+    }
+
+    private func text(from sourceDocument: SourceDocument) -> String? {
+        guard let data = Data(base64Encoded: sourceDocument.dataBase64) else {
+            return nil
+        }
+
+        let contentType = sourceDocument.contentType.lowercased()
+        let fileExtension = (sourceDocument.fileName as NSString).pathExtension.lowercased()
+
+        if contentType.contains("pdf") || fileExtension == "pdf" {
+            guard let document = PDFDocument(data: data) else {
+                return nil
+            }
+
+            let text = (0..<document.pageCount)
+                .compactMap { document.page(at: $0)?.string }
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.nilIfEmpty
+        }
+
+        if contentType.hasPrefix("text/")
+            || ["txt", "eml", "ics", "csv"].contains(fileExtension) {
+            return String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty
+        }
+
+        return nil
+    }
+
     func syncTripNotifications() {
         let notificationTrips = trips.map { trip in
             VoyaNotificationTrip(
@@ -211,6 +315,9 @@ extension VoyaStore {
                         title: item.title,
                         location: item.location,
                         status: item.status,
+                        sourceName: item.sourceName,
+                        confirmationCode: item.confirmationCode,
+                        providerName: item.providerName,
                         startsAt: item.startsAt,
                         endsAt: item.endsAt
                     )

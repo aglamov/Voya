@@ -122,6 +122,8 @@ struct ItineraryItemDraft {
     var hasEndDate: Bool
     var location: String
     var status: String
+    var confirmationCode: String
+    var providerName: String
 
     init(item: ItineraryItem) {
         kind = item.kind
@@ -132,6 +134,8 @@ struct ItineraryItemDraft {
         hasEndDate = item.endsAt != nil
         location = item.location
         status = item.status
+        confirmationCode = item.confirmationCode ?? ""
+        providerName = item.providerName ?? ""
     }
 
     init() {
@@ -143,6 +147,8 @@ struct ItineraryItemDraft {
         hasEndDate = false
         location = ""
         status = ""
+        confirmationCode = ""
+        providerName = ""
     }
 
     var effectiveStartsAt: Date? {
@@ -166,6 +172,8 @@ struct ItineraryItemDraft {
             && hasEndDate == other.hasEndDate
             && location == other.location
             && status == other.status
+            && confirmationCode == other.confirmationCode
+            && providerName == other.providerName
     }
 }
 

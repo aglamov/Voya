@@ -95,6 +95,7 @@ final class ItineraryItem: Identifiable {
     var endsAt: Date?
     var sourceName: String?
     var sourceDocumentID: UUID?
+    var boardingPassDocumentID: UUID?
     var confirmationCode: String?
     var providerName: String?
     var rawData: String?
@@ -116,6 +117,7 @@ final class ItineraryItem: Identifiable {
         endsAt: Date? = nil,
         sourceName: String? = nil,
         sourceDocumentID: UUID? = nil,
+        boardingPassDocumentID: UUID? = nil,
         confirmationCode: String? = nil,
         providerName: String? = nil,
         rawData: String? = nil,
@@ -136,6 +138,7 @@ final class ItineraryItem: Identifiable {
         self.endsAt = endsAt
         self.sourceName = sourceName
         self.sourceDocumentID = sourceDocumentID
+        self.boardingPassDocumentID = boardingPassDocumentID
         self.confirmationCode = confirmationCode
         self.providerName = providerName
         self.rawData = rawData

@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ImportedDocument: Identifiable {
     let id = UUID()
@@ -51,6 +52,22 @@ struct SourceDocumentFile: Codable, Equatable {
         }
 
         return source
+    }
+
+    static func imported(from url: URL) throws -> SourceDocumentFile {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let data = try Data(contentsOf: url)
+        return SourceDocumentFile(
+            fileName: url.lastPathComponent,
+            contentType: UTType(filenameExtension: url.pathExtension)?.identifier ?? "application/octet-stream",
+            data: data
+        )
     }
 }
 

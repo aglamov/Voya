@@ -12,12 +12,15 @@ struct ItineraryItemDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var store: VoyaStore
     @State private var draft: ItineraryItemDraft
     @State private var isEditing = false
     @State private var didCopyLocation = false
     @State private var enrichment: ItemEnrichment?
     @State private var isLoadingEnrichment = false
     @State private var sourcePreviewURL: URL?
+    @State private var isBoardingPassImporterPresented = false
+    @State private var boardingPassImportMessage: String?
     let item: ItineraryItem
     let sourceDocument: SourceDocument?
     let onSave: (ItineraryItemDraft) -> Void
@@ -53,6 +56,9 @@ struct ItineraryItemDetailView: View {
                         onOpenLocation: openMaps,
                         onCopyLocation: copyLocation
                     )
+                    if item.kind == .flight {
+                        boardingPassCard
+                    }
                     ItemInsightPanel(
                         item: item,
                         phase: ItineraryPhase(item: item),
@@ -105,6 +111,13 @@ struct ItineraryItemDetailView: View {
             }
         }
         .quickLookPreview($sourcePreviewURL)
+        .fileImporter(
+            isPresented: $isBoardingPassImporterPresented,
+            allowedContentTypes: [.pdf, .image],
+            allowsMultipleSelection: false
+        ) { result in
+            handleBoardingPassImport(result)
+        }
         .task(id: item.id) {
             await loadEnrichment()
         }
@@ -211,6 +224,12 @@ struct ItineraryItemDetailView: View {
                 .disabled(!isEditing)
             ClearableTextField("Status", text: $draft.status, prompt: "Confirmed, needs review, ticket saved")
                 .disabled(!isEditing)
+            if draft.kind == .flight {
+                ClearableTextField("Booking reference / PNR", text: $draft.confirmationCode, prompt: "ABC123")
+                    .disabled(!isEditing)
+                ClearableTextField("Airline / provider", text: $draft.providerName, prompt: "British Airways")
+                    .disabled(!isEditing)
+            }
 
             HStack(spacing: 8) {
                 Label(item.sourceName ?? String(localized: "Manual entry"), systemImage: "doc.text")
@@ -267,6 +286,98 @@ struct ItineraryItemDetailView: View {
         }
         .buttonStyle(.plain)
         .disabled(sourceDocument == nil)
+    }
+
+    private var boardingPassCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(boardingPassDocument == nil ? Color.voyaTeal : .white)
+                    .frame(width: 42, height: 42)
+                    .background(boardingPassDocument == nil ? Color.voyaTeal.opacity(0.12) : Color.voyaTeal)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(boardingPassDocument == nil ? "Boarding pass" : "Boarding pass ready")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text(boardingPassSubtitle)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if let boardingPassImportMessage {
+                Label(boardingPassImportMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.voyaCoral)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let boardingPassDocument {
+                HStack(spacing: 10) {
+                    Button {
+                        sourcePreviewURL = SourceDocumentPreviewer.temporaryURL(for: boardingPassDocument.sourceFile)
+                    } label: {
+                        Label("Show", systemImage: "rectangle.portrait.and.arrow.right")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .foregroundStyle(.white)
+                            .background(Color.voyaInk)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        isBoardingPassImporterPresented = true
+                    } label: {
+                        Label("Replace", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .foregroundStyle(Color.voyaInk)
+                            .background(Color.voyaSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(role: .destructive) {
+                        store.removeBoardingPass(from: item)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.voyaCoral)
+                            .frame(width: 44, height: 44)
+                            .background(Color.voyaCoral.opacity(0.10))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove boarding pass")
+                }
+            } else {
+                Button {
+                    isBoardingPassImporterPresented = true
+                } label: {
+                    Label("Add boarding pass", systemImage: "plus")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .foregroundStyle(.white)
+                        .background(Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 12, y: 7)
     }
 
     private var locationActions: some View {
@@ -342,6 +453,18 @@ struct ItineraryItemDetailView: View {
             || draft.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var boardingPassDocument: SourceDocument? {
+        store.boardingPassDocument(for: item)
+    }
+
+    private var boardingPassSubtitle: String {
+        if let boardingPassDocument {
+            return boardingPassDocument.fileName
+        }
+
+        return String(localized: "Attach a PDF or image to this flight for quick access at the airport.")
+    }
+
     private var locationActionTitle: String {
         LocationLinkResolver.directURL(from: draft.location) == nil ? String(localized: "Open map") : String(localized: "Open link")
     }
@@ -359,6 +482,21 @@ struct ItineraryItemDetailView: View {
         UIPasteboard.general.string = value
         withAnimation(.easeInOut(duration: 0.18)) {
             didCopyLocation = true
+        }
+    }
+
+    private func handleBoardingPassImport(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else {
+            return
+        }
+
+        do {
+            let sourceFile = try SourceDocumentFile.imported(from: url)
+            store.attachBoardingPass(sourceFile, to: item)
+            draft.status = String(localized: "Checked in")
+            boardingPassImportMessage = nil
+        } catch {
+            boardingPassImportMessage = String(localized: "Could not attach this boarding pass.")
         }
     }
 

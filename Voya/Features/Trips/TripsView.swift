@@ -265,7 +265,9 @@ struct TripsView: View {
                     startsAt: draft.effectiveStartsAt,
                     endsAt: draft.effectiveEndsAt,
                     location: draft.location,
-                    status: draft.status
+                    status: draft.status,
+                    confirmationCode: draft.confirmationCode,
+                    providerName: draft.providerName
                 )
             }
         }
@@ -278,7 +280,9 @@ struct TripsView: View {
                     startsAt: draft.effectiveStartsAt,
                     endsAt: draft.effectiveEndsAt,
                     location: draft.location,
-                    status: draft.status
+                    status: draft.status,
+                    confirmationCode: draft.confirmationCode,
+                    providerName: draft.providerName
                 )
             } onDelete: {
                 store.deleteItineraryItem(item)
