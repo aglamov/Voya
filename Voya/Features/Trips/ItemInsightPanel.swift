@@ -48,10 +48,10 @@ struct ItemInsightPanel: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("AI brief")
+                    Text(panelTitle)
                         .font(.headline)
                         .foregroundStyle(Color.voyaInk)
-                    Text("What matters now for this item.")
+                    Text(panelSubtitle)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Color.voyaMuted)
                 }
@@ -74,17 +74,25 @@ struct ItemInsightPanel: View {
                 .accessibilityLabel("Refresh trip intelligence")
             }
 
-            Text(aiBriefText)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Color.voyaInk)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.voyaSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            if let enrichment, hasDetailedBrief(enrichment) {
+                DetailedInsightBrief(
+                    enrichment: enrichment,
+                    fallbackText: aiBriefText,
+                    isRussian: isRussian
+                )
+            } else {
+                Text(aiBriefText)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.voyaInk)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.voyaSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
 
-            if !guidanceRows.isEmpty {
+            if !hasRichBrief, !guidanceRows.isEmpty {
                 VStack(spacing: 10) {
                     ForEach(guidanceRows) { row in
                         if let actionURL = row.actionURL {
@@ -158,15 +166,22 @@ struct ItemInsightPanel: View {
         return Array(rows.prefix(3))
     }
 
+    private var hasRichBrief: Bool {
+        enrichment.map(hasDetailedBrief) ?? false
+    }
+
+    private func hasDetailedBrief(_ enrichment: ItemEnrichment) -> Bool {
+        !enrichment.sections.isEmpty || !enrichment.briefMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var aiBriefText: String {
         if let warning = enrichment?.warnings.first?.trimmingCharacters(in: .whitespacesAndNewlines), !warning.isEmpty {
             return conciseText([primaryNextMove, warning].joined(separator: " "))
         }
 
         if let enrichment {
-            let brief = enrichment.briefMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !brief.isEmpty {
-                return conciseText(plainText(fromMarkdown: brief))
+            if let composedBrief = composedBrief(for: enrichment) {
+                return composedBrief
             }
 
             let sectionText = enrichment.sections
@@ -182,9 +197,194 @@ struct ItemInsightPanel: View {
             if !summary.isEmpty {
                 return conciseText(summary)
             }
+
+            let brief = enrichment.briefMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !brief.isEmpty {
+                return conciseText(plainText(fromMarkdown: brief))
+            }
         }
 
         return conciseText([primaryNextMove, primaryNextMoveDetail].joined(separator: " "))
+    }
+
+    private var panelTitle: String {
+        isRussian ? "Описание" : "Description"
+    }
+
+    private var panelSubtitle: String {
+        isRussian ? "Коротко, что важно сейчас." : "A short read on what matters now."
+    }
+
+    private var isRussian: Bool {
+        VoyaAppLocale.currentLanguageCode == "ru"
+    }
+
+    private func composedBrief(for enrichment: ItemEnrichment) -> String? {
+        let text: String?
+        switch item.kind {
+        case .flight:
+            text = composedFlightBrief(for: enrichment)
+        case .hotel:
+            text = composedStayBrief(for: enrichment)
+        case .event:
+            text = composedEventBrief(for: enrichment)
+        case .transit:
+            text = composedTransitBrief(for: enrichment)
+        }
+
+        return text.flatMap { conciseText($0) }
+    }
+
+    private func composedFlightBrief(for enrichment: ItemEnrichment) -> String? {
+        let flight = firstCard(in: enrichment, kind: "flight", preferredTitles: ["Рейс", "Flight"])
+        let gate = firstCard(in: enrichment, kind: "flight", preferredTitles: ["Выход", "Gate"])
+        let delay = firstCard(in: enrichment, kind: "flight", preferredTitles: ["Задержка", "Delay"])
+        let weather = firstCard(in: enrichment, kind: "weather", preferredTitles: ["Погода", "Weather", "Airport weather", "Погода в аэропорту"])
+
+        var sentences: [String] = []
+
+        if let flight {
+            sentences.append(isRussian
+                ? "\(cleanCardValue(flight.value))\(cleanCardDetail(flight.detail).map { ": \($0)" } ?? "")."
+                : "\(cleanCardValue(flight.value))\(cleanCardDetail(flight.detail).map { ": \($0)" } ?? "").")
+        } else {
+            sentences.append(isRussian
+                ? "\(displayTitle) запланирован на \(item.displayTime)."
+                : "\(displayTitle) is scheduled for \(item.displayTime).")
+        }
+
+        if let gate {
+            let value = cleanCardValue(gate.value)
+            let detail = cleanCardDetail(gate.detail)
+            if value.localizedCaseInsensitiveContains("не опубликовано") || value.localizedCaseInsensitiveContains("not posted") {
+                sentences.append(isRussian
+                    ? "Выход пока не опубликован; проверьте его ближе к вылету."
+                    : "The gate is not posted yet; check again closer to departure.")
+            } else {
+                sentences.append(isRussian ? "Выход: \(value)." : "Gate: \(value).")
+            }
+            if let detail, !detail.localizedCaseInsensitiveContains("final source") {
+                sentences.append("\(detail).")
+            }
+        }
+
+        if let delay {
+            sentences.append(isRussian
+                ? "По задержкам: \(cleanCardValue(delay.value))."
+                : "Delay signal: \(cleanCardValue(delay.value)).")
+        }
+
+        if let weather {
+            sentences.append(isRussian
+                ? "Погода: \(cleanCardValue(weather.value))\(cleanCardDetail(weather.detail).map { ", \($0)" } ?? "")."
+                : "Weather: \(cleanCardValue(weather.value))\(cleanCardDetail(weather.detail).map { ", \($0)" } ?? "").")
+        }
+
+        return sentences.isEmpty ? nil : sentences.joined(separator: " ")
+    }
+
+    private func composedStayBrief(for enrichment: ItemEnrichment) -> String? {
+        let route = enrichment.routeLegs.first
+        let weather = firstCard(in: enrichment, kind: "weather", preferredTitles: ["Погода", "Weather"])
+        let status = firstCard(in: enrichment, kind: "status", preferredTitles: ["Статус", "Status"])
+
+        var sentences = [isRussian
+            ? "\(displayTitle): держите адрес, время заезда и маршрут прибытия под рукой."
+            : "\(displayTitle): keep the address, check-in window, and arrival route handy."]
+
+        if let route {
+            sentences.append(route.guidance)
+        }
+        if let weather {
+            sentences.append(isRussian
+                ? "Погода рядом: \(cleanCardValue(weather.value))\(cleanCardDetail(weather.detail).map { ", \($0)" } ?? "")."
+                : "Nearby weather: \(cleanCardValue(weather.value))\(cleanCardDetail(weather.detail).map { ", \($0)" } ?? "").")
+        }
+        if let status {
+            sentences.append(isRussian ? "Статус: \(cleanCardValue(status.value))." : "Status: \(cleanCardValue(status.value)).")
+        }
+
+        return sentences.joined(separator: " ")
+    }
+
+    private func composedEventBrief(for enrichment: ItemEnrichment) -> String? {
+        let route = enrichment.routeLegs.first
+        let weather = firstCard(in: enrichment, kind: "weather", preferredTitles: ["Погода", "Weather"])
+        let event = firstCard(in: enrichment, kind: "events", preferredTitles: ["События", "Events"])
+
+        var sentences = [isRussian
+            ? "\(displayTitle): проверьте время, место и маршрут до выхода."
+            : "\(displayTitle): check the time, venue, and route before leaving."]
+
+        if let route {
+            sentences.append(route.guidance)
+        }
+        if let weather {
+            sentences.append(isRussian
+                ? "Погода: \(cleanCardValue(weather.value))\(cleanCardDetail(weather.detail).map { ", \($0)" } ?? "")."
+                : "Weather: \(cleanCardValue(weather.value))\(cleanCardDetail(weather.detail).map { ", \($0)" } ?? "").")
+        }
+        if let event {
+            sentences.append(cleanCardLine(event))
+        }
+
+        return sentences.joined(separator: " ")
+    }
+
+    private func composedTransitBrief(for enrichment: ItemEnrichment) -> String? {
+        if let route = enrichment.routeLegs.first {
+            return isRussian
+                ? "\(route.guidance) \(route.bufferMinutes.map { "Держите запас около \($0) мин." } ?? "")"
+                : "\(route.guidance) \(route.bufferMinutes.map { "Keep about \($0) min buffer." } ?? "")"
+        }
+
+        return nil
+    }
+
+    private var displayTitle: String {
+        let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? String(localized: "Untitled item") : title
+    }
+
+    private func firstCard(in enrichment: ItemEnrichment, kind: String, preferredTitles: [String]) -> ItemEnrichmentCard? {
+        enrichment.cards.first { card in
+            preferredTitles.contains { title in
+                card.title.localizedCaseInsensitiveContains(title)
+            }
+        } ?? enrichment.cards.first { $0.kind == kind }
+    }
+
+    private func cleanCardLine(_ card: ItemEnrichmentCard) -> String {
+        let value = cleanCardValue(card.value)
+        if let detail = cleanCardDetail(card.detail) {
+            return "\(value): \(detail)."
+        }
+        return "\(value)."
+    }
+
+    private func cleanCardValue(_ value: String) -> String {
+        cleanInlineText(value)
+    }
+
+    private func cleanCardDetail(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+
+        let cleaned = cleanInlineText(value)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    private func cleanInlineText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"\[([^\]]+)\]\([^)]+\)"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"#{1,6}\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\*\*([^*]+)\*\*"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\b(status|статус|рейс|flight|weather decision|flight status)\s*[-:]\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
 
     private func routeValue(for leg: TravelRouteLeg) -> String {
@@ -342,7 +542,10 @@ struct ItemInsightPanel: View {
 
     private func plainText(fromMarkdown value: String) -> String {
         value
+            .replacingOccurrences(of: #"\[([^\]]+)\]\([^)]+\)"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"(?m)^#{1,6}\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"#{1,6}\s*"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"(?m)^\s*[-*]\s+"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"\*\*([^*]+)\*\*"#, with: "$1", options: .regularExpression)
             .replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
@@ -364,6 +567,306 @@ struct AssistantGuidance: Identifiable {
     let symbol: String
     let tint: Color
     let actionURL: URL?
+}
+
+struct DetailedInsightBrief: View {
+    @Environment(\.openURL) private var openURL
+    let enrichment: ItemEnrichment
+    let fallbackText: String
+    let isRussian: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(displaySections) { section in
+                DetailedInsightSection(section: section)
+            }
+
+            if !displayActions.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    Label(isRussian ? "Что сделать дальше" : "Next actions", systemImage: "checklist")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaTeal)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(displayActions) { action in
+                            Button {
+                                if let actionURL = action.actionURL {
+                                    openURL(actionURL)
+                                }
+                            } label: {
+                                HStack(alignment: .top, spacing: 9) {
+                                    Image(systemName: actionSymbol(for: action.kind))
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(action.priority == "now" ? Color.voyaCoral : Color.voyaTeal)
+                                        .frame(width: 22, height: 22)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(action.title)
+                                            .font(.subheadline.weight(.bold))
+                                            .foregroundStyle(Color.voyaInk)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        if !action.detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                            Text(cleanInlineText(action.detail))
+                                                .font(.caption.weight(.medium))
+                                                .foregroundStyle(Color.voyaMuted)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    }
+
+                                    Spacer(minLength: 0)
+
+                                    if action.actionURL != nil {
+                                        Image(systemName: "arrow.up.right")
+                                            .font(.caption2.weight(.bold))
+                                            .foregroundStyle(Color.voyaTeal)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(action.actionURL == nil)
+                        }
+                    }
+                }
+                .padding(14)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+    }
+
+    private var displaySections: [DetailedBriefSection] {
+        let sourceSections = enrichment.sections.isEmpty
+            ? sectionsFromMarkdown(enrichment.briefMarkdown)
+            : enrichment.sections.map {
+                DetailedBriefSection(title: $0.title, body: $0.body, kind: $0.kind)
+            }
+
+        let filtered = sourceSections.filter { section in
+            let title = section.title.lowercased()
+            guard !title.contains("assistant stance"),
+                  !title.contains("позиция ассистента"),
+                  !title.contains("следующие действия"),
+                  !title.contains("next actions") else {
+                return false
+            }
+            return !section.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        let unique = deduplicated(filtered)
+        if unique.isEmpty {
+            return [DetailedBriefSection(title: isRussian ? "Главное" : "Overview", body: fallbackText, kind: "overview")]
+        }
+        return unique
+    }
+
+    private var displayActions: [TravelAction] {
+        var seen: Set<String> = []
+        return enrichment.actions.filter { action in
+            let key = normalizedKey("\(action.title) \(action.detail)")
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func sectionsFromMarkdown(_ markdown: String) -> [DetailedBriefSection] {
+        let lines = markdown
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        var sections: [DetailedBriefSection] = []
+        var currentTitle = isRussian ? "Главное" : "Overview"
+        var currentBody: [String] = []
+
+        func flush() {
+            let body = currentBody
+                .map(cleanMarkdownLine)
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !body.isEmpty {
+                sections.append(DetailedBriefSection(title: cleanMarkdownLine(currentTitle), body: body, kind: kind(for: currentTitle)))
+            }
+            currentBody = []
+        }
+
+        for line in lines {
+            guard !line.isEmpty else {
+                continue
+            }
+
+            if line.hasPrefix("#") {
+                flush()
+                currentTitle = line.replacingOccurrences(of: #"^#{1,6}\s*"#, with: "", options: .regularExpression)
+            } else {
+                currentBody.append(line)
+            }
+        }
+
+        flush()
+        return sections
+    }
+
+    private func deduplicated(_ sections: [DetailedBriefSection]) -> [DetailedBriefSection] {
+        var seenTitles: Set<String> = []
+        var seenBodies: Set<String> = []
+
+        return sections.compactMap { section in
+            let titleKey = normalizedKey(section.title)
+            let bodyLines = section.body
+                .components(separatedBy: .newlines)
+                .map(cleanMarkdownLine)
+                .filter { !$0.isEmpty }
+
+            var uniqueLines: [String] = []
+            for line in bodyLines {
+                let lineKey = normalizedKey(line)
+                if seenBodies.insert(lineKey).inserted {
+                    uniqueLines.append(line)
+                }
+            }
+
+            let body = uniqueLines.joined(separator: "\n")
+            guard !body.isEmpty else {
+                return nil
+            }
+
+            if seenTitles.contains(titleKey), seenBodies.contains(normalizedKey(body)) {
+                return nil
+            }
+            seenTitles.insert(titleKey)
+            return DetailedBriefSection(title: section.title, body: body, kind: section.kind)
+        }
+    }
+
+    private func cleanMarkdownLine(_ value: String) -> String {
+        cleanInlineText(
+            value
+                .replacingOccurrences(of: #"^\s*[-*]\s+"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: #"^#{1,6}\s*"#, with: "", options: .regularExpression)
+        )
+    }
+
+    private func cleanInlineText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"\[([^\]]+)\]\([^)]+\)"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\*\*([^*]+)\*\*"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func normalizedKey(_ value: String) -> String {
+        cleanInlineText(value)
+            .lowercased()
+            .replacingOccurrences(of: #"\d{1,2}:\d{2}\s*(am|pm)?"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func kind(for title: String) -> String {
+        let lowercased = title.lowercased()
+        if lowercased.contains("route") || lowercased.contains("маршрут") || lowercased.contains("добраться") {
+            return "route"
+        }
+        if lowercased.contains("weather") || lowercased.contains("погода") {
+            return "weather"
+        }
+        if lowercased.contains("flight") || lowercased.contains("рейс") || lowercased.contains("вылет") {
+            return "flight"
+        }
+        if lowercased.contains("risk") || lowercased.contains("риск") {
+            return "risk"
+        }
+        if lowercased.contains("event") || lowercased.contains("событ") {
+            return "event"
+        }
+        return "overview"
+    }
+
+    private func actionSymbol(for kind: String) -> String {
+        switch kind {
+        case "route": "map"
+        case "weather": "cloud.sun"
+        case "booking": "doc.text"
+        case "flight": "airplane"
+        case "event": "ticket"
+        case "safety": "exclamationmark.triangle"
+        default: "sparkles"
+        }
+    }
+}
+
+struct DetailedBriefSection: Identifiable {
+    let id = UUID()
+    let title: String
+    let body: String
+    let kind: String
+}
+
+struct DetailedInsightSection: View {
+    let section: DetailedBriefSection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Label(section.title, systemImage: symbol)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(tint)
+
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(displayLines, id: \.self) { line in
+                    Text(line)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaInk)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var displayLines: [String] {
+        let lines = section.body
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if lines.count > 1 {
+            return lines
+        }
+
+        let body = section.body
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return body.isEmpty ? [] : [body]
+    }
+
+    private var symbol: String {
+        switch section.kind {
+        case "route": "map"
+        case "weather": "cloud.sun"
+        case "event": "ticket"
+        case "flight": "airplane"
+        case "risk": "exclamationmark.triangle"
+        case "action": "checklist"
+        default: "sparkles"
+        }
+    }
+
+    private var tint: Color {
+        switch section.kind {
+        case "risk": Color.voyaCoral
+        case "route": Color.voyaTeal
+        case "weather": Color.voyaSky
+        case "event": Color.voyaCoral
+        case "flight": Color.voyaSky
+        default: Color.voyaGold
+        }
+    }
 }
 
 struct AssistantGuidanceRow: View {
