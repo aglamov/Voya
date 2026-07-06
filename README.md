@@ -160,7 +160,7 @@ Flight support endpoints:
 - `POST /api/flight-status` with `{ "flightNumber": "BA2490", "date": "2026-08-12", "originAirport": "LHR", "destinationAirport": "FCO" }`
 - `POST /api/booking-validation` combines imported-confirmation evidence, user review, and provider flight existence validation. It does not claim true PNR or ticket validation unless Voya later integrates directly with the airline, OTA, NDC, GDS, or booking provider.
 - `GET/POST/DELETE /api/flightaware-alert-subscriptions` proxies FlightAware AeroAPI `/alerts` management calls while keeping the AeroAPI key server-side. Use the exact alert payload shape from FlightAware's `/alerts` documentation.
-- `POST /api/flight-watch` stores device-to-flight watch records, including the APNs token when supplied, so one provider callback can fan out to multiple travelers on the same flight.
+- `POST /api/flight-watch` stores device-to-flight watch records, including the APNs token when supplied, so one provider callback can fan out to multiple travelers on the same flight. Pass `subscribeToAlerts: true` to create and remember a FlightAware alert rule for that watched flight.
 - `POST /api/flightaware-alerts` receives FlightAware alert callbacks after a FlightAware alert subscription points to this callback URL, normalizes them, deduplicates gate/status changes, and sends APNs alerts to matching watched devices when APNs credentials are configured. If `FLIGHTAWARE_ALERT_WEBHOOK_SECRET` is set, use a callback URL such as `https://your-domain.vercel.app/api/flightaware-alerts?secret=...`.
 
 Mobility support endpoints:

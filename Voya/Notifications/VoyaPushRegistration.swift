@@ -53,14 +53,18 @@ final class VoyaPushRegistrationService {
         userDefaults.set(token, forKey: deviceTokenKey)
     }
 
-    func registerFlightWatch(for item: ItineraryItem, candidate: FlightLookupCandidate? = nil) async {
+    func registerFlightWatch(
+        for item: ItineraryItem,
+        candidate: FlightLookupCandidate? = nil,
+        subscribeToAlerts: Bool = false
+    ) async -> FlightWatchRegistrationResponse? {
         guard item.kind == .flight,
               let flightNumber = candidate?.flightNumber ?? Self.firstFlightNumber(in: "\(item.title) \(item.location)") else {
-            return
+            return nil
         }
 
         let token = userDefaults.string(forKey: deviceTokenKey)
-        await send(
+        return await send(
             path: "api/flight-watch",
             payload: FlightWatchRegistrationPayload(
                 appInstallId: installID,
@@ -69,14 +73,15 @@ final class VoyaPushRegistrationService {
                 flightNumber: flightNumber,
                 date: item.startsAt.map { Self.flightDateFormatter.string(from: $0) },
                 originAirport: candidate?.originAirport ?? candidate?.originAirportIcao,
-                destinationAirport: candidate?.destinationAirport ?? candidate?.destinationAirportIcao
+                destinationAirport: candidate?.destinationAirport ?? candidate?.destinationAirportIcao,
+                subscribeToAlerts: subscribeToAlerts
             )
         )
     }
 
-    private func send<T: Encodable>(path: String, payload: T) async {
+    private func send<T: Encodable>(path: String, payload: T) async -> FlightWatchRegistrationResponse? {
         guard let baseURL else {
-            return
+            return nil
         }
 
         do {
@@ -85,11 +90,17 @@ final class VoyaPushRegistrationService {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.timeoutInterval = 15
             request.httpBody = try JSONEncoder().encode(payload)
-            _ = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode) else {
+                return nil
+            }
+            return try JSONDecoder().decode(FlightWatchRegistrationResponse.self, from: data)
         } catch {
             #if DEBUG
             print("[Voya] Push registration request failed: \(error.localizedDescription)")
             #endif
+            return nil
         }
     }
 
@@ -128,4 +139,26 @@ private struct FlightWatchRegistrationPayload: Encodable {
     var date: String?
     var originAirport: String?
     var destinationAirport: String?
+    var subscribeToAlerts: Bool
+}
+
+struct FlightWatchRegistrationResponse: Decodable {
+    var accepted: Bool
+    var stored: Bool
+    var flightKey: String?
+    var deviceLinked: Bool?
+    var alertWatch: FlightAlertWatchStatus?
+    var updatedAt: String?
+    var warning: String?
+}
+
+struct FlightAlertWatchStatus: Decodable {
+    var requested: Bool
+    var configured: Bool
+    var subscribed: Bool
+    var existing: Bool
+    var alertId: String?
+    var location: String?
+    var status: Int?
+    var error: String?
 }

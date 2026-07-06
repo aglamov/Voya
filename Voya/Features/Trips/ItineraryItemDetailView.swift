@@ -24,6 +24,9 @@ struct ItineraryItemDetailView: View {
     @State private var flightLookupResponse: FlightLookupResponse?
     @State private var isRefreshingFlightStatus = false
     @State private var flightStatusMessage: String?
+    @State private var flightAlertWatchStatus: FlightAlertWatchStatus?
+    @State private var isUpdatingFlightAlertWatch = false
+    @State private var flightAlertWatchMessage: String?
     let item: ItineraryItem
     let sourceDocument: SourceDocument?
     let onSave: (ItineraryItemDraft) -> Void
@@ -125,7 +128,7 @@ struct ItineraryItemDetailView: View {
         .task(id: item.id) {
             await loadEnrichment()
             if item.kind == .flight {
-                await VoyaPushRegistrationService.shared.registerFlightWatch(for: item)
+                await updateFlightAlertWatchState()
             }
         }
         .presentationDetents([.large])
@@ -441,6 +444,8 @@ struct ItineraryItemDetailView: View {
                     .foregroundStyle(flightStatusMessage == nil ? Color.voyaMuted : Color.voyaCoral)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            flightAlertWatchControl
         }
         .padding(16)
         .background(.white)
@@ -550,6 +555,75 @@ struct ItineraryItemDetailView: View {
             ?? String(localized: "Add a flight number to enable live lookup.")
     }
 
+    private var isFlightAlertSubscribed: Bool {
+        flightAlertWatchStatus?.subscribed == true
+    }
+
+    private var flightAlertWatchControl: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                Task {
+                    await subscribeToFlightAlerts()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    if isUpdatingFlightAlertWatch {
+                        ProgressView()
+                            .scaleEffect(0.78)
+                            .tint(Color.voyaTeal)
+                            .frame(width: 20, height: 20)
+                    } else {
+                        Image(systemName: isFlightAlertSubscribed ? "checkmark.circle.fill" : "bell.badge")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(isFlightAlertSubscribed ? Color.voyaTeal : Color.voyaInk)
+                            .frame(width: 20, height: 20)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(isFlightAlertSubscribed ? "Alerts subscribed" : "Subscribe to alerts")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.voyaInk)
+                        Text(flightAlertWatchDetail)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(12)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isUpdatingFlightAlertWatch || isFlightAlertSubscribed || flightLookupNumber == nil)
+            .opacity(flightLookupNumber == nil ? 0.55 : 1)
+
+            if let message = flightAlertWatchMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+                Text(message)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(isFlightAlertSubscribed ? Color.voyaTeal : Color.voyaCoral)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var flightAlertWatchDetail: String {
+        if let error = flightAlertWatchStatus?.error?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            return error
+        }
+
+        if isFlightAlertSubscribed {
+            return String(localized: "FlightAware will notify Voya about major flight changes.")
+        }
+
+        if flightAlertWatchStatus?.configured == false {
+            return String(localized: "FlightAware alerts are not configured on the backend yet.")
+        }
+
+        return String(localized: "Create a FlightAware alert rule for this flight.")
+    }
+
     private func openMaps() {
         guard let url = LocationLinkResolver.mapURL(for: draft.location) else {
             return
@@ -621,14 +695,46 @@ struct ItineraryItemDetailView: View {
                     draft = ItineraryItemDraft(item: item)
                     store.saveTrips()
                 }
-                await VoyaPushRegistrationService.shared.registerFlightWatch(for: item, candidate: candidate)
+                let watchResponse = await VoyaPushRegistrationService.shared.registerFlightWatch(for: item, candidate: candidate)
+                flightAlertWatchStatus = watchResponse?.alertWatch
                 flightStatusMessage = String(localized: "Flight status refreshed.")
             } else {
-                await VoyaPushRegistrationService.shared.registerFlightWatch(for: item)
+                let watchResponse = await VoyaPushRegistrationService.shared.registerFlightWatch(for: item)
+                flightAlertWatchStatus = watchResponse?.alertWatch
                 flightStatusMessage = response.warnings.first ?? response.validation.reasons.first ?? String(localized: "No matching live flight was found.")
             }
         } catch {
             flightStatusMessage = String(localized: "Flight lookup is unavailable right now.")
+        }
+    }
+
+    @MainActor
+    private func updateFlightAlertWatchState() async {
+        let response = await VoyaPushRegistrationService.shared.registerFlightWatch(for: item)
+        flightAlertWatchStatus = response?.alertWatch
+    }
+
+    @MainActor
+    private func subscribeToFlightAlerts() async {
+        guard !isUpdatingFlightAlertWatch else {
+            return
+        }
+
+        isUpdatingFlightAlertWatch = true
+        flightAlertWatchMessage = nil
+        defer { isUpdatingFlightAlertWatch = false }
+
+        let response = await VoyaPushRegistrationService.shared.registerFlightWatch(
+            for: item,
+            candidate: flightLookupResponse?.candidate,
+            subscribeToAlerts: true
+        )
+        flightAlertWatchStatus = response?.alertWatch
+
+        if response?.alertWatch?.subscribed == true {
+            flightAlertWatchMessage = String(localized: "Flight alerts are enabled for this flight.")
+        } else {
+            flightAlertWatchMessage = response?.alertWatch?.error ?? String(localized: "Could not enable FlightAware alerts for this flight.")
         }
     }
 }
