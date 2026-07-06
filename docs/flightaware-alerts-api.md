@@ -4,6 +4,114 @@ Source: `https://www.flightaware.com/aeroapi/portal/documentation#post-/alerts`
 
 Captured from pasted FlightAware documentation on 2026-07-06 for implementation reference.
 
+Full pasted AeroAPI reference is stored at [flightaware-aeroapi-full-paste.txt](/Users/aglamov/Projects/Tripit/docs/flightaware-aeroapi-full-paste.txt:1).
+
+## Alerts Overview
+
+AeroAPI alerting can configure and receive real-time alerts on key flight events. Alerts are selective: each alert can choose specific events and filters.
+
+Setup order:
+
+1. Call `PUT /alerts/endpoint` to set the account-wide default callback URL.
+2. Call `POST /alerts` to create alert rules.
+3. Use `GET /alerts` to list configured alerts and obtain IDs.
+4. Use `GET`, `PUT`, or `DELETE /alerts/{id}` to inspect, update, or remove a specific alert.
+
+Callback routing:
+
+- If an alert has `target_url`, that specific alert is delivered to `target_url`.
+- Otherwise, it is delivered to the account-wide URL configured via `PUT /alerts/endpoint`.
+
+Bundled events:
+
+- `departure` bundles actual off-ground departure plus filed flight-plan alert and up to five per-departure changes, including significant departure delays over 30 minutes, gate changes, and airport delays.
+- `arrival` bundles actual on-ground arrival plus up to five en-route changes, including delays over 30 minutes and excluding diversions.
+- Setting overlapping bundled and unbundled events for on/off may still produce only one alert where the events overlap.
+
+Operational notes:
+
+- Each delivered callback is charged as a query against the AeroAPI key that created the alert.
+- If the creating API key is disabled or removed, the alert is no longer available.
+- Updating an existing alert is preferred over creating duplicates.
+- More than 50 exact duplicate alert configurations returns `400`.
+
+## Get All Configured Alerts
+
+`GET /alerts`
+
+Returns all configured alerts for the FlightAware account, including alerts configured through other FlightAware surfaces owned by the AeroAPI account.
+
+Authentication: API Key (`x-apikey`)
+
+Query parameters:
+
+- `max_pages` integer, default `0`, minimum `0`: maximum pages to fetch. `0` means no maximum is set. Set if the call is timing out due to many alerts.
+- `cursor` string: opaque pagination cursor.
+
+Responses:
+
+- `200` List of all alerts
+
+Example response:
+
+```json
+{
+  "links": {
+    "next": ""
+  },
+  "num_pages": 1,
+  "alerts": [
+    {
+      "id": 0,
+      "description": "string",
+      "ident": "string",
+      "ident_icao": "string",
+      "ident_iata": "string",
+      "origin": "string",
+      "origin_icao": "string",
+      "origin_iata": "string",
+      "origin_lid": "string",
+      "destination": "string",
+      "destination_icao": "string",
+      "destination_iata": "string",
+      "destination_lid": "string",
+      "aircraft_type": "string",
+      "created": "2021-12-31T19:59:59Z",
+      "changed": "2021-12-31T19:59:59Z",
+      "start": "1970-01-01",
+      "end": "1970-01-01",
+      "user_ident": "string",
+      "eta": 0,
+      "impending_arrival": [
+        5,
+        10,
+        15
+      ],
+      "impending_departure": [
+        5,
+        10,
+        15
+      ],
+      "events": {
+        "arrival": false,
+        "cancelled": false,
+        "departure": false,
+        "diverted": false,
+        "filed": false,
+        "out": false,
+        "off": false,
+        "on": false,
+        "in": false,
+        "hold_start": false,
+        "hold_end": false
+      },
+      "target_url": "string",
+      "enabled": false
+    }
+  ]
+}
+```
+
 ## Create New Alert
 
 `POST /alerts`
@@ -219,3 +327,4 @@ Responses:
 - A specific alert can override the account-wide callback via `target_url`.
 - Alert callbacks are billable queries against the AeroAPI key that created the alert.
 - Duplicate alert configurations are limited: more than 50 exact duplicates returns `400`.
+- Gate changes can arrive through bundled `departure` event deliveries, not as a separate `gate_change` event in the documented alert configuration schema.
