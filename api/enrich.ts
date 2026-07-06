@@ -127,6 +127,8 @@ const travelBriefSchema = z.object({
   imageURLs: z.array(z.string().url()).max(4)
 });
 
+type TravelBriefGenerated = z.infer<typeof travelBriefSchema>;
+
 const locationModelName = () => openAIModelFor("location");
 const briefModelName = () => openAIModelFor("brief");
 
@@ -1027,13 +1029,13 @@ function markdownFromSections(summary: string, sections: TravelBriefSection[], a
   return ["## Travel brief", summary, sectionLines, routeLines, actionLines].filter(Boolean).join("\n\n");
 }
 
-async function aiBrief(kind: string, title: string, location: string, status: string, cards: EnrichmentCard[], warnings: string[], languageInstruction: string, locale: string) {
+async function aiBrief(kind: string, title: string, location: string, status: string, cards: EnrichmentCard[], warnings: string[], languageInstruction: string, locale: string): Promise<TravelBriefGenerated | undefined> {
   if (!process.env.OPENAI_API_KEY) {
     return undefined;
   }
 
   try {
-    const { object } = await generateObject({
+    const { object }: { object: TravelBriefGenerated } = await generateObject({
       model: openai(briefModelName()),
       schema: travelBriefSchema,
       schemaName: "TravelAssistantBrief",
