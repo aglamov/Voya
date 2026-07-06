@@ -1252,6 +1252,27 @@ function connectionCards(attempts: FlightAttempt[], isRussian = false) {
   } satisfies EnrichmentCard];
 }
 
+function planeContextCard(response: FlightAttempt["response"], isRussian = false): EnrichmentCard {
+  const plane = response.plane;
+  const position = plane.position;
+  const positionText = position
+    ? `${position.lat.toFixed(2)}, ${position.lon.toFixed(2)}`
+    : undefined;
+  const sourceTime = compactTime(plane.sourceUpdatedAt);
+  const detailParts = [
+    plane.detail,
+    positionText ? (isRussian ? `Позиция ${positionText}` : `Position ${positionText}`) : undefined,
+    sourceTime ? (isRussian ? `Обновлено ${sourceTime}` : `Updated ${sourceTime}`) : undefined
+  ].filter(Boolean);
+
+  return {
+    title: isRussian ? "Где самолет" : "Aircraft location",
+    value: plane.headline,
+    detail: detailParts.join(" · ") || undefined,
+    kind: "flight"
+  };
+}
+
 async function flightCards(title: string, location: string, startsAt?: string | number | null, isRussian = false): Promise<EnrichmentCard[]> {
   const flightNumbers = allFlightNumbers(`${title} ${location}`);
   if (flightNumbers.length === 0) {
@@ -1375,7 +1396,7 @@ async function flightCards(title: string, location: string, startsAt?: string | 
     value: response.alerting.supported ? (isRussian ? "Готово" : "Ready") : (isRussian ? "Недоступно" : "Unavailable"),
     detail: response.alerting.supported ? (isRussian ? "Оповещения FlightAware могут передавать обновления по выходу, задержке, отмене, диверсии, вылету и прибытию." : "FlightAware alerts can feed gate, delay, cancellation, diversion, departure, and arrival updates.") : undefined,
     kind: "flight"
-  }, {
+  }, planeContextCard(response, isRussian), {
     title: isRussian ? "Самолет" : "Aircraft",
     value: aircraftParts.length ? aircraftParts.join(" · ") : (isRussian ? "Недоступно" : "Not available"),
     detail: snapshot.position?.updatedAt ? (isRussian ? `Живая позиция обновлена ${compactTime(snapshot.position.updatedAt)}` : `Live position updated ${compactTime(snapshot.position.updatedAt)}`) : snapshot.airlineCode,

@@ -56,6 +56,10 @@ struct ItemCompanionCard: View {
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                if let aircraftLocationCard {
+                    AircraftLocationSummary(card: aircraftLocationCard, tint: item.kind.timelineAccent)
+                }
             }
             .padding(18)
 
@@ -260,6 +264,24 @@ struct ItemCompanionCard: View {
         return defaultOperationalNote
     }
 
+    private var aircraftLocationCard: ItemEnrichmentCard? {
+        guard item.kind == .flight else {
+            return nil
+        }
+
+        return enrichment?.cards.first { card in
+            let title = card.title.lowercased()
+            let value = card.value.lowercased()
+            return card.kind == "flight"
+                && (
+                    title.contains("aircraft location")
+                    || value.contains("assigned aircraft")
+                    || value.contains("airborne")
+                    || value.contains("inbound")
+                )
+        }
+    }
+
     private var defaultOperationalNote: String {
         switch item.kind {
         case .flight:
@@ -430,6 +452,48 @@ struct MomentMetric: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+}
+
+struct AircraftLocationSummary: View {
+    let card: ItemEnrichmentCard
+    let tint: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "airplane.departure")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 34, height: 34)
+                .background(tint.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(card.title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaMuted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+
+                Text(card.value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.voyaInk)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let detail = card.detail?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+                    Text(detail)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

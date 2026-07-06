@@ -80,6 +80,46 @@ export type FlightSnapshot = {
   fetchedAt: string;
 };
 
+export type FlightPosition = NonNullable<FlightSnapshot["position"]>;
+
+export type FlightPlaneSegment = {
+  flightNumber?: string;
+  originAirport?: string;
+  destinationAirport?: string;
+  status: FlightSnapshotStatus;
+  providerStatus?: string;
+  scheduledDepartureAt?: string;
+  estimatedDepartureAt?: string;
+  actualDepartureAt?: string;
+  scheduledArrivalAt?: string;
+  estimatedArrivalAt?: string;
+  actualArrivalAt?: string;
+  progressPercent?: number;
+  position?: FlightPosition;
+};
+
+export type FlightPlaneContext = {
+  state:
+    | "not_assigned"
+    | "assigned"
+    | "current_airborne"
+    | "current_arrived"
+    | "inbound_airborne"
+    | "inbound_arrived"
+    | "inbound_scheduled"
+    | "unknown";
+  headline: string;
+  detail: string;
+  aircraftType?: string;
+  aircraftRegistration?: string;
+  currentFlight?: FlightPlaneSegment;
+  inboundFlight?: FlightPlaneSegment;
+  position?: FlightPosition;
+  progressPercent?: number;
+  sourceUpdatedAt?: string;
+  confidence: number;
+};
+
 export type FlightAirportWeather = {
   airport?: string;
   observedAt?: string;
@@ -154,8 +194,9 @@ export type FlightStatusResponse = {
   aircraft: {
     type?: string;
     registration?: string;
-    position?: FlightSnapshot["position"];
+    position?: FlightPosition;
   };
+  plane: FlightPlaneContext;
   intelligence: {
     mode: "published_schedule" | "live_operations" | "not_available";
     scheduleAvailableUntil?: string;
@@ -767,6 +808,32 @@ async function flightAwareFlights(ident: string, window: { start: string; end: s
   return flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
 }
 
+async function flightAwareFlightById(flightId: string) {
+  const url = new URL(`/aeroapi/flights/${encodeURIComponent(flightId)}`, "https://aeroapi.flightaware.com");
+  url.searchParams.set("ident_type", "fa_flight_id");
+
+  return flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
+}
+
+async function flightAwareSnapshotById(flightId?: string) {
+  if (!flightId) {
+    return undefined;
+  }
+
+  const result = await flightAwareFlightById(flightId);
+  if (!result.connected || !result.ok) {
+    return undefined;
+  }
+
+  const data = result.data as FlightAwareFlightsResponse;
+  const flight = data.flights?.[0];
+  if (!flight) {
+    return undefined;
+  }
+
+  return normalizeFlightAwareFlight(flight, flight.ident_iata ?? flight.ident_icao ?? flight.ident ?? "inbound");
+}
+
 async function flightAwareHistoricalFlights(ident: string, window: { start: string; end: string }) {
   const url = new URL(`/aeroapi/history/flights/${encodeURIComponent(ident)}`, "https://aeroapi.flightaware.com");
   url.searchParams.set("ident_type", "designator");
@@ -1160,6 +1227,208 @@ async function fetchTrack(snapshot: FlightSnapshot) {
   };
 }
 
+function primaryDeparture(snapshot?: FlightSnapshot) {
+  return snapshot?.actualDepartureAt
+    ?? snapshot?.estimatedDepartureAt
+    ?? snapshot?.scheduledDepartureAt;
+}
+
+function primaryArrival(snapshot?: FlightSnapshot) {
+  return snapshot?.actualArrivalAt
+    ?? snapshot?.estimatedArrivalAt
+    ?? snapshot?.scheduledArrivalAt;
+}
+
+function segmentFromSnapshot(snapshot: FlightSnapshot): FlightPlaneSegment {
+  return {
+    flightNumber: snapshot.flightIata ?? snapshot.flightNumber,
+    originAirport: snapshot.originAirport,
+    destinationAirport: snapshot.destinationAirport,
+    status: snapshot.status,
+    providerStatus: snapshot.providerStatus,
+    scheduledDepartureAt: snapshot.scheduledDepartureAt,
+    estimatedDepartureAt: snapshot.estimatedDepartureAt,
+    actualDepartureAt: snapshot.actualDepartureAt,
+    scheduledArrivalAt: snapshot.scheduledArrivalAt,
+    estimatedArrivalAt: snapshot.estimatedArrivalAt,
+    actualArrivalAt: snapshot.actualArrivalAt,
+    progressPercent: snapshot.progressPercent,
+    position: snapshot.position
+  };
+}
+
+function routeLabel(segment?: FlightPlaneSegment) {
+  return [segment?.originAirport, segment?.destinationAirport].filter(Boolean).join(" to ");
+}
+
+function formatPercent(value?: number) {
+  return value == null ? undefined : `${Math.round(value)}%`;
+}
+
+function compactTimeLabel(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+
+  return date.toISOString().slice(11, 16);
+}
+
+function buildPlaneContext(snapshot?: FlightSnapshot, inboundSnapshot?: FlightSnapshot): FlightPlaneContext {
+  if (!snapshot) {
+    return {
+      state: "unknown",
+      headline: "Aircraft status unavailable",
+      detail: "Validate the flight first to check aircraft assignment and live position.",
+      confidence: 0
+    };
+  }
+
+  const currentFlight = segmentFromSnapshot(snapshot);
+  const inboundFlight = inboundSnapshot ? segmentFromSnapshot(inboundSnapshot) : undefined;
+  const aircraftType = snapshot.aircraftType ?? inboundSnapshot?.aircraftType;
+  const aircraftRegistration = snapshot.aircraftRegistration ?? inboundSnapshot?.aircraftRegistration;
+  const position = snapshot.position ?? inboundSnapshot?.position;
+  const progressPercent = snapshot.status === "departed"
+    ? snapshot.progressPercent
+    : inboundSnapshot?.progressPercent;
+  const sourceUpdatedAt = position?.updatedAt
+    ?? snapshot.sourceUpdatedAt
+    ?? inboundSnapshot?.sourceUpdatedAt
+    ?? snapshot.fetchedAt;
+
+  if (snapshot.status === "departed") {
+    const progress = formatPercent(snapshot.progressPercent);
+    const route = routeLabel(currentFlight);
+    const arrivalTime = compactTimeLabel(primaryArrival(snapshot));
+    return {
+      state: "current_airborne",
+      headline: progress ? `This flight is airborne, ${progress} complete` : "This flight is airborne",
+      detail: [
+        route || undefined,
+        snapshot.position ? "Live aircraft position is available." : "FlightAware has marked the flight departed; live position is not available yet.",
+        arrivalTime ? `Expected arrival around ${arrivalTime}.` : undefined
+      ].filter(Boolean).join(" "),
+      aircraftType,
+      aircraftRegistration,
+      currentFlight,
+      position,
+      progressPercent,
+      sourceUpdatedAt,
+      confidence: snapshot.position ? 0.94 : 0.82
+    };
+  }
+
+  if (snapshot.status === "arrived") {
+    const arrivalTime = compactTimeLabel(snapshot.actualArrivalAt ?? snapshot.estimatedArrivalAt);
+    return {
+      state: "current_arrived",
+      headline: "This flight has arrived",
+      detail: [
+        arrivalTime ? `Arrived around ${arrivalTime}.` : undefined,
+        routeLabel(currentFlight) || undefined
+      ].filter(Boolean).join(" ") || "FlightAware has marked this flight arrived.",
+      aircraftType,
+      aircraftRegistration,
+      currentFlight,
+      position: snapshot.position,
+      progressPercent: snapshot.progressPercent,
+      sourceUpdatedAt,
+      confidence: 0.9
+    };
+  }
+
+  if (inboundSnapshot) {
+    const inboundRoute = routeLabel(inboundFlight);
+    const arrivalTime = compactTimeLabel(primaryArrival(inboundSnapshot));
+    const isInboundAirborne = inboundSnapshot.status === "departed";
+    const isInboundArrived = inboundSnapshot.status === "arrived";
+
+    if (isInboundAirborne) {
+      return {
+        state: "inbound_airborne",
+        headline: "Assigned aircraft is still inbound",
+        detail: [
+          inboundRoute ? `It is flying ${inboundRoute}.` : "It is flying the previous segment.",
+          arrivalTime ? `Expected at ${arrivalTime} before your departure.` : undefined
+        ].filter(Boolean).join(" "),
+        aircraftType,
+        aircraftRegistration,
+        currentFlight,
+        inboundFlight,
+        position,
+        progressPercent,
+        sourceUpdatedAt,
+        confidence: inboundSnapshot.position ? 0.92 : 0.82
+      };
+    }
+
+    if (isInboundArrived) {
+      return {
+        state: "inbound_arrived",
+        headline: "Assigned aircraft has arrived",
+        detail: [
+          inboundRoute ? `Previous segment ${inboundRoute} is complete.` : "The previous segment is complete.",
+          arrivalTime ? `Arrived around ${arrivalTime}.` : undefined
+        ].filter(Boolean).join(" "),
+        aircraftType,
+        aircraftRegistration,
+        currentFlight,
+        inboundFlight,
+        position,
+        progressPercent,
+        sourceUpdatedAt,
+        confidence: 0.88
+      };
+    }
+
+    return {
+      state: "inbound_scheduled",
+      headline: "Assigned aircraft has an inbound segment",
+      detail: [
+        inboundRoute ? `Inbound segment ${inboundRoute}.` : "Inbound segment is known.",
+        arrivalTime ? `Scheduled around ${arrivalTime}.` : undefined
+      ].filter(Boolean).join(" "),
+      aircraftType,
+      aircraftRegistration,
+      currentFlight,
+      inboundFlight,
+      position,
+      progressPercent,
+      sourceUpdatedAt,
+      confidence: 0.76
+    };
+  }
+
+  if (aircraftRegistration || (snapshot.dataMode !== "published_schedule" && aircraftType)) {
+    return {
+      state: "assigned",
+      headline: "Aircraft is assigned",
+      detail: [aircraftRegistration, aircraftType, "No inbound aircraft position is available yet."].filter(Boolean).join(" · "),
+      aircraftType,
+      aircraftRegistration,
+      currentFlight,
+      position,
+      progressPercent,
+      sourceUpdatedAt,
+      confidence: 0.72
+    };
+  }
+
+  return {
+    state: "not_assigned",
+    headline: "Aircraft not assigned yet",
+    detail: "Aircraft assignment and inbound tracking usually appear closer to departure.",
+    currentFlight,
+    sourceUpdatedAt,
+    confidence: snapshot.dataMode === "published_schedule" ? 0.42 : 0.58
+  };
+}
+
 function gateGuidance(snapshot?: FlightSnapshot) {
   if (!snapshot) {
     return ["Validate the flight first, then refresh gate and terminal guidance closer to departure."];
@@ -1365,14 +1634,19 @@ export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatu
   }
 
   snapshot.position = await fetchTrack(snapshot);
+  const inboundSnapshot = await flightAwareSnapshotById(snapshot.inboundProviderFlightId);
+  if (inboundSnapshot) {
+    inboundSnapshot.position = await fetchTrack(inboundSnapshot);
+  }
 
-  return flightStatusSuccess(normalizedLookup, snapshot);
+  return flightStatusSuccess(normalizedLookup, snapshot, [], inboundSnapshot);
 }
 
 function flightStatusSuccess(
   normalizedLookup: FlightLookup,
   snapshot: FlightSnapshot,
-  warnings: string[] = []
+  warnings: string[] = [],
+  inboundSnapshot?: FlightSnapshot
 ): Promise<FlightStatusResponse> {
   return fetchFlightIntelligence(normalizedLookup, snapshot).then((intelligence) => ({
     query: normalizedLookup,
@@ -1413,6 +1687,7 @@ function flightStatusSuccess(
       registration: snapshot.aircraftRegistration,
       position: snapshot.position
     },
+    plane: buildPlaneContext(snapshot, inboundSnapshot),
     intelligence,
     schedule: {
       scheduledDepartureAt: snapshot.scheduledDepartureAt,
@@ -1460,6 +1735,7 @@ function flightStatusError(
       guidance: gateGuidance()
     },
     aircraft: {},
+    plane: buildPlaneContext(),
     intelligence: emptyIntelligence(lookup),
     schedule: {},
     alerting: alerting(process.env.VOYA_API_PUBLIC_BASE_URL),

@@ -445,6 +445,9 @@ struct AssistantIntelligenceBuilder {
                 }
 
                 alerts.append(flightAlert(for: item, candidate: candidate))
+                if let plane = response.plane {
+                    alerts.append(flightPlaneAlert(for: item, candidate: candidate, plane: plane))
+                }
             } catch {
                 alerts.append(
                     TravelAlert(
@@ -501,6 +504,36 @@ struct AssistantIntelligenceBuilder {
             sourceDetail: candidate.confidence.map {
                 String(localized: "\(Int($0 * 100))% provider match confidence.")
             } ?? String(localized: "Live flight candidate returned by provider.")
+        )
+    }
+
+    private func flightPlaneAlert(for item: ItineraryItem, candidate: FlightLookupCandidate, plane: FlightPlaneContext) -> TravelAlert {
+        let severity: AlertSeverity
+        switch plane.state {
+        case "current_airborne", "inbound_airborne", "inbound_scheduled":
+            severity = .watch
+        case "unknown":
+            severity = .watch
+        default:
+            severity = .calm
+        }
+
+        let aircraft = [
+            plane.aircraftRegistration?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            plane.aircraftType?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        ].compactMap { $0 }.joined(separator: " · ")
+
+        let message = [plane.detail, aircraft.nilIfEmpty]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+            .joined(separator: " · ")
+
+        return TravelAlert(
+            id: "flight-plane-\(item.id.uuidString)",
+            title: String(localized: "\(candidate.flightNumber): \(plane.headline)"),
+            message: message.isEmpty ? String(localized: "Aircraft assignment and live position will appear closer to departure.") : message,
+            severity: severity,
+            sourceTitle: String(localized: "Flight lookup"),
+            sourceDetail: String(localized: "\(Int(plane.confidence * 100))% aircraft context confidence.")
         )
     }
 

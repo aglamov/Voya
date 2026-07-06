@@ -20,8 +20,12 @@ struct FlightLookupCandidate: Decodable {
     var arrivalGate: String?
     var baggageClaim: String?
     var aircraftType: String?
+    var aircraftRegistration: String?
     var providerStatus: String?
     var dataMode: String?
+    var progressPercent: Double?
+    var position: FlightPosition?
+    var inboundProviderFlightId: String?
     var confidence: Double?
 
     var parsedDepartureAt: Date? {
@@ -68,6 +72,45 @@ struct FlightLookupCandidate: Decodable {
     }
 }
 
+struct FlightPosition: Decodable {
+    var lat: Double
+    var lon: Double
+    var altitudeFeet: Double?
+    var groundspeedKnots: Double?
+    var headingDegrees: Double?
+    var updatedAt: String?
+}
+
+struct FlightPlaneSegment: Decodable {
+    var flightNumber: String?
+    var originAirport: String?
+    var destinationAirport: String?
+    var status: String
+    var providerStatus: String?
+    var scheduledDepartureAt: String?
+    var estimatedDepartureAt: String?
+    var actualDepartureAt: String?
+    var scheduledArrivalAt: String?
+    var estimatedArrivalAt: String?
+    var actualArrivalAt: String?
+    var progressPercent: Double?
+    var position: FlightPosition?
+}
+
+struct FlightPlaneContext: Decodable {
+    var state: String
+    var headline: String
+    var detail: String
+    var aircraftType: String?
+    var aircraftRegistration: String?
+    var currentFlight: FlightPlaneSegment?
+    var inboundFlight: FlightPlaneSegment?
+    var position: FlightPosition?
+    var progressPercent: Double?
+    var sourceUpdatedAt: String?
+    var confidence: Double
+}
+
 struct FlightLookupResponse: Decodable {
     struct Validation: Decodable {
         var state: String
@@ -77,6 +120,7 @@ struct FlightLookupResponse: Decodable {
 
     var validation: Validation
     var candidate: FlightLookupCandidate?
+    var plane: FlightPlaneContext?
     var delayStats: FlightDelayStats?
     var reliability: FlightReliabilityStats?
     var gate: FlightGateStatus?

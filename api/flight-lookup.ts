@@ -82,10 +82,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         arrivalGate: snapshot.arrivalGate,
         baggageClaim: snapshot.baggageClaim,
         aircraftType: snapshot.aircraftType,
+        aircraftRegistration: snapshot.aircraftRegistration,
         providerStatus: snapshot.providerStatus,
         dataMode: snapshot.dataMode,
+        progressPercent: snapshot.progressPercent,
+        position: snapshot.position,
+        inboundProviderFlightId: snapshot.inboundProviderFlightId,
         confidence: status.validation.confidence
       } : undefined,
+      plane: status.plane,
       delayStats: status.delayStats,
       reliability: status.intelligence.history ? {
         sampleSize: status.intelligence.history.sampleSize,
