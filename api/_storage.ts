@@ -1,11 +1,19 @@
 type RedisValue = string | number;
 
 function redisURL() {
-  return process.env.UPSTASH_REDIS_REST_URL?.trim().replace(/\/$/, "");
+  return (
+    process.env.UPSTASH_REDIS_REST_URL
+      ?? process.env.UPSTASH_KV_REST_API_URL
+      ?? process.env.UPSTASH_REDIS_REST_API_URL
+  )?.trim().replace(/\/$/, "");
 }
 
 function redisToken() {
-  return process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  return (
+    process.env.UPSTASH_REDIS_REST_TOKEN
+      ?? process.env.UPSTASH_KV_REST_API_TOKEN
+      ?? process.env.UPSTASH_REDIS_REST_API_TOKEN
+  )?.trim();
 }
 
 export function storageConfigured() {
