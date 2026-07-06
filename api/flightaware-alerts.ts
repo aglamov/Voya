@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { timingSafeEqual } from "node:crypto";
 import { sendAPNsAlert } from "./_apns.js";
 import {
   fallbackPushTokens,
@@ -34,6 +35,41 @@ type FlightAwareAlertPayload = {
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : undefined;
+}
+
+function configuredWebhookSecret() {
+  return process.env.FLIGHTAWARE_ALERT_WEBHOOK_SECRET?.trim();
+}
+
+function firstHeader(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function requestWebhookSecret(req: VercelRequest) {
+  const querySecret = typeof req.query.secret === "string" ? req.query.secret.trim() : undefined;
+  const headerSecret = firstHeader(req.headers["x-voya-webhook-secret"])?.trim();
+  const authorization = firstHeader(req.headers.authorization)?.trim();
+  const bearerSecret = authorization?.toLowerCase().startsWith("bearer ")
+    ? authorization.slice("bearer ".length).trim()
+    : undefined;
+
+  return querySecret || headerSecret || bearerSecret;
+}
+
+function secretsMatch(actual: string | undefined, expected: string) {
+  if (!actual) {
+    return false;
+  }
+
+  const encoder = new TextEncoder();
+  const actualBuffer = encoder.encode(actual);
+  const expectedBuffer = encoder.encode(expected);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function authorizeWebhook(req: VercelRequest) {
+  const expected = configuredWebhookSecret();
+  return !expected || secretsMatch(requestWebhookSecret(req), expected);
 }
 
 function eventType(payload: FlightAwareAlertPayload) {
@@ -189,6 +225,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  if (!authorizeWebhook(req)) {
+    return res.status(401).json({ error: "Unauthorized FlightAware alert callback." });
   }
 
   const payload = req.body as FlightAwareAlertPayload;
