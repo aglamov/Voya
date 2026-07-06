@@ -111,6 +111,14 @@ struct TripsView: View {
                         .buttonStyle(.plain)
                     }
 
+                    if hiddenTransferCount(for: trip, itinerary: itinerary) > 0 {
+                        RestoreHiddenTransfersCard(
+                            count: hiddenTransferCount(for: trip, itinerary: itinerary)
+                        ) {
+                            restoreHiddenTransfers(for: trip, itinerary: itinerary)
+                        }
+                    }
+
                     VStack(spacing: 0) {
                         ForEach(Array(itinerary.enumerated()), id: \.element.id) { index, item in
                             if index == 0 {
@@ -446,4 +454,93 @@ struct TripsView: View {
         mobilityPlanErrors[context.id] = nil
     }
 
+    private func transferContexts(for trip: Trip, itinerary: [ItineraryItem]) -> [MobilityTransferContext] {
+        guard !itinerary.isEmpty else {
+            return []
+        }
+
+        var contexts: [MobilityTransferContext] = []
+
+        if let firstItem = itinerary.first,
+           let context = VercelMobilityService.startTransferContext(
+            for: trip,
+            firstItem: firstItem,
+            defaultHomeAddress: homeLocationAddress,
+            defaultHomeName: homeLocationName
+           ) {
+            contexts.append(context)
+        }
+
+        for index in itinerary.indices.dropLast() {
+            if let context = VercelMobilityService.transferContext(from: itinerary[index], to: itinerary[index + 1]) {
+                contexts.append(context)
+            }
+        }
+
+        if let lastItem = itinerary.last,
+           let context = VercelMobilityService.endTransferContext(
+            for: trip,
+            lastItem: lastItem,
+            defaultHomeAddress: homeLocationAddress,
+            defaultHomeName: homeLocationName
+           ) {
+            contexts.append(context)
+        }
+
+        return contexts
+    }
+
+    private func hiddenTransferCount(for trip: Trip, itinerary: [ItineraryItem]) -> Int {
+        transferContexts(for: trip, itinerary: itinerary)
+            .filter { hiddenTransferIDs.contains($0.id) }
+            .count
+    }
+
+    private func restoreHiddenTransfers(for trip: Trip, itinerary: [ItineraryItem]) {
+        let restorableIDs = Set(transferContexts(for: trip, itinerary: itinerary).map(\.id))
+        let remainingIDs = hiddenTransferIDs.subtracting(restorableIDs)
+        hiddenTransferIDsRaw = remainingIDs.sorted().joined(separator: "\n")
+    }
+
+}
+
+struct RestoreHiddenTransfersCard: View {
+    let count: Int
+    let onRestore: () -> Void
+
+    var body: some View {
+        Button(action: onRestore) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.voyaTeal)
+                    .frame(width: 34, height: 34)
+                    .background(Color.voyaTeal.opacity(0.10))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Hidden transfers")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                    Text(count == 1 ? "Restore hidden transfer" : "Restore \(count) hidden transfers")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaMuted)
+            }
+            .padding(14)
+            .background(Color.voyaTeal.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.voyaTeal.opacity(0.16), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
 }

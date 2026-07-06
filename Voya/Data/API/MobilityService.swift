@@ -306,23 +306,78 @@ struct VercelMobilityService {
 
     private static func airportDeparturesAddress(_ value: String) -> String {
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.localizedCaseInsensitiveContains("departure") else {
-            return normalized
-        }
-        return airportPointAddress(normalized, point: "Departures")
+        return airportPointAddress(normalized, point: "Departures", markers: airportDepartureMarkers)
     }
 
     private static func airportArrivalsAddress(_ value: String) -> String {
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.localizedCaseInsensitiveContains("arrival") else {
-            return normalized
-        }
-        return airportPointAddress(normalized, point: "Arrivals")
+        return airportPointAddress(normalized, point: "Arrivals", markers: airportArrivalMarkers)
     }
 
-    private static func airportPointAddress(_ value: String, point: String) -> String {
-        let airportName = value.localizedCaseInsensitiveContains("airport") ? value : "\(value) Airport"
+    private static func airportPointAddress(_ value: String, point: String, markers: [String]) -> String {
+        let airport = airportPointBase(value, markers: markers)
+        let airportName = isAirportLike(airport) ? airport : "\(airport) Airport"
         return "\(airportName) \(point)"
+    }
+
+    private static let airportDepartureMarkers = [
+        "departure", "departures", "departing", "depart", "departe",
+        "вылет", "вылеты", "отправление", "отправления"
+    ]
+
+    private static let airportArrivalMarkers = [
+        "arrival", "arrivals", "arriving", "arrive",
+        "прилет", "прилёт", "прилеты", "прилёты", "прибытие", "прибытия"
+    ]
+
+    private static let airportPointSeparators = CharacterSet.whitespacesAndNewlines
+        .union(CharacterSet(charactersIn: ",.-–—/()"))
+
+    private static func airportPointBase(_ value: String, markers: [String]) -> String {
+        var words = value.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        while let first = words.first, isAirportPointMarkerToken(first, markers: markers) {
+            words.removeFirst()
+        }
+        while let last = words.last, isAirportPointMarkerToken(last, markers: markers) {
+            words.removeLast()
+        }
+
+        let base = words
+            .joined(separator: " ")
+            .trimmingCharacters(in: airportPointSeparators)
+
+        return base.isEmpty ? value : base
+    }
+
+    private static func isAirportPointMarkerToken(_ value: String, markers: [String]) -> Bool {
+        let normalized = value
+            .trimmingCharacters(in: airportPointSeparators)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+
+        return markers.contains { marker in
+            marker
+                .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                .lowercased() == normalized
+        }
+    }
+
+    private static func isAirportLike(_ value: String) -> Bool {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            return false
+        }
+
+        if normalized.localizedCaseInsensitiveContains("airport")
+            || normalized.localizedCaseInsensitiveContains("аэропорт") {
+            return true
+        }
+
+        if normalized.range(of: #"^[A-Z]{3}\s+(?:terminal|терминал)\b"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            return true
+        }
+
+        return false
     }
 
     private static func airportBufferMinutes(for item: ItineraryItem) -> Int {

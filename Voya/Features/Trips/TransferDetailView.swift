@@ -21,6 +21,7 @@ struct TransferDetailView: View {
     @State private var displayOrigin = ""
     @State private var displayDestination = ""
     @State private var draftBufferMinutes: Int?
+    @State private var isShowingDeleteConfirmation = false
 
     var body: some View {
         ZStack {
@@ -67,6 +68,15 @@ struct TransferDetailView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .alert("Delete transfer?", isPresented: $isShowingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                onDelete()
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This hides the transfer recommendation from the timeline. You can restore hidden transfers from the trip timeline.")
+        }
         .task(id: context.id) {
             displayOrigin = LocationDisplayResolver.immediateDisplayName(for: context.origin)
             displayDestination = LocationDisplayResolver.immediateDisplayName(for: context.destination)
@@ -110,9 +120,8 @@ struct TransferDetailView: View {
                 .buttonStyle(.plain)
                 .disabled(isLoading)
 
-                Button(role: .destructive) {
-                    onDelete()
-                    dismiss()
+                Button {
+                    isShowingDeleteConfirmation = true
                 } label: {
                     Image(systemName: "trash")
                         .font(.headline.weight(.bold))
