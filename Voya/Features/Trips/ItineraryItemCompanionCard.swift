@@ -473,7 +473,7 @@ struct MomentLocationRow: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!hasLocation)
-                .accessibilityLabel(isCopied ? "Copied" : "Copy location")
+                .accessibilityLabel(Text(isCopied ? String(localized: "Copied") : String(localized: "Copy location")))
             }
         }
         .padding(14)

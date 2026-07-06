@@ -609,22 +609,22 @@ async function geocode(locationLookup: string | LocationLookup) {
   return { error: "not_found" } satisfies GeocodeResult;
 }
 
-async function weatherCard(location: string | LocationLookup | undefined): Promise<EnrichmentCard> {
+async function weatherCard(location: string | LocationLookup | undefined, isRussian = false): Promise<EnrichmentCard> {
   const apiKey = process.env.OPENWEATHER_API_KEY;
   if (!apiKey) {
     return {
-      title: "Weather",
-      value: "Not connected",
-      detail: "Set OPENWEATHER_API_KEY on Vercel to show live weather.",
+      title: isRussian ? "Погода" : "Weather",
+      value: isRussian ? "Не подключено" : "Not connected",
+      detail: isRussian ? "Добавьте OPENWEATHER_API_KEY в Vercel, чтобы показывать живую погоду." : "Set OPENWEATHER_API_KEY on Vercel to show live weather.",
       kind: "weather"
     };
   }
 
   if (!location) {
     return {
-      title: "Weather",
-      value: "Location needed",
-      detail: "Add a clearer city, airport, hotel, venue address, or map link.",
+      title: isRussian ? "Погода" : "Weather",
+      value: isRussian ? "Нужно место" : "Location needed",
+      detail: isRussian ? "Добавьте более точный город, аэропорт, отель, адрес места или ссылку на карту." : "Add a clearer city, airport, hotel, venue address, or map link.",
       kind: "weather"
     };
   }
@@ -633,19 +633,19 @@ async function weatherCard(location: string | LocationLookup | undefined): Promi
   if ("error" in geocoded) {
     if (geocoded.error === "provider_error") {
       return {
-        title: "Weather",
-        value: "Unavailable",
-        detail: `OpenWeather geocoding returned ${geocoded.status}.`,
+        title: isRussian ? "Погода" : "Weather",
+        value: isRussian ? "Недоступно" : "Unavailable",
+        detail: isRussian ? `Геокодинг OpenWeather вернул ${geocoded.status}.` : `OpenWeather geocoding returned ${geocoded.status}.`,
         kind: "weather"
       };
     }
 
     return {
-      title: "Weather",
-      value: "Location needed",
+      title: isRussian ? "Погода" : "Weather",
+      value: isRussian ? "Нужно место" : "Location needed",
       detail: (typeof location === "string" ? location : location.query)
-        ? `OpenWeather could not find "${typeof location === "string" ? location : location.query}".`
-        : "Add a clearer city, airport, hotel, or venue address.",
+        ? (isRussian ? `OpenWeather не нашёл "${typeof location === "string" ? location : location.query}".` : `OpenWeather could not find "${typeof location === "string" ? location : location.query}".`)
+        : (isRussian ? "Добавьте более точный город, аэропорт, отель или адрес места." : "Add a clearer city, airport, hotel, or venue address."),
       kind: "weather"
     };
   }
@@ -662,9 +662,9 @@ async function weatherCard(location: string | LocationLookup | undefined): Promi
   const response = await fetch(url);
   if (!response.ok) {
     return {
-      title: "Weather",
-      value: "Unavailable",
-      detail: `OpenWeather returned ${response.status}.`,
+      title: isRussian ? "Погода" : "Weather",
+      value: isRussian ? "Недоступно" : "Unavailable",
+      detail: isRussian ? `OpenWeather вернул ${response.status}.` : `OpenWeather returned ${response.status}.`,
       kind: "weather"
     };
   }
@@ -682,20 +682,20 @@ async function weatherCard(location: string | LocationLookup | undefined): Promi
   const alertCount = current?.alerts?.length ?? 0;
 
   return {
-    title: "Weather",
-    value: temp == null ? "Forecast ready" : `${Math.round(temp)} C`,
-    detail: [description, alertCount > 0 ? `${alertCount} weather alert${alertCount === 1 ? "" : "s"}` : undefined].filter(Boolean).join(" · "),
+    title: isRussian ? "Погода" : "Weather",
+    value: temp == null ? (isRussian ? "Прогноз готов" : "Forecast ready") : `${Math.round(temp)} C`,
+    detail: [description, alertCount > 0 ? (isRussian ? `${alertCount} погодных предупреждений` : `${alertCount} weather alert${alertCount === 1 ? "" : "s"}`) : undefined].filter(Boolean).join(" · "),
     kind: alertCount > 0 ? "warning" : "weather"
   };
 }
 
-async function eventsCard(location: string | LocationLookup | undefined, kind: string, startsAt?: string | number | null, endsAt?: string | number | null): Promise<EnrichmentCard> {
+async function eventsCard(location: string | LocationLookup | undefined, kind: string, startsAt?: string | number | null, endsAt?: string | number | null, isRussian = false): Promise<EnrichmentCard> {
   const apiKey = ticketmasterApiKey();
   if (!apiKey) {
     return {
-      title: "Nearby events",
-      value: "Not connected",
-      detail: "Set TICKETMASTER_API_KEY or TICKETMASTER_CONSUMER_KEY on Vercel for local event context.",
+      title: isRussian ? "События рядом" : "Nearby events",
+      value: isRussian ? "Не подключено" : "Not connected",
+      detail: isRussian ? "Добавьте TICKETMASTER_API_KEY или TICKETMASTER_CONSUMER_KEY в Vercel для контекста местных событий." : "Set TICKETMASTER_API_KEY or TICKETMASTER_CONSUMER_KEY on Vercel for local event context.",
       kind: "events"
     };
   }
@@ -726,9 +726,9 @@ async function eventsCard(location: string | LocationLookup | undefined, kind: s
   const response = await fetch(url);
   if (!response.ok) {
     return {
-      title: "Nearby events",
-      value: "Unavailable",
-      detail: `Ticketmaster returned ${response.status}.`,
+      title: isRussian ? "События рядом" : "Nearby events",
+      value: isRussian ? "Недоступно" : "Unavailable",
+      detail: isRussian ? `Ticketmaster вернул ${response.status}.` : `Ticketmaster returned ${response.status}.`,
       kind: "events"
     };
   }
@@ -739,9 +739,9 @@ async function eventsCard(location: string | LocationLookup | undefined, kind: s
   const eventNames = events.map((event) => event.name).filter(Boolean).slice(0, 2);
 
   return {
-    title: "Nearby events",
-    value: `${data.page?.totalElements ?? 0} found`,
-    detail: firstEvent ? eventDetail(firstEvent) : eventNames?.length ? eventNames.join(" · ") : "No major public events found nearby.",
+    title: isRussian ? "События рядом" : "Nearby events",
+    value: isRussian ? `Найдено: ${data.page?.totalElements ?? 0}` : `${data.page?.totalElements ?? 0} found`,
+    detail: firstEvent ? eventDetail(firstEvent) : eventNames?.length ? eventNames.join(" · ") : (isRussian ? "Крупных публичных событий рядом не найдено." : "No major public events found nearby."),
     actionURL: firstEvent?.url,
     kind: "events"
   };
@@ -839,37 +839,45 @@ function bestCard(cards: EnrichmentCard[], kind: EnrichmentCard["kind"]) {
   return cards.find((card) => card.kind === kind);
 }
 
-function routeTitleForKind(kind: string) {
+function routeTitleForKind(kind: string, isRussian = false) {
   switch (kind) {
   case "flight":
-    return "Route to airport";
+    return isRussian ? "Маршрут в аэропорт" : "Route to airport";
   case "hotel":
-    return "Arrival route";
+    return isRussian ? "Маршрут прибытия" : "Arrival route";
   case "event":
-    return "Route to venue";
+    return isRussian ? "Маршрут к месту события" : "Route to venue";
   case "transit":
-    return "Travel leg";
+    return isRussian ? "Участок поездки" : "Travel leg";
   default:
-    return "Getting there";
+    return isRussian ? "Как добраться" : "Getting there";
   }
 }
 
-function deterministicRouteLeg(kind: string, title: string, location: string): TravelRouteLeg[] {
+function deterministicRouteLeg(kind: string, title: string, location: string, isRussian = false): TravelRouteLeg[] {
   if (!location) {
     return [];
   }
 
   const destination = placeForExternalLookup(kind, location) || location;
-  const guidance = kind === "flight"
-    ? "Plan the door-to-airport journey with enough buffer for bags, security, and gate changes."
-    : kind === "event"
-      ? "Plan the route before you leave, then keep a small buffer for entry, tickets, and finding the right door."
-      : kind === "hotel"
-        ? "Use this leg to make arrival feel automatic: route, check-in window, and nearby essentials."
-        : "Keep the route, buffer, and fallback option ready before this leg starts.";
+  const guidance = isRussian
+    ? (kind === "flight"
+      ? "Запланируйте путь до аэропорта с запасом на багаж, контроль безопасности и смену выхода."
+      : kind === "event"
+        ? "Проверьте маршрут до выхода и оставьте небольшой запас на вход, билеты и поиск нужной двери."
+        : kind === "hotel"
+          ? "Сделайте прибытие предсказуемым: маршрут, окно заселения и ближайшие полезные места."
+          : "Держите маршрут, запас времени и запасной вариант под рукой до начала этого участка.")
+    : (kind === "flight"
+      ? "Plan the door-to-airport journey with enough buffer for bags, security, and gate changes."
+      : kind === "event"
+        ? "Plan the route before you leave, then keep a small buffer for entry, tickets, and finding the right door."
+        : kind === "hotel"
+          ? "Use this leg to make arrival feel automatic: route, check-in window, and nearby essentials."
+          : "Keep the route, buffer, and fallback option ready before this leg starts.");
 
   return [{
-    title: routeTitleForKind(kind),
+    title: routeTitleForKind(kind, isRussian),
     destination,
     guidance,
     bufferMinutes: kind === "flight" ? 120 : kind === "event" ? 20 : 15,
@@ -877,7 +885,7 @@ function deterministicRouteLeg(kind: string, title: string, location: string): T
   }];
 }
 
-function deterministicActions(kind: string, title: string, location: string, cards: EnrichmentCard[]): TravelAction[] {
+function deterministicActions(kind: string, title: string, location: string, cards: EnrichmentCard[], isRussian = false): TravelAction[] {
   const actions: TravelAction[] = [];
   const warning = cards.find((card) => card.kind === "warning");
   const maps = bestCard(cards, "maps");
@@ -887,7 +895,7 @@ function deterministicActions(kind: string, title: string, location: string, car
 
   if (warning) {
     actions.push({
-      title: "Review the risk",
+      title: isRussian ? "Проверьте риск" : "Review the risk",
       detail: cardLine(warning),
       priority: "now",
       kind: warning.title.toLowerCase().includes("flight") ? "flight" : "safety",
@@ -897,8 +905,10 @@ function deterministicActions(kind: string, title: string, location: string, car
 
   if (location) {
     actions.push({
-      title: kind === "flight" ? "Check the airport route" : "Preview the route",
-      detail: maps?.detail || `Open the route context for ${location}.`,
+      title: kind === "flight"
+        ? (isRussian ? "Проверьте маршрут в аэропорт" : "Check the airport route")
+        : (isRussian ? "Посмотрите маршрут" : "Preview the route"),
+      detail: maps?.detail || (isRussian ? `Откройте маршрутный контекст для ${location}.` : `Open the route context for ${location}.`),
       priority: kind === "flight" ? "soon" : "later",
       kind: "route",
       actionURL: mapsSearchURL(location)
@@ -907,7 +917,7 @@ function deterministicActions(kind: string, title: string, location: string, car
 
   if (flight && kind === "flight") {
     actions.push({
-      title: "Keep flight status visible",
+      title: isRussian ? "Держите статус рейса под рукой" : "Keep flight status visible",
       detail: cardLine(flight),
       priority: "soon",
       kind: "flight",
@@ -917,8 +927,8 @@ function deterministicActions(kind: string, title: string, location: string, car
 
   if (weather) {
     actions.push({
-      title: "Prepare for the weather",
-      detail: cardLine(weather) || "Check the forecast before leaving.",
+      title: isRussian ? "Подготовьтесь к погоде" : "Prepare for the weather",
+      detail: cardLine(weather) || (isRussian ? "Проверьте прогноз перед выходом." : "Check the forecast before leaving."),
       priority: warning ? "now" : "soon",
       kind: "weather",
       actionURL: weather.actionURL
@@ -927,7 +937,7 @@ function deterministicActions(kind: string, title: string, location: string, car
 
   if (event) {
     actions.push({
-      title: "Look at what is nearby",
+      title: isRussian ? "Посмотрите, что есть рядом" : "Look at what is nearby",
       detail: cardLine(event),
       priority: "later",
       kind: "event",
@@ -936,8 +946,10 @@ function deterministicActions(kind: string, title: string, location: string, car
   }
 
   actions.push({
-    title: "Keep booking details handy",
-    detail: title ? `Use "${title}" as the source of truth if provider data changes.` : "Add a clearer title so Voya can reason about this moment.",
+    title: isRussian ? "Держите детали бронирования под рукой" : "Keep booking details handy",
+    detail: title
+      ? (isRussian ? `Используйте "${title}" как источник истины, если данные провайдера изменятся.` : `Use "${title}" as the source of truth if provider data changes.`)
+      : (isRussian ? "Добавьте более понятный заголовок, чтобы Voya могла оценить этот момент." : "Add a clearer title so Voya can reason about this moment."),
     priority: "later",
     kind: "booking"
   });
@@ -945,31 +957,31 @@ function deterministicActions(kind: string, title: string, location: string, car
   return actions.slice(0, 5);
 }
 
-function deterministicSections(kind: string, title: string, location: string, cards: EnrichmentCard[], warnings: string[]): TravelBriefSection[] {
+function deterministicSections(kind: string, title: string, location: string, cards: EnrichmentCard[], warnings: string[], isRussian = false): TravelBriefSection[] {
   const weather = cards.find((card) => card.kind === "weather" || card.title.toLowerCase().includes("weather"));
   const flight = cards.find((card) => card.kind === "flight");
   const events = cards.find((card) => card.kind === "events");
   const maps = bestCard(cards, "maps");
 
   const sections: TravelBriefSection[] = [{
-    title: "What this moment means",
+    title: isRussian ? "Что значит этот момент" : "What this moment means",
     body: title
-      ? `${title} is not just an itinerary item; it combines timing, place, route, weather, and booking context.`
-      : "Add a clear title and Voya can turn this into a practical travel moment.",
+      ? (isRussian ? `${title} - это не просто пункт маршрута: здесь сходятся время, место, маршрут, погода и детали бронирования.` : `${title} is not just an itinerary item; it combines timing, place, route, weather, and booking context.`)
+      : (isRussian ? "Добавьте понятный заголовок, и Voya превратит это в практичный момент поездки." : "Add a clear title and Voya can turn this into a practical travel moment."),
     kind: "overview"
   }];
 
   if (maps || location) {
     sections.push({
-      title: "Getting there",
-      body: maps?.detail || location || "Add a venue, airport, hotel, station, or map link to unlock route guidance.",
+      title: isRussian ? "Как добраться" : "Getting there",
+      body: maps?.detail || location || (isRussian ? "Добавьте место, аэропорт, отель, станцию или ссылку на карту, чтобы включить подсказки по маршруту." : "Add a venue, airport, hotel, station, or map link to unlock route guidance."),
       kind: "route"
     });
   }
 
   if (flight && kind === "flight") {
     sections.push({
-      title: "Flight intelligence",
+      title: isRussian ? "Сигналы по рейсу" : "Flight intelligence",
       body: cardLine(flight),
       kind: flight.kind === "warning" ? "risk" : "flight"
     });
@@ -977,15 +989,17 @@ function deterministicSections(kind: string, title: string, location: string, ca
 
   if (weather) {
     sections.push({
-      title: "Weather as a decision",
-      body: cardLine(weather) || "Forecast data should become practical advice: what to wear, what to pack, and when to leave.",
+      title: isRussian ? "Погода как решение" : "Weather as a decision",
+      body: cardLine(weather) || (isRussian ? "Прогноз должен превращаться в практичный совет: что надеть, что взять и когда выходить." : "Forecast data should become practical advice: what to wear, what to pack, and when to leave."),
       kind: weather.kind === "warning" ? "risk" : "weather"
     });
   }
 
   if (events) {
     sections.push({
-      title: kind === "event" ? "Event context" : "Nearby opportunities",
+      title: kind === "event"
+        ? (isRussian ? "Контекст события" : "Event context")
+        : (isRussian ? "Возможности рядом" : "Nearby opportunities"),
       body: cardLine(events),
       kind: "event"
     });
@@ -993,40 +1007,42 @@ function deterministicSections(kind: string, title: string, location: string, ca
 
   if (warnings.length > 0) {
     sections.push({
-      title: "Risks to keep visible",
+      title: isRussian ? "Риски, которые нужно видеть" : "Risks to keep visible",
       body: warnings.join(" "),
       kind: "risk"
     });
   }
 
   sections.push({
-    title: "Assistant stance",
-    body: "Voya should keep translating provider data into decisions: leave time, buffer, fallback route, weather prep, and what deserves attention now.",
+    title: isRussian ? "Позиция ассистента" : "Assistant stance",
+    body: isRussian
+      ? "Voya должна переводить данные провайдеров в решения: время выхода, запас, запасной маршрут, подготовку к погоде и то, что требует внимания сейчас."
+      : "Voya should keep translating provider data into decisions: leave time, buffer, fallback route, weather prep, and what deserves attention now.",
     kind: "action"
   });
 
   return sections.slice(0, 7);
 }
 
-function markdownFromSections(summary: string, sections: TravelBriefSection[], actions: TravelAction[], routeLegs: TravelRouteLeg[]) {
+function markdownFromSections(summary: string, sections: TravelBriefSection[], actions: TravelAction[], routeLegs: TravelRouteLeg[], isRussian = false) {
   const sectionLines = sections.map((section) => [
     `### ${section.title}`,
     cleanBriefText(section.body)
   ].join("\n")).join("\n\n");
   const routeLines = routeLegs.length
     ? [
-      "### Journey legs",
-      ...routeLegs.map((leg) => `- **${leg.title}**: ${leg.guidance}${leg.bufferMinutes ? ` Keep ~${leg.bufferMinutes} min buffer.` : ""}`)
+      isRussian ? "### Участки пути" : "### Journey legs",
+      ...routeLegs.map((leg) => `- **${leg.title}**: ${leg.guidance}${leg.bufferMinutes ? (isRussian ? ` Держите запас около ${leg.bufferMinutes} мин.` : ` Keep ~${leg.bufferMinutes} min buffer.`) : ""}`)
     ].join("\n")
     : "";
   const actionLines = actions.length
     ? [
-      "### Next actions",
+      isRussian ? "### Следующие действия" : "### Next actions",
       ...actions.map((action) => `- **${action.title}**: ${action.detail}`)
     ].join("\n")
     : "";
 
-  return ["## Travel brief", summary, sectionLines, routeLines, actionLines].filter(Boolean).join("\n\n");
+  return [isRussian ? "## Краткая сводка поездки" : "## Travel brief", summary, sectionLines, routeLines, actionLines].filter(Boolean).join("\n\n");
 }
 
 async function aiBrief(kind: string, title: string, location: string, status: string, cards: EnrichmentCard[], warnings: string[], languageInstruction: string, locale: string): Promise<TravelBriefGenerated | undefined> {
@@ -1076,10 +1092,10 @@ async function aiBrief(kind: string, title: string, location: string, status: st
 }
 
 async function buildTravelBrief(kind: string, title: string, location: string, status: string, cards: EnrichmentCard[], warnings: string[], locale: string, languageCode: string, languageName: string): Promise<Pick<EnrichmentResponse, "summary" | "briefMarkdown" | "sections" | "actions" | "routeLegs" | "imageURLs">> {
-  const routeLegs = deterministicRouteLeg(kind, title, location);
-  const actions = deterministicActions(kind, title, location, cards);
-  const sections = deterministicSections(kind, title, location, cards, warnings);
   const isRussian = languageCode.toLowerCase().startsWith("ru");
+  const routeLegs = deterministicRouteLeg(kind, title, location, isRussian);
+  const actions = deterministicActions(kind, title, location, cards, isRussian);
+  const sections = deterministicSections(kind, title, location, cards, warnings, isRussian);
   const languageInstruction = responseLanguageInstruction(languageCode, languageName, locale);
   const summary = isRussian
     ? (title
@@ -1090,7 +1106,7 @@ async function buildTravelBrief(kind: string, title: string, location: string, s
       : "Add more details and Voya will turn this into a practical travel moment.");
   const fallback = {
     summary,
-    briefMarkdown: markdownFromSections(summary, sections, actions, routeLegs),
+    briefMarkdown: markdownFromSections(summary, sections, actions, routeLegs, isRussian),
     sections,
     actions,
     routeLegs,
@@ -1173,16 +1189,16 @@ function flightDuration(attempt: FlightAttempt) {
   return compactDuration(minutesBetweenIso(arrivalTime(attempt), departureTime(attempt)));
 }
 
-function flightLegCards(attempts: FlightAttempt[]) {
+function flightLegCards(attempts: FlightAttempt[], isRussian = false) {
   const cards: EnrichmentCard[] = [];
 
   attempts.forEach((attempt, index) => {
     const snapshot = attempt.response.snapshot;
     if (!snapshot) {
       cards.push({
-        title: `Flight ${attempt.flightNumber}`,
-        value: "Not validated",
-        detail: attempt.response.validation.reasons[0] ?? "FlightAware did not return a trustworthy match for this segment.",
+        title: isRussian ? `Рейс ${attempt.flightNumber}` : `Flight ${attempt.flightNumber}`,
+        value: isRussian ? "Не подтверждено" : "Not validated",
+        detail: attempt.response.validation.reasons[0] ?? (isRussian ? "FlightAware не вернул надежное совпадение для этого сегмента." : "FlightAware did not return a trustworthy match for this segment."),
         kind: "warning"
       });
       return;
@@ -1191,8 +1207,8 @@ function flightLegCards(attempts: FlightAttempt[]) {
     const depart = departureTime(attempt);
     const arrive = arrivalTime(attempt);
     cards.push({
-      title: attempts.length > 1 ? `Flight ${index + 1}` : "Flight",
-      value: `${attempt.flightNumber} · ${compactRoute(snapshot.originAirport, snapshot.destinationAirport) || "Route pending"}`,
+      title: attempts.length > 1 ? (isRussian ? `Рейс ${index + 1}` : `Flight ${index + 1}`) : (isRussian ? "Рейс" : "Flight"),
+      value: `${attempt.flightNumber} · ${compactRoute(snapshot.originAirport, snapshot.destinationAirport) || (isRussian ? "Маршрут ожидается" : "Route pending")}`,
       detail: [
         [compactTime(depart), compactTime(arrive)].filter(Boolean).join(" -> "),
         flightDuration(attempt),
@@ -1205,7 +1221,7 @@ function flightLegCards(attempts: FlightAttempt[]) {
   return cards;
 }
 
-function connectionCards(attempts: FlightAttempt[]) {
+function connectionCards(attempts: FlightAttempt[], isRussian = false) {
   if (attempts.length < 2) {
     return [];
   }
@@ -1229,20 +1245,20 @@ function connectionCards(attempts: FlightAttempt[]) {
   }
 
   return [{
-    title: "Connection",
-    value: `${validated.length}/${attempts.length} legs`,
-    detail: connectionDetails.length ? connectionDetails.join(" · ") : `Tried ${attempts.map((attempt) => attempt.flightNumber).join(", ")}.`,
+    title: isRussian ? "Стыковка" : "Connection",
+    value: isRussian ? `${validated.length}/${attempts.length} сегментов` : `${validated.length}/${attempts.length} legs`,
+    detail: connectionDetails.length ? connectionDetails.join(" · ") : (isRussian ? `Проверены: ${attempts.map((attempt) => attempt.flightNumber).join(", ")}.` : `Tried ${attempts.map((attempt) => attempt.flightNumber).join(", ")}.`),
     kind: validated.length === attempts.length ? "flight" : "warning"
   } satisfies EnrichmentCard];
 }
 
-async function flightCards(title: string, location: string, startsAt?: string | number | null): Promise<EnrichmentCard[]> {
+async function flightCards(title: string, location: string, startsAt?: string | number | null, isRussian = false): Promise<EnrichmentCard[]> {
   const flightNumbers = allFlightNumbers(`${title} ${location}`);
   if (flightNumbers.length === 0) {
     return [{
-      title: "Flight",
-      value: "No flight number",
-      detail: "Add a flight number such as BA2490 to enable live status.",
+      title: isRussian ? "Рейс" : "Flight",
+      value: isRussian ? "Нет номера рейса" : "No flight number",
+      detail: isRussian ? "Добавьте номер рейса, например BA2490, чтобы включить живой статус." : "Add a flight number such as BA2490 to enable live status.",
       kind: "flight"
     }];
   }
@@ -1267,11 +1283,11 @@ async function flightCards(title: string, location: string, startsAt?: string | 
 
   if (!response.snapshot) {
     return [{
-      title: "Flight",
+      title: isRussian ? "Рейс" : "Flight",
       value: flightNumber,
       detail: [
-        response.validation.reasons[0] ?? "Live flight status is unavailable.",
-        flightNumbers.length > 1 ? `Tried ${flightNumbers.join(", ")}.` : undefined
+        response.validation.reasons[0] ?? (isRussian ? "Живой статус рейса недоступен." : "Live flight status is unavailable."),
+        flightNumbers.length > 1 ? (isRussian ? `Проверены: ${flightNumbers.join(", ")}.` : `Tried ${flightNumbers.join(", ")}.`) : undefined
       ].filter(Boolean).join(" "),
       kind: "flight"
     }];
@@ -1293,76 +1309,76 @@ async function flightCards(title: string, location: string, startsAt?: string | 
   const destinationWeather = response.intelligence.weather.destination;
   const route = response.intelligence.route;
   const delayCard: EnrichmentCard = {
-    title: "Delay",
+    title: isRussian ? "Задержка" : "Delay",
     value: response.delayStats.headline,
     detail: response.delayStats.onTimeProbability == null
       ? undefined
-      : `${Math.round(response.delayStats.onTimeProbability * 100)}% Voya on-time estimate`,
+      : (isRussian ? `${Math.round(response.delayStats.onTimeProbability * 100)}% оценка Voya для вылета вовремя` : `${Math.round(response.delayStats.onTimeProbability * 100)}% Voya on-time estimate`),
     kind: (snapshot.delayMinutes ?? 0) >= 15 ? "warning" : "flight"
   };
 
-  return [...flightLegCards(attempts), ...connectionCards(attempts), delayCard, {
-    title: "Gate",
-    value: gateParts.length ? gateParts.join(" · ") : "Not posted",
+  return [...flightLegCards(attempts, isRussian), ...connectionCards(attempts, isRussian), delayCard, {
+    title: isRussian ? "Выход" : "Gate",
+    value: gateParts.length ? gateParts.join(" · ") : (isRussian ? "Не опубликовано" : "Not posted"),
     detail: response.gate.baggageClaim ? `Baggage ${response.gate.baggageClaim}` : response.gate.guidance[1],
     kind: "flight"
   }, {
-    title: "Times",
+    title: isRussian ? "Время" : "Times",
     value: [
       compactTime(response.schedule.estimatedDepartureAt ?? response.schedule.scheduledDepartureAt),
       compactTime(response.schedule.estimatedArrivalAt ?? response.schedule.scheduledArrivalAt)
-    ].filter(Boolean).join(" -> ") || "Not available",
+    ].filter(Boolean).join(" -> ") || (isRussian ? "Недоступно" : "Not available"),
     detail: response.schedule.actualDepartureAt
       ? `Departed ${compactTime(response.schedule.actualDepartureAt)}`
       : snapshot.dataMode === "published_schedule"
-        ? "Published airline schedule. Live gate times open closer to departure."
-        : "Uses FlightAware scheduled, estimated, and actual gate times.",
+        ? (isRussian ? "Опубликованное расписание авиакомпании. Живое время у выхода появится ближе к вылету." : "Published airline schedule. Live gate times open closer to departure.")
+        : (isRussian ? "Используются плановые, расчетные и фактические времена у выхода от FlightAware." : "Uses FlightAware scheduled, estimated, and actual gate times."),
     kind: "flight"
   }, {
-    title: "Reliability",
+    title: isRussian ? "Надежность" : "Reliability",
     value: history?.sampleSize
       ? `${compactPercent(history.delayed15Rate) ?? "0%"} delayed`
-      : "Collecting",
+      : (isRussian ? "Собираем" : "Collecting"),
     detail: history?.averageArrivalDelayMinutes == null
-      ? "History may require the enabled FlightAware tier."
-      : `${history.sampleSize} recent flights · avg arrival delay ${Math.round(history.averageArrivalDelayMinutes)} min`,
+      ? (isRussian ? "История может требовать подключенный тариф FlightAware." : "History may require the enabled FlightAware tier.")
+      : (isRussian ? `${history.sampleSize} недавних рейсов · средняя задержка прибытия ${Math.round(history.averageArrivalDelayMinutes)} мин` : `${history.sampleSize} recent flights · avg arrival delay ${Math.round(history.averageArrivalDelayMinutes)} min`),
     kind: (history?.delayed15Rate ?? 0) >= 0.3 ? "warning" : "flight"
   }, {
-    title: "Disruptions",
+    title: isRussian ? "Сбои" : "Disruptions",
     value: disruption?.total
       ? `${compactPercent(disruption.delayRate) ?? "0%"} delayed`
-      : "No signal",
+      : (isRussian ? "Нет сигнала" : "No signal"),
     detail: disruption
       ? `${disruption.entityName ?? disruption.entityId ?? disruption.entityType} · ${disruption.delays ?? 0} delayed · ${disruption.cancellations ?? 0} cancelled`
-      : "No FlightAware disruption count returned.",
+      : (isRussian ? "FlightAware не вернул счетчик сбоев." : "No FlightAware disruption count returned."),
     kind: (disruption?.delayRate ?? 0) >= 0.25 ? "warning" : "flight"
   }, {
-    title: "Route",
-    value: route?.routeDistance ?? "Not filed",
+    title: isRussian ? "Маршрут" : "Route",
+    value: route?.routeDistance ?? (isRussian ? "Не подан" : "Not filed"),
     detail: route?.route
       ? `${route.route.slice(0, 80)}${route.route.length > 80 ? "..." : ""}`
       : response.intelligence.mode === "published_schedule"
-        ? "Typical filed routes appear closer to operations or when route history is available."
+        ? (isRussian ? "Типовые поданные маршруты появляются ближе к операции или когда доступна история маршрутов." : "Typical filed routes appear closer to operations or when route history is available.")
         : undefined,
     kind: "flight"
   }, {
-    title: "Airport weather",
-    value: originWeather?.temperatureC == null ? "Forecast" : `${originWeather.temperatureC} C`,
+    title: isRussian ? "Погода в аэропорту" : "Airport weather",
+    value: originWeather?.temperatureC == null ? (isRussian ? "Прогноз" : "Forecast") : `${originWeather.temperatureC} C`,
     detail: [
       originWeather?.airport,
       originWeather?.summary ?? originWeather?.forecastSummary,
-      destinationWeather?.airport ? `Arrive ${destinationWeather.airport}` : undefined
+      destinationWeather?.airport ? (isRussian ? `Прибытие ${destinationWeather.airport}` : `Arrive ${destinationWeather.airport}`) : undefined
     ].filter(Boolean).join(" · "),
     kind: "weather"
   }, {
-    title: "Alerts",
-    value: response.alerting.supported ? "Ready" : "Unavailable",
-    detail: response.alerting.supported ? "FlightAware alerts can feed gate, delay, cancellation, diversion, departure, and arrival updates." : undefined,
+    title: isRussian ? "Оповещения" : "Alerts",
+    value: response.alerting.supported ? (isRussian ? "Готово" : "Ready") : (isRussian ? "Недоступно" : "Unavailable"),
+    detail: response.alerting.supported ? (isRussian ? "Оповещения FlightAware могут передавать обновления по выходу, задержке, отмене, диверсии, вылету и прибытию." : "FlightAware alerts can feed gate, delay, cancellation, diversion, departure, and arrival updates.") : undefined,
     kind: "flight"
   }, {
-    title: "Aircraft",
-    value: aircraftParts.length ? aircraftParts.join(" · ") : "Not available",
-    detail: snapshot.position?.updatedAt ? `Live position updated ${compactTime(snapshot.position.updatedAt)}` : snapshot.airlineCode,
+    title: isRussian ? "Самолет" : "Aircraft",
+    value: aircraftParts.length ? aircraftParts.join(" · ") : (isRussian ? "Недоступно" : "Not available"),
+    detail: snapshot.position?.updatedAt ? (isRussian ? `Живая позиция обновлена ${compactTime(snapshot.position.updatedAt)}` : `Live position updated ${compactTime(snapshot.position.updatedAt)}`) : snapshot.airlineCode,
     kind: "flight"
   }];
 }
@@ -1382,26 +1398,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const locale = clean(body.locale) || "en";
   const languageCode = clean(body.languageCode) || locale.split(/[-_]/)[0] || "en";
   const languageName = clean(body.languageName) || languageCode;
+  const isRussian = languageCode.toLowerCase().startsWith("ru");
 
   const cards: EnrichmentCard[] = [
     {
-      title: "Status",
-      value: status || "Needs review",
-      detail: title || "Add a title for better context.",
+      title: isRussian ? "Статус" : "Status",
+      value: status || (isRussian ? "Нужно проверить" : "Needs review"),
+      detail: title || (isRussian ? "Добавьте заголовок для лучшего контекста." : "Add a title for better context."),
       kind: "ai"
     },
     {
-      title: "Maps",
-      value: location ? "Ready" : "Location needed",
-      detail: location || "Add an address, airport, hotel, venue, or city.",
+      title: isRussian ? "Карты" : "Maps",
+      value: location ? (isRussian ? "Готово" : "Ready") : (isRussian ? "Нужно место" : "Location needed"),
+      detail: location || (isRussian ? "Добавьте адрес, аэропорт, отель, место или город." : "Add an address, airport, hotel, venue, or city."),
       kind: "maps"
     },
-    await weatherCard(lookupPlace),
-    await eventsCard(lookupPlace, kind, body.startsAt, body.endsAt)
+    await weatherCard(lookupPlace, isRussian),
+    await eventsCard(lookupPlace, kind, body.startsAt, body.endsAt, isRussian)
   ];
 
   if (kind === "flight") {
-    cards.splice(2, 0, ...await flightCards(title, location, body.startsAt));
+    cards.splice(2, 0, ...await flightCards(title, location, body.startsAt, isRussian));
   }
 
   const warnings = cards.filter((card) => card.kind === "warning").map((card) => `${card.title}: ${card.detail ?? card.value}`);

@@ -236,7 +236,7 @@ struct TransferRecommendationCard: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isLoading)
-                    .accessibilityLabel("Refresh transfer timing")
+                    .accessibilityLabel(Text("Refresh transfer timing"))
 
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.bold))

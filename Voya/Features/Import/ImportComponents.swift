@@ -51,8 +51,8 @@ struct ImportPrimaryDropZone: View {
 
 struct ImportOption: View {
     let symbol: String
-    let title: String
-    let subtitle: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
     let tint: Color
 
     var body: some View {
@@ -244,7 +244,7 @@ struct ImportPreparationStatusPanel: View {
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(Color.voyaInk)
                             .lineLimit(1)
-                        Text(status.hasFailure ? "Needs attention" : "Tap for details")
+                        Text(status.hasFailure ? String(localized: "Needs attention") : String(localized: "Tap for details"))
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(Color.voyaMuted)
                             .lineLimit(1)
@@ -463,7 +463,7 @@ struct RecognitionAnimationCard: View {
                     .frame(width: 86, height: 100)
 
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("Reading confirmation")
+                    Text("Reading confirmation")
                             .font(.headline)
                             .foregroundStyle(Color.voyaInk)
                         Text(message)
@@ -511,7 +511,7 @@ struct RecognitionTag: View {
 
 struct ImportSuccessAnimationCard: View {
     let success: ImportSuccess
-    let actionTitle: String
+    let actionTitle: LocalizedStringKey
     let onViewTrip: () -> Void
     let onAction: () -> Void
     @State private var isCheckVisible = false
@@ -548,7 +548,7 @@ struct ImportSuccessAnimationCard: View {
                     Text(success.didCreateTrip ? String(localized: "Trip created") : String(localized: "Added to trip"))
                         .font(.title3.bold())
                         .foregroundStyle(Color.voyaInk)
-                    Text("\(itemLabel) from \(success.sourceName) is now in \(success.tripTitle).")
+                    Text(String(localized: "\(itemLabel) from \(success.sourceName) is now in \(success.tripTitle)."))
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.voyaMuted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -689,7 +689,7 @@ struct ExtractionReview: View {
             .buttonStyle(.plain)
 
             Button(action: onConfirm) {
-                Label(isConfirming ? "Checking flights" : "Save to trip", systemImage: isConfirming ? "airplane.circle" : "checkmark")
+                Label(isConfirming ? String(localized: "Checking flights") : String(localized: "Save to trip"), systemImage: isConfirming ? "airplane.circle" : "checkmark")
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
@@ -727,7 +727,7 @@ struct ImportRecognitionStatusCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isConfirming ? "Checking imported details" : "Filled from source")
+                    Text(isConfirming ? String(localized: "Checking imported details") : String(localized: "Filled from source"))
                         .font(.headline)
                         .foregroundStyle(Color.voyaInk)
                     Text(detailText)
@@ -897,7 +897,7 @@ struct EditableItineraryItem: View {
     }
 
     private func dateTimePickerRow(
-        _ label: String,
+        _ label: LocalizedStringKey,
         selection: Binding<Date>,
         range: PartialRangeFrom<Date>? = nil
     ) -> some View {
@@ -958,15 +958,15 @@ struct EditableItineraryItem: View {
 }
 
 struct ClearableTextField: View {
-    let label: String
+    let label: LocalizedStringKey
     @Binding var text: String
-    let prompt: String
+    let prompt: LocalizedStringKey
     let lineLimit: ClosedRange<Int>
 
     init(
-        _ label: String,
+        _ label: LocalizedStringKey,
         text: Binding<String>,
-        prompt: String,
+        prompt: LocalizedStringKey,
         lineLimit: ClosedRange<Int> = 1...3
     ) {
         self.label = label
@@ -982,12 +982,13 @@ struct ClearableTextField: View {
                 .foregroundStyle(Color.voyaMuted)
 
             HStack(alignment: .top, spacing: 8) {
-                TextField(label, text: $text, prompt: Text(prompt), axis: .vertical)
+                TextField("", text: $text, prompt: Text(prompt), axis: .vertical)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Color.voyaInk)
                     .lineLimit(lineLimit)
                     .padding(.vertical, 4)
                     .frame(minHeight: lineLimit.lowerBound > 1 ? 88 : 38)
+                    .accessibilityLabel(label)
 
                 if !text.isEmpty {
                     Button {
@@ -999,7 +1000,7 @@ struct ClearableTextField: View {
                             .frame(width: 30, height: 30)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Clear \(label)")
+                    .accessibilityLabel(Text("Clear field"))
                 }
             }
             .padding(.horizontal, 10)

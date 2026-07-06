@@ -114,28 +114,41 @@ function severityRank(value?: string) {
   }
 }
 
+function isRussianRequest(body: AssistantRequest) {
+  return [body.languageCode, body.locale, body.languageName]
+    .map((value) => clean(value).toLowerCase())
+    .some((value) => value === "ru" || value.startsWith("ru-") || value.startsWith("ru_") || value.includes("russian") || value.includes("рус"));
+}
+
 function deterministicResponse(body: AssistantRequest): AssistantResponse {
-  const tripTitle = clean(body.trip?.title) || "this trip";
+  const isRussian = isRussianRequest(body);
+  const tripTitle = clean(body.trip?.title) || (isRussian ? "эта поездка" : "this trip");
   const alerts = body.alerts ?? [];
   const highest = alerts.reduce((current, alert) => Math.max(current, severityRank(alert.severity)), 0);
   const topAlert = [...alerts].sort((a, b) => severityRank(b.severity) - severityRank(a.severity))[0];
   const nextItemTitle = clean(body.nextItem?.title);
   const score = Math.round(body.assessment?.score ?? 0);
-  const weatherRecommendation = clean(body.weather?.recommendation) || "Check the forecast before leaving and pack adaptable layers.";
+  const weatherRecommendation = clean(body.weather?.recommendation) || (isRussian
+    ? "Проверьте прогноз перед выходом и возьмите вещи, которые легко комбинировать."
+    : "Check the forecast before leaving and pack adaptable layers.");
   const weatherItems = body.weather?.items?.filter(Boolean) ?? [];
   const packingAdvice = [weatherRecommendation, ...weatherItems].join(" ");
 
   const assessmentTitle = highest >= 2
-    ? `${tripTitle} needs action`
+    ? (isRussian ? `${tripTitle}: нужно действие` : `${tripTitle} needs action`)
     : highest === 1
-      ? `${tripTitle} needs watching`
-      : `${tripTitle} looks ready`;
+      ? (isRussian ? `${tripTitle}: нужно следить` : `${tripTitle} needs watching`)
+      : (isRussian ? `${tripTitle} выглядит готовой` : `${tripTitle} looks ready`);
 
   const assessmentDetail = topAlert
     ? `${topAlert.title}: ${topAlert.message}`
     : nextItemTitle
-      ? `Next up: ${nextItemTitle}. Live provider signals will appear as they refresh.`
-      : "Add itinerary items to unlock route, flight, weather, and readiness guidance.";
+      ? (isRussian
+        ? `Дальше: ${nextItemTitle}. Живые сигналы провайдеров появятся после обновления.`
+        : `Next up: ${nextItemTitle}. Live provider signals will appear as they refresh.`)
+      : (isRussian
+        ? "Добавьте элементы маршрута, чтобы включить подсказки по маршрутам, рейсам, погоде и готовности."
+        : "Add itinerary items to unlock route, flight, weather, and readiness guidance.");
 
   const nextActions = alerts
     .filter((alert) => alert.severity === "action" || alert.severity === "watch")
@@ -143,10 +156,10 @@ function deterministicResponse(body: AssistantRequest): AssistantResponse {
     .map((alert) => `${alert.title}: ${alert.message}`);
 
   if (nextActions.length === 0 && nextItemTitle) {
-    nextActions.push(`Prepare for ${nextItemTitle}.`);
+    nextActions.push(isRussian ? `Подготовьтесь к ${nextItemTitle}.` : `Prepare for ${nextItemTitle}.`);
   }
   if (nextActions.length === 0) {
-    nextActions.push("Import or add a confirmed itinerary item.");
+    nextActions.push(isRussian ? "Импортируйте или добавьте подтвержденный пункт маршрута." : "Import or add a confirmed itinerary item.");
   }
 
   const question = clean(body.question);
@@ -155,7 +168,9 @@ function deterministicResponse(body: AssistantRequest): AssistantResponse {
     : assessmentDetail;
 
   return {
-    summary: score > 0 ? `Trip readiness score: ${score}. ${assessmentDetail}` : assessmentDetail,
+    summary: score > 0
+      ? (isRussian ? `Оценка готовности поездки: ${score}. ${assessmentDetail}` : `Trip readiness score: ${score}. ${assessmentDetail}`)
+      : assessmentDetail,
     assessmentTitle,
     assessmentDetail,
     answer,

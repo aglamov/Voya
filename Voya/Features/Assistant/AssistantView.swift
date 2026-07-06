@@ -398,7 +398,7 @@ struct AssistantStatusCard: View {
             HStack(spacing: 10) {
                 MetricPill(title: "Alerts", value: "\(activeAlertCount)")
                 MetricPill(title: "Risk", value: intelligence.assessment.riskLabel)
-                MetricPill(title: "Next", value: nextItem?.startsAt.map { MomentDateFormatter.time.string(from: $0) } ?? "Set")
+                MetricPill(title: "Next", value: nextItem?.startsAt.map { MomentDateFormatter.time.string(from: $0) } ?? String(localized: "Set"))
             }
             .foregroundStyle(.white)
         }
@@ -543,7 +543,7 @@ struct AssistantAssessmentCard: View {
 }
 
 struct AssessmentSignalPill: View {
-    let title: String
+    let title: LocalizedStringKey
     let value: Int
     let tint: Color
 
@@ -777,7 +777,7 @@ struct AssistantCheckInCard: View {
                                 Button {
                                     copyBookingReference(confirmationCode, for: action)
                                 } label: {
-                                    Label(copiedBookingActionID == action.id ? "Copied" : "Copy", systemImage: copiedBookingActionID == action.id ? "checkmark" : "doc.on.doc")
+                                    Label(copiedBookingActionID == action.id ? String(localized: "Copied") : String(localized: "Copy"), systemImage: copiedBookingActionID == action.id ? "checkmark" : "doc.on.doc")
                                         .font(.caption.weight(.bold))
                                         .foregroundStyle(Color.voyaInk)
                                         .padding(.horizontal, 9)
@@ -886,7 +886,7 @@ struct AssistantBoardingPassCard: View {
 
                         Spacer(minLength: 8)
 
-                        Text(entry.document == nil ? "Missing" : "Ready")
+                        Text(entry.document == nil ? String(localized: "Missing") : String(localized: "Ready"))
                             .font(.caption.weight(.bold))
                             .foregroundStyle(entry.document == nil ? Color.voyaCoral : Color.voyaTeal)
                             .padding(.horizontal, 9)
@@ -948,7 +948,7 @@ struct AssistantBoardingPassCard: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Open flight")
+                        .accessibilityLabel(Text("Open flight"))
                     }
                 }
                 .padding(14)
@@ -1163,7 +1163,7 @@ struct HomeBaseSettingsCard: View {
                 Button {
                     saveHomeBase()
                 } label: {
-                    Label(didSave ? "Saved" : "Save home base", systemImage: didSave ? "checkmark" : "checkmark.circle")
+                    Label(didSave ? String(localized: "Saved") : String(localized: "Save home base"), systemImage: didSave ? "checkmark" : "checkmark.circle")
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
@@ -1186,7 +1186,7 @@ struct HomeBaseSettingsCard: View {
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Reset home base changes")
+                    .accessibilityLabel(Text("Reset home base changes"))
                 }
             }
         }

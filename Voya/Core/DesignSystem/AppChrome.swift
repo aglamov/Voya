@@ -15,10 +15,10 @@ struct HeaderBar: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.voyaInk)
-                Text(subtitle)
+                Text(LocalizedStringKey(subtitle))
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Color.voyaMuted)
             }
@@ -120,8 +120,8 @@ struct TripChip: View {
 }
 
 struct EmptyTripsCard: View {
-    let title: String
-    let message: String
+    let title: LocalizedStringKey
+    let message: LocalizedStringKey
     let symbol: String
 
     var body: some View {
@@ -322,8 +322,8 @@ struct DestinationMark: View {
 }
 
 struct SectionHeader: View {
-    let title: String
-    let action: String
+    let title: LocalizedStringKey
+    let action: LocalizedStringKey
 
     var body: some View {
         HStack {
@@ -344,7 +344,7 @@ enum ButtonChrome {
 }
 
 struct IconTextButton: View {
-    let title: String
+    let title: LocalizedStringKey
     let symbol: String
     let style: ButtonChrome
     let action: () -> Void
@@ -366,7 +366,7 @@ struct IconTextButton: View {
 }
 
 struct MetricPill: View {
-    let title: String
+    let title: LocalizedStringKey
     let value: String
 
     var body: some View {
