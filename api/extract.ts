@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { openai } from "@ai-sdk/openai";
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
-import { openAIModelFor } from "./ai-models.js";
+import { openAIModelFor } from "./_ai-models.js";
 
 const itemSchema = z.object({
   kind: z.enum(["flight", "hotel", "event", "transit"]),

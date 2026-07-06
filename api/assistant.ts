@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { z } from "zod";
-import { openAIModelFor } from "./ai-models.js";
+import { openAIModelFor } from "./_ai-models.js";
 
 type AssistantSignal = {
   title: string;

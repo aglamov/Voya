@@ -66,6 +66,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (deviceToken) {
     await redisCommand(["SADD", `voya:flight-watch:${key}:devices`, deviceToken]);
+    if (date) {
+      await redisCommand(["SADD", `voya:flight-watch:${flightWatchKey(flightNumber)}:devices`, deviceToken]);
+    }
     await redisCommand([
       "HSET",
       `voya:push:device:${deviceToken}`,

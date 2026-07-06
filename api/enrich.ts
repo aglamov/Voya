@@ -3,7 +3,7 @@ import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { getFlightStatus } from "./_flight.js";
-import { openAIModelFor } from "./ai-models.js";
+import { openAIModelFor } from "./_ai-models.js";
 
 type EnrichmentCard = {
   title: string;

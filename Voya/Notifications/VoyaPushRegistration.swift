@@ -51,7 +51,6 @@ final class VoyaPushRegistrationService {
     func registerDeviceToken(_ data: Data) async {
         let token = data.map { String(format: "%02x", $0) }.joined()
         userDefaults.set(token, forKey: deviceTokenKey)
-        await registerDevice(token: token)
     }
 
     func registerFlightWatch(for item: ItineraryItem, candidate: FlightLookupCandidate? = nil) async {
@@ -71,17 +70,6 @@ final class VoyaPushRegistrationService {
                 date: item.startsAt.map { Self.flightDateFormatter.string(from: $0) },
                 originAirport: candidate?.originAirport ?? candidate?.originAirportIcao,
                 destinationAirport: candidate?.destinationAirport ?? candidate?.destinationAirportIcao
-            )
-        )
-    }
-
-    private func registerDevice(token: String) async {
-        await send(
-            path: "api/push-register-device",
-            payload: DeviceRegistrationPayload(
-                deviceToken: token,
-                appInstallId: installID,
-                platform: "ios"
             )
         )
     }
@@ -130,12 +118,6 @@ final class VoyaPushRegistrationService {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
-}
-
-private struct DeviceRegistrationPayload: Encodable {
-    var deviceToken: String
-    var appInstallId: String
-    var platform: String
 }
 
 private struct FlightWatchRegistrationPayload: Encodable {
