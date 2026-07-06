@@ -20,6 +20,8 @@ final class VoyaStore: ObservableObject {
     @Published var importPreparationStatus: ImportPreparationStatus?
     @Published var isExtractingConfirmation = false
     @Published var isConfirmingExtraction = false
+    @Published var assistantIntelligenceCache: [String: AssistantIntelligence] = [:]
+    @Published var refreshingAssistantIntelligenceKeys: Set<String> = []
 
     var selectedTrip: Trip? {
         guard let selectedTripID else { return trips.first }
@@ -39,7 +41,6 @@ final class VoyaStore: ObservableObject {
     }
 
     let recommendations = SampleData.recommendations
-    let alerts = SampleData.alerts
 
     var itinerary: [ItineraryItem] {
         selectedTrip.map { sortedItinerary($0.items) } ?? []

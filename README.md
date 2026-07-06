@@ -149,6 +149,9 @@ Optional enrichment environment variables:
 - `GOOGLE_ROUTES_API_KEY` or `GOOGLE_MAPS_API_KEY`: enables `POST /api/mobility` through Google Routes API for live transfer duration, traffic-aware driving, public transit, walking, cycling, route comparison, and time-to-leave planning.
 - `UBER_CLIENT_ID` and `UBER_CLIENT_SECRET`: optional Uber developer credentials. `GET /api/uber-diagnostics` checks whether OAuth and estimates/products endpoints are accessible without exposing secrets.
 - `VOYA_API_PUBLIC_BASE_URL`: optional public backend URL used to describe the FlightAware alert callback endpoint, for example `https://voya-lime.vercel.app`.
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`: optional Redis storage for APNs device tokens, watched flights, FlightAware alert deduplication, and last known gate state. Without these, webhook responses are accepted but not persisted.
+- `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_PRIVATE_KEY`, and `APNS_ENV`: optional Apple Push Notification service credentials used by `POST /api/flightaware-alerts` to fan out traveler alerts after a FlightAware callback. Use `APNS_ENV=development` for debug builds and `APNS_ENV=production` for App Store/TestFlight builds.
+- `VOYA_PUSH_TEST_DEVICE_TOKENS`: optional comma-separated APNs token fallback for testing webhook delivery before Redis-backed device registration is enabled.
 
 Flight support endpoints:
 
@@ -156,7 +159,9 @@ Flight support endpoints:
 - `POST /api/flight-status` with `{ "flightNumber": "BA2490", "date": "2026-08-12", "originAirport": "LHR", "destinationAirport": "FCO" }`
 - `POST /api/booking-validation` combines imported-confirmation evidence, user review, and provider flight existence validation. It does not claim true PNR or ticket validation unless Voya later integrates directly with the airline, OTA, NDC, GDS, or booking provider.
 - `GET/POST/DELETE /api/flightaware-alert-subscriptions` proxies FlightAware AeroAPI `/alerts` management calls while keeping the AeroAPI key server-side. Use the exact alert payload shape from FlightAware's `/alerts` documentation.
-- `POST /api/flightaware-alerts` receives FlightAware alert callbacks after a FlightAware alert subscription points to this callback URL, then normalizes them for Voya alert generation.
+- `POST /api/push-register-device` stores iOS APNs device tokens when Redis is configured.
+- `POST /api/flight-watch` stores device-to-flight watch records so one provider callback can fan out to multiple travelers on the same flight.
+- `POST /api/flightaware-alerts` receives FlightAware alert callbacks after a FlightAware alert subscription points to this callback URL, normalizes them, deduplicates gate/status changes, and sends APNs alerts to matching watched devices when APNs credentials are configured.
 
 Mobility support endpoints:
 

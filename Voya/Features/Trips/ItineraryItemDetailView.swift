@@ -21,6 +21,9 @@ struct ItineraryItemDetailView: View {
     @State private var sourcePreviewURL: URL?
     @State private var isBoardingPassImporterPresented = false
     @State private var boardingPassImportMessage: String?
+    @State private var flightLookupResponse: FlightLookupResponse?
+    @State private var isRefreshingFlightStatus = false
+    @State private var flightStatusMessage: String?
     let item: ItineraryItem
     let sourceDocument: SourceDocument?
     let onSave: (ItineraryItemDraft) -> Void
@@ -58,6 +61,7 @@ struct ItineraryItemDetailView: View {
                     )
                     if item.kind == .flight {
                         boardingPassCard
+                        flightStatusCard
                     }
                     ItemInsightPanel(
                         item: item,
@@ -120,6 +124,9 @@ struct ItineraryItemDetailView: View {
         }
         .task(id: item.id) {
             await loadEnrichment()
+            if item.kind == .flight {
+                await VoyaPushRegistrationService.shared.registerFlightWatch(for: item)
+            }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -380,6 +387,67 @@ struct ItineraryItemDetailView: View {
         .shadow(color: .black.opacity(0.04), radius: 12, y: 7)
     }
 
+    private var flightStatusCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "airplane.departure")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Color.voyaSky)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Flight status")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text(flightStatusSubtitle)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                Button {
+                    Task {
+                        await refreshFlightStatus()
+                    }
+                } label: {
+                    if isRefreshingFlightStatus {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .tint(Color.voyaTeal)
+                            .frame(width: 38, height: 38)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(flightLookupNumber == nil ? Color.voyaMuted : Color.voyaTeal)
+                            .frame(width: 38, height: 38)
+                    }
+                }
+                .background(Color.voyaSurface)
+                .clipShape(Circle())
+                .buttonStyle(.plain)
+                .disabled(isRefreshingFlightStatus || flightLookupNumber == nil)
+                .accessibilityLabel("Refresh flight status")
+            }
+
+            if let response = flightLookupResponse {
+                FlightStatusSummaryView(response: response)
+            } else {
+                Text(flightStatusMessage ?? String(localized: "Refresh to pull the latest gate, delay estimate, and reliability signal from the flight provider."))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(flightStatusMessage == nil ? Color.voyaMuted : Color.voyaCoral)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.04), radius: 12, y: 7)
+    }
+
     private var locationActions: some View {
         HStack(spacing: 10) {
             Button {
@@ -469,6 +537,19 @@ struct ItineraryItemDetailView: View {
         LocationLinkResolver.directURL(from: draft.location) == nil ? String(localized: "Open map") : String(localized: "Open link")
     }
 
+    private var flightLookupNumber: String? {
+        guard item.kind == .flight else {
+            return nil
+        }
+
+        return store.firstFlightNumber(in: "\(item.title) \(item.location)")
+    }
+
+    private var flightStatusSubtitle: String {
+        flightLookupNumber.map { String(localized: "Live lookup and push watch for \($0).") }
+            ?? String(localized: "Add a flight number to enable live lookup.")
+    }
+
     private func openMaps() {
         guard let url = LocationLinkResolver.mapURL(for: draft.location) else {
             return
@@ -513,5 +594,135 @@ struct ItineraryItemDetailView: View {
         } catch {
             enrichment = nil
         }
+    }
+
+    @MainActor
+    private func refreshFlightStatus() async {
+        guard let flightNumber = flightLookupNumber, !isRefreshingFlightStatus else {
+            return
+        }
+
+        isRefreshingFlightStatus = true
+        flightStatusMessage = nil
+        defer { isRefreshingFlightStatus = false }
+
+        let route = store.airportRouteCodes(in: item.location)
+        do {
+            let response = try await VercelFlightLookupService().lookup(
+                flightNumber: flightNumber,
+                date: item.startsAt,
+                originAirport: route?.origin,
+                destinationAirport: route?.destination
+            )
+            flightLookupResponse = response
+
+            if let candidate = response.candidate {
+                if store.apply(candidate, toImportedFlight: item) {
+                    draft = ItineraryItemDraft(item: item)
+                    store.saveTrips()
+                }
+                await VoyaPushRegistrationService.shared.registerFlightWatch(for: item, candidate: candidate)
+                flightStatusMessage = String(localized: "Flight status refreshed.")
+            } else {
+                await VoyaPushRegistrationService.shared.registerFlightWatch(for: item)
+                flightStatusMessage = response.warnings.first ?? response.validation.reasons.first ?? String(localized: "No matching live flight was found.")
+            }
+        } catch {
+            flightStatusMessage = String(localized: "Flight lookup is unavailable right now.")
+        }
+    }
+}
+
+private struct FlightStatusSummaryView: View {
+    let response: FlightLookupResponse
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                FlightStatusMetric(title: String(localized: "Gate"), value: gateValue)
+                FlightStatusMetric(title: String(localized: "Delay"), value: delayValue)
+            }
+
+            if let headline = response.delayStats?.headline.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+                Label(headline, systemImage: "clock.badge.exclamationmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle((response.delayStats?.delayMinutes ?? 0) >= 15 ? Color.voyaCoral : Color.voyaInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let reliabilityText {
+                Label(reliabilityText, systemImage: "chart.bar.xaxis")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let firstWarning = response.warnings.first, !firstWarning.isEmpty {
+                Label(firstWarning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.voyaCoral)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var gateValue: String {
+        let terminal = response.gate?.departureTerminal ?? response.candidate?.departureTerminal
+        let gate = response.gate?.departureGate ?? response.candidate?.departureGate
+        let parts = [
+            terminal.map { String(localized: "T\($0)") },
+            gate.map { String(localized: "Gate \($0)") }
+        ].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+
+        return parts.isEmpty ? String(localized: "Not posted") : parts.joined(separator: " · ")
+    }
+
+    private var delayValue: String {
+        guard let delayMinutes = response.delayStats?.delayMinutes else {
+            return response.delayStats?.onTimeProbability.map { "\(Int(($0 * 100).rounded()))%" } ?? String(localized: "Checking")
+        }
+
+        if delayMinutes <= 5 {
+            return String(localized: "On time")
+        }
+
+        return String(localized: "\(delayMinutes) min")
+    }
+
+    private var reliabilityText: String? {
+        guard let reliability = response.reliability else {
+            return response.delayStats?.onTimeProbability.map { String(localized: "\(Int(($0 * 100).rounded()))% Voya on-time estimate") }
+        }
+
+        let delayed = reliability.delayed15Rate.map { "\(Int(($0 * 100).rounded()))% delayed" }
+        let average = reliability.averageArrivalDelayMinutes.map { "avg arrival delay \(Int($0.rounded())) min" }
+        let sample = reliability.sampleSize > 0 ? "\(reliability.sampleSize) recent flights" : nil
+
+        return [sample, delayed, average]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+            .nilIfEmpty
+    }
+}
+
+private struct FlightStatusMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(Color.voyaMuted)
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.voyaInk)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }

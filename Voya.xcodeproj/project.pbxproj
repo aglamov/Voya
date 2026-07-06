@@ -25,8 +25,10 @@
 		D0000000000000000000002F /* ItemEnricher.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000000F /* ItemEnricher.swift */; };
 		D00000000000000000000030 /* FlightLookupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000010 /* FlightLookupService.swift */; };
 		D00000000000000000000031 /* ConfirmationParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000011 /* ConfirmationParser.swift */; };
+		D00000000000000000000070 /* AssistantAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006F /* AssistantAIService.swift */; };
 		D00000000000000000000032 /* ItemEnrichmentCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000012 /* ItemEnrichmentCache.swift */; };
 		D00000000000000000000033 /* VoyaNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000013 /* VoyaNotifications.swift */; };
+		D00000000000000000000071 /* VoyaPushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000072 /* VoyaPushRegistration.swift */; };
 		D00000000000000000000034 /* InspireView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000014 /* InspireView.swift */; };
 		D00000000000000000000035 /* TripsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000015 /* TripsView.swift */; };
 		D00000000000000000000036 /* TripHeroComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000016 /* TripHeroComponents.swift */; };
@@ -40,6 +42,7 @@
 		D0000000000000000000003E /* ImportModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000001E /* ImportModels.swift */; };
 		D0000000000000000000003F /* ImportComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000001F /* ImportComponents.swift */; };
 		D00000000000000000000040 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000020 /* AssistantView.swift */; };
+		D0000000000000000000006E /* AssistantIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0000000000000000000006D /* AssistantIntelligence.swift */; };
 		1A2B3C4D5E6F700000000015 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700000000007 /* Assets.xcassets */; };
 		1A2B3C4D5E6F700000000016 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F700000000008 /* Localizable.xcstrings */; };
 		D00000000000000000000055 /* StringHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000054 /* StringHelpers.swift */; };
@@ -74,8 +77,10 @@
 		D0000000000000000000000F /* ItemEnricher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemEnricher.swift; sourceTree = "<group>"; };
 		D00000000000000000000010 /* FlightLookupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightLookupService.swift; sourceTree = "<group>"; };
 		D00000000000000000000011 /* ConfirmationParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationParser.swift; sourceTree = "<group>"; };
+		D0000000000000000000006F /* AssistantAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantAIService.swift; sourceTree = "<group>"; };
 		D00000000000000000000012 /* ItemEnrichmentCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemEnrichmentCache.swift; sourceTree = "<group>"; };
 		D00000000000000000000013 /* VoyaNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoyaNotifications.swift; sourceTree = "<group>"; };
+		D00000000000000000000072 /* VoyaPushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoyaPushRegistration.swift; sourceTree = "<group>"; };
 		D00000000000000000000014 /* InspireView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspireView.swift; sourceTree = "<group>"; };
 		D00000000000000000000015 /* TripsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripsView.swift; sourceTree = "<group>"; };
 		D00000000000000000000016 /* TripHeroComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripHeroComponents.swift; sourceTree = "<group>"; };
@@ -89,7 +94,9 @@
 		D0000000000000000000001E /* ImportModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportModels.swift; sourceTree = "<group>"; };
 		D0000000000000000000001F /* ImportComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportComponents.swift; sourceTree = "<group>"; };
 		D00000000000000000000020 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
+		D0000000000000000000006D /* AssistantIntelligence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantIntelligence.swift; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D00000000000000000000073 /* Voya.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Voya.entitlements; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700000000006 /* Voya.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Voya.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A2B3C4D5E6F700000000007 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1A2B3C4D5E6F700000000008 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
@@ -134,6 +141,7 @@
 				D0000000000000000000004C /* Features */,
 				D0000000000000000000004B /* Notifications */,
 				1A2B3C4D5E6F700000000005 /* Info.plist */,
+				D00000000000000000000073 /* Voya.entitlements */,
 				1A2B3C4D5E6F700000000008 /* Localizable.xcstrings */,
 				1A2B3C4D5E6F700000000007 /* Assets.xcassets */,
 			);
@@ -226,6 +234,7 @@
 				D0000000000000000000000F /* ItemEnricher.swift */,
 				D00000000000000000000010 /* FlightLookupService.swift */,
 				D00000000000000000000011 /* ConfirmationParser.swift */,
+				D0000000000000000000006F /* AssistantAIService.swift */,
 			);
 			path = API;
 			sourceTree = "<group>";
@@ -242,6 +251,7 @@
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000013 /* VoyaNotifications.swift */,
+				D00000000000000000000072 /* VoyaPushRegistration.swift */,
 			);
 			path = Notifications;
 			sourceTree = "<group>";
@@ -297,6 +307,7 @@
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000020 /* AssistantView.swift */,
+				D0000000000000000000006D /* AssistantIntelligence.swift */,
 			);
 			path = Assistant;
 			sourceTree = "<group>";
@@ -421,8 +432,10 @@
 				D0000000000000000000002F /* ItemEnricher.swift in Sources */,
 				D00000000000000000000030 /* FlightLookupService.swift in Sources */,
 				D00000000000000000000031 /* ConfirmationParser.swift in Sources */,
+				D00000000000000000000070 /* AssistantAIService.swift in Sources */,
 				D00000000000000000000032 /* ItemEnrichmentCache.swift in Sources */,
 				D00000000000000000000033 /* VoyaNotifications.swift in Sources */,
+				D00000000000000000000071 /* VoyaPushRegistration.swift in Sources */,
 				D00000000000000000000034 /* InspireView.swift in Sources */,
 				D00000000000000000000035 /* TripsView.swift in Sources */,
 				D00000000000000000000036 /* TripHeroComponents.swift in Sources */,
@@ -439,6 +452,7 @@
 				D0000000000000000000003E /* ImportModels.swift in Sources */,
 				D0000000000000000000003F /* ImportComponents.swift in Sources */,
 				D00000000000000000000040 /* AssistantView.swift in Sources */,
+				D0000000000000000000006E /* AssistantIntelligence.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -568,6 +582,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				APS_ENVIRONMENT = development;
+				CODE_SIGN_ENTITLEMENTS = Voya/Voya.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -601,6 +617,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				APS_ENVIRONMENT = production;
+				CODE_SIGN_ENTITLEMENTS = Voya/Voya.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";

@@ -77,7 +77,48 @@ struct FlightLookupResponse: Decodable {
 
     var validation: Validation
     var candidate: FlightLookupCandidate?
+    var delayStats: FlightDelayStats?
+    var reliability: FlightReliabilityStats?
+    var gate: FlightGateStatus?
+    var alerting: FlightAlertingStatus?
     var warnings: [String]
+}
+
+struct FlightDelayStats: Decodable {
+    var headline: String
+    var delayMinutes: Int?
+    var onTimeProbability: Double?
+    var reasons: [String]
+}
+
+struct FlightReliabilityStats: Decodable {
+    var sampleSize: Int
+    var averageDepartureDelayMinutes: Double?
+    var averageArrivalDelayMinutes: Double?
+    var delayed15Rate: Double?
+    var cancelledCount: Int
+    var divertedCount: Int
+    var typicalDepartureGate: String?
+    var typicalArrivalGate: String?
+    var typicalAircraftTypes: [String]
+}
+
+struct FlightGateStatus: Decodable {
+    var departureTerminal: String?
+    var departureGate: String?
+    var arrivalTerminal: String?
+    var arrivalGate: String?
+    var baggageClaim: String?
+    var changed: Bool
+    var guidance: [String]
+}
+
+struct FlightAlertingStatus: Decodable {
+    var supported: Bool
+    var source: String
+    var events: [String]
+    var webhookEndpoint: String
+    var managementEndpoint: String
 }
 
 struct VercelFlightLookupService {

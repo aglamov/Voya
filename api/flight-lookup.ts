@@ -86,6 +86,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         dataMode: snapshot.dataMode,
         confidence: status.validation.confidence
       } : undefined,
+      delayStats: status.delayStats,
+      reliability: status.intelligence.history ? {
+        sampleSize: status.intelligence.history.sampleSize,
+        averageDepartureDelayMinutes: status.intelligence.history.averageDepartureDelayMinutes,
+        averageArrivalDelayMinutes: status.intelligence.history.averageArrivalDelayMinutes,
+        delayed15Rate: status.intelligence.history.delayed15Rate,
+        cancelledCount: status.intelligence.history.cancelledCount,
+        divertedCount: status.intelligence.history.divertedCount,
+        typicalDepartureGate: status.intelligence.history.typicalDepartureGate,
+        typicalArrivalGate: status.intelligence.history.typicalArrivalGate,
+        typicalAircraftTypes: status.intelligence.history.typicalAircraftTypes
+      } : undefined,
+      gate: status.gate,
+      alerting: status.alerting,
       warnings: status.warnings,
       provider: status.provider
     });

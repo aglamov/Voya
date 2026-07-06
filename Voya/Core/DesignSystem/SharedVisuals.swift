@@ -28,6 +28,13 @@ struct AlertCard: View {
                     .font(.subheadline)
                     .foregroundStyle(Color.voyaMuted)
                     .fixedSize(horizontal: false, vertical: true)
+                if let sourceText {
+                    Label(sourceText, systemImage: "point.3.connected.trianglepath.dotted")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(alert.severity.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
             }
 
             Spacer(minLength: 0)
@@ -37,6 +44,18 @@ struct AlertCard: View {
         .foregroundStyle(Color.voyaInk)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 14, y: 8)
+    }
+
+    private var sourceText: String? {
+        guard let sourceTitle = alert.sourceTitle?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty else {
+            return nil
+        }
+
+        if let sourceDetail = alert.sourceDetail?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            return "\(sourceTitle): \(sourceDetail)"
+        }
+
+        return sourceTitle
     }
 }
 

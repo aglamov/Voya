@@ -14,7 +14,8 @@ struct FlightCheckInAction: Identifiable {
     init?(item: ItineraryItem, now: Date = Date()) {
         guard item.kind == .flight,
               let departsAt = item.startsAt,
-              departsAt > now else {
+              departsAt > now,
+              !Self.isAlreadyCheckedIn(item) else {
             return nil
         }
 
@@ -54,6 +55,21 @@ struct FlightCheckInAction: Identifiable {
         }
 
         return airlineName(forFlightNumber: flightNumber)
+    }
+
+    static func isAlreadyCheckedIn(_ item: ItineraryItem) -> Bool {
+        let status = item.status
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !status.isEmpty else {
+            return false
+        }
+
+        return status.contains("checked in")
+            || status.contains("checked-in")
+            || status.contains("boarding pass")
+            || status.contains("посадочный")
+            || status.contains("зарегистр")
     }
 
     private static func requiredDetails(confirmationCode: String?) -> [String] {

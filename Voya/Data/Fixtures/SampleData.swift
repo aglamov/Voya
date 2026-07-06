@@ -73,12 +73,6 @@ enum SampleData {
         )
     ]
 
-    static let alerts: [TravelAlert] = [
-        TravelAlert(title: String(localized: "Leave at 06:50"), message: String(localized: "Traffic is normal. This keeps 35 minutes of airport buffer."), severity: .calm),
-        TravelAlert(title: String(localized: "Gate not posted yet"), message: String(localized: "Voya will check again 2 hours before departure."), severity: .watch),
-        TravelAlert(title: String(localized: "Hotel route ready"), message: String(localized: "Fastest public transit option takes 42 minutes from FCO."), severity: .calm)
-    ]
-
     private static func date(month: Int, day: Int, hour: Int, minute: Int) -> Date {
         Calendar.current.date(
             from: DateComponents(
