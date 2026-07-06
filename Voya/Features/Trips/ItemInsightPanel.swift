@@ -78,6 +78,7 @@ struct ItemInsightPanel: View {
                 DetailedInsightBrief(
                     enrichment: enrichment,
                     fallbackText: aiBriefText,
+                    itemKind: item.kind,
                     isRussian: isRussian
                 )
             } else {
@@ -573,6 +574,7 @@ struct DetailedInsightBrief: View {
     @Environment(\.openURL) private var openURL
     let enrichment: ItemEnrichment
     let fallbackText: String
+    let itemKind: ItineraryKind
     let isRussian: Bool
 
     var body: some View {
@@ -636,21 +638,39 @@ struct DetailedInsightBrief: View {
     }
 
     private var displaySections: [DetailedBriefSection] {
+        if let polishedSections = polishedSectionsFromCards(), !polishedSections.isEmpty {
+            return deduplicated(polishedSections)
+        }
+
         let sourceSections = enrichment.sections.isEmpty
             ? sectionsFromMarkdown(enrichment.briefMarkdown)
             : enrichment.sections.map {
                 DetailedBriefSection(title: $0.title, body: $0.body, kind: $0.kind)
             }
 
-        let filtered = sourceSections.filter { section in
+        let filtered = sourceSections.compactMap { section -> DetailedBriefSection? in
             let title = section.title.lowercased()
             guard !title.contains("assistant stance"),
                   !title.contains("позиция ассистента"),
                   !title.contains("следующие действия"),
                   !title.contains("next actions") else {
-                return false
+                return nil
             }
-            return !section.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+            if isGenericOverview(section) {
+                return nil
+            }
+
+            if section.kind == "route", isBareRoute(section.body) {
+                return nil
+            }
+
+            let body = cleanSectionBody(section.body)
+            guard !body.isEmpty else {
+                return nil
+            }
+
+            return DetailedBriefSection(title: section.title, body: body, kind: section.kind)
         }
 
         let unique = deduplicated(filtered)
@@ -658,6 +678,77 @@ struct DetailedInsightBrief: View {
             return [DetailedBriefSection(title: isRussian ? "Главное" : "Overview", body: fallbackText, kind: "overview")]
         }
         return unique
+    }
+
+    private func polishedSectionsFromCards() -> [DetailedBriefSection]? {
+        switch itemKind {
+        case .flight:
+            return polishedFlightSections()
+        case .hotel, .event, .transit:
+            return nil
+        }
+    }
+
+    private func polishedFlightSections() -> [DetailedBriefSection] {
+        let flight = firstCard(kind: "flight", titles: ["Рейс", "Flight"])
+        let gate = firstCard(kind: "flight", titles: ["Выход", "Gate"])
+        let delay = firstCard(kind: "flight", titles: ["Задержка", "Delay"])
+        let weather = firstCard(kind: "weather", titles: ["Погода", "Weather", "Airport weather", "Погода в аэропорту"])
+
+        var sections: [DetailedBriefSection] = []
+
+        if let flight {
+            let value = cleanInlineText(flight.value)
+            let detail = cleanInlineText(flight.detail ?? "")
+            let body = [humanizedFlightValue(value), humanizedFlightDetail(detail)]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            if !body.isEmpty {
+                sections.append(DetailedBriefSection(title: isRussian ? "Рейс" : "Flight", body: body, kind: "flight"))
+            }
+        }
+
+        if let gate {
+            let value = cleanInlineText(gate.value)
+            let detail = cleanInlineText(gate.detail ?? "")
+            let body: String
+            if value.localizedCaseInsensitiveContains("не опубликовано") || value.localizedCaseInsensitiveContains("not posted") {
+                body = isRussian
+                    ? "Выход пока не опубликован. Проверьте его за 1-3 часа до вылета и сверяйтесь с табло аэропорта."
+                    : "The gate is not posted yet. Check again 1-3 hours before departure and use airport displays as the final source."
+            } else {
+                body = [isRussian ? "Выход: \(value)." : "Gate: \(value).", detail].filter { !$0.isEmpty }.joined(separator: "\n")
+            }
+            sections.append(DetailedBriefSection(title: isRussian ? "Выход" : "Gate", body: body, kind: "flight"))
+        }
+
+        if let delay {
+            let value = cleanInlineText(delay.value)
+            let detail = cleanInlineText(delay.detail ?? "")
+            let body = [isRussian ? "Сигнал по задержкам: \(value)." : "Delay signal: \(value).", detail]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            sections.append(DetailedBriefSection(title: isRussian ? "Надежность" : "Reliability", body: body, kind: delay.kind == "warning" ? "risk" : "flight"))
+        }
+
+        if let weather {
+            let value = humanizedWeatherText(cleanInlineText(weather.value))
+            let detail = humanizedWeatherText(cleanInlineText(weather.detail ?? ""))
+            let body = [value, detail].filter { !$0.isEmpty }.joined(separator: "\n")
+            if !body.isEmpty {
+                sections.append(DetailedBriefSection(title: isRussian ? "Погода" : "Weather", body: body, kind: "weather"))
+            }
+        }
+
+        return sections
+    }
+
+    private func firstCard(kind: String, titles: [String]) -> ItemEnrichmentCard? {
+        enrichment.cards.first { card in
+            titles.contains { title in
+                card.title.localizedCaseInsensitiveContains(title)
+            }
+        } ?? enrichment.cards.first { $0.kind == kind }
     }
 
     private var displayActions: [TravelAction] {
@@ -738,6 +829,27 @@ struct DetailedInsightBrief: View {
         }
     }
 
+    private func isGenericOverview(_ section: DetailedBriefSection) -> Bool {
+        let combined = "\(section.title) \(section.body)".lowercased()
+        return combined.contains("не просто пункт маршрута")
+            || combined.contains("not just an itinerary item")
+            || combined.contains("здесь сходятся время")
+            || combined.contains("combines timing, place, route")
+    }
+
+    private func isBareRoute(_ value: String) -> Bool {
+        let cleaned = cleanInlineText(value)
+        return cleaned.range(of: #"^[A-Z0-9]{3,4}\s+(to|→|->)\s+[A-Z0-9]{3,4}$"#, options: .regularExpression) != nil
+    }
+
+    private func cleanSectionBody(_ value: String) -> String {
+        value
+            .components(separatedBy: .newlines)
+            .map(cleanMarkdownLine)
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
     private func cleanMarkdownLine(_ value: String) -> String {
         cleanInlineText(
             value
@@ -754,6 +866,33 @@ struct DetailedInsightBrief: View {
             .replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func humanizedFlightValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "->", with: "→")
+            .replacingOccurrences(of: " to ", with: " → ", options: .caseInsensitive)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    private func humanizedFlightDetail(_ value: String) -> String {
+        guard !value.isEmpty else {
+            return ""
+        }
+
+        return value
+            .replacingOccurrences(of: "->", with: "→")
+            .replacingOccurrences(of: "Schedule", with: isRussian ? "по расписанию" : "schedule", options: .caseInsensitive)
+            .replacingOccurrences(of: "Published schedule", with: isRussian ? "опубликованное расписание" : "published schedule", options: .caseInsensitive)
+    }
+
+    private func humanizedWeatherText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"(\d+)\s*C\b"#, with: "$1 °C", options: .regularExpression)
+            .replacingOccurrences(of: " - ", with: " · ")
+            .replacingOccurrences(of: "Clear skies", with: isRussian ? "ясное небо" : "clear skies", options: .caseInsensitive)
+            .replacingOccurrences(of: "Few clouds", with: isRussian ? "малооблачно" : "few clouds", options: .caseInsensitive)
+            .replacingOccurrences(of: "Scattered clouds", with: isRussian ? "переменная облачность" : "scattered clouds", options: .caseInsensitive)
     }
 
     private func normalizedKey(_ value: String) -> String {
