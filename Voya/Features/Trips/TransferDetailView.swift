@@ -21,6 +21,7 @@ struct TransferDetailView: View {
     @State private var displayOrigin = ""
     @State private var displayDestination = ""
     @State private var draftBufferMinutes: Int?
+    @State private var appliedBufferMinutes: Int?
     @State private var isShowingDeleteConfirmation = false
 
     var body: some View {
@@ -169,7 +170,6 @@ struct TransferDetailView: View {
                     set: { newValue in
                         let boundedValue = min(max(newValue, 0), 240)
                         draftBufferMinutes = boundedValue
-                        onUpdateBuffer(boundedValue)
                     }
                 ),
                 in: 0...240,
@@ -178,6 +178,24 @@ struct TransferDetailView: View {
                 Text("Extra time before arrival or departure")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Color.voyaMuted)
+            }
+
+            if hasPendingBufferChanges {
+                Button {
+                    let bufferMinutes = effectiveBufferMinutes
+                    onUpdateBuffer(bufferMinutes)
+                    appliedBufferMinutes = bufferMinutes
+                } label: {
+                    Label("Save changes", systemImage: "arrow.clockwise")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .foregroundStyle(.white)
+                        .background(Color.voyaTeal)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
             }
         }
         .padding(18)
@@ -523,6 +541,10 @@ struct TransferDetailView: View {
 
     private var effectiveBufferMinutes: Int {
         draftBufferMinutes ?? context.airportBufferMinutes
+    }
+
+    private var hasPendingBufferChanges: Bool {
+        effectiveBufferMinutes != (appliedBufferMinutes ?? context.airportBufferMinutes)
     }
 
     private var primaryDetail: String {
