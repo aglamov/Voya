@@ -149,6 +149,13 @@ function pushCopy(
     };
   }
 
+  if (departureGate && !previous?.departureGate) {
+    return {
+      title: `${flight} gate posted`,
+      body: `Departure gate is ${departureGate}${departureTerminal ? `, terminal ${departureTerminal}` : ""}.`
+    };
+  }
+
   if (departureGate && event.includes("gate")) {
     return {
       title: `${flight} gate update`,
@@ -160,6 +167,13 @@ function pushCopy(
     return {
       title: `${flight} arrival gate changed`,
       body: `Arrival gate ${previous.arrivalGate} -> ${arrivalGate}.`
+    };
+  }
+
+  if (arrivalGate && !previous?.arrivalGate) {
+    return {
+      title: `${flight} arrival gate posted`,
+      body: `Arrival gate is ${arrivalGate}.`
     };
   }
 
@@ -297,8 +311,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     || changed(previous?.arrivalGate, normalized.gate.arrivalGate)
     || changed(previous?.departureTerminal, normalized.gate.departureTerminal)
     || changed(previous?.arrivalTerminal, normalized.gate.arrivalTerminal);
+  const hasNewGateInfo = Boolean((normalized.gate.departureGate && !previous?.departureGate)
+    || (normalized.gate.arrivalGate && !previous?.arrivalGate));
   const eventLooksImportant = /gate|delay|schedule|cancel|divert/i.test(normalized.eventType);
-  const shouldPush = !duplicate && copy && (hasGateDiff || eventLooksImportant);
+  const shouldPush = !duplicate && copy && (hasGateDiff || hasNewGateInfo || eventLooksImportant);
   const storedTokens = await registeredTokensForFlight(flightNumber, normalized.flightDate);
   const testTokens = storedTokens.length ? [] : fallbackPushTokens();
   const deviceTokens = [...new Set([...storedTokens, ...testTokens])];
