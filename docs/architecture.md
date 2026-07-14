@@ -13,7 +13,7 @@ flowchart TD
     iOS["iPhone App"] --> API["Voya Backend API"]
     API --> AI["AI Orchestration"]
     API --> DB["Upstash Redis operational state"]
-    API --> Jobs["Vercel Cron and provider webhooks"]
+    API --> Jobs["QStash schedule and provider webhooks"]
     Jobs --> Flight["Flight Status APIs"]
     Jobs --> Search["Travel Search APIs"]
     Jobs --> Maps["Maps and Transit APIs"]
@@ -73,7 +73,7 @@ Current production stack:
 
 - TypeScript Vercel Functions
 - Upstash Redis for ephemeral operational state
-- Vercel Cron for weather monitoring
+- Upstash QStash for weather monitoring
 - FlightAware webhooks for flight changes
 - APNs for notifications
 

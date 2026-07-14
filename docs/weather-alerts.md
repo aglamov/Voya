@@ -6,7 +6,7 @@ Voya uses OpenWeather One Call 4.0 for both current weather cards and official w
 
 1. iOS receives an APNs device token.
 2. Upcoming trip locations are registered through `POST /api/weather-watch`.
-3. `GET /api/weather-monitor` is invoked every 10 minutes by Vercel Cron.
+3. `POST /api/weather-monitor` is invoked every 10 minutes by Upstash QStash.
 4. Watches are grouped by rounded coordinates so nearby itinerary items share one current-weather lookup.
 5. Alert IDs from One Call `current` are resolved through `/onecall/alert/{alert_id}`.
 6. Redis `SET NX` delivery keys prevent duplicate notifications for the same installation and alert.
@@ -19,7 +19,7 @@ The monitor only checks a watch from 48 hours before its itinerary start until 1
 - `OPENWEATHER_API_KEY`
 - `UPSTASH_REDIS_REST_URL`
 - `UPSTASH_REDIS_REST_TOKEN`
-- `CRON_SECRET`: a random value of at least 16 characters. Vercel automatically forwards it as a bearer token to cron endpoints.
+- `WEATHER_MONITOR_SECRET`: a random value of at least 32 bytes, forwarded by QStash as a bearer token.
 - `WEATHER_MAX_GROUPS_PER_RUN`: optional cost ceiling; defaults to 12 coordinate groups per run. Groups are processed round-robin.
 - `APNS_KEY_ID`
 - `APNS_TEAM_ID`
@@ -29,9 +29,9 @@ The monitor only checks a watch from 48 hours before its itinerary start until 1
 
 `VOYA_API_BASE_URL` must point the iOS build to the production Vercel deployment.
 
-## Vercel Cron
+## QStash schedule
 
-[`vercel.json`](../vercel.json) registers `/api/weather-monitor` with the `*/10 * * * *` schedule. On Vercel Pro it runs with per-minute scheduling precision. Add `CRON_SECRET` to Production before deploying; Vercel sends it automatically in the `Authorization` header.
+Create one QStash schedule for `https://voya-lime.vercel.app/api/weather-monitor` using `*/10 * * * *`, method `POST`, and `Authorization: Bearer <WEATHER_MONITOR_SECRET>`. The free QStash allowance is enough for the 144 normal invocations per day and includes retries.
 
 The endpoint also accepts `WEATHER_MONITOR_SECRET` through `x-voya-monitor-secret` as an optional manual-diagnostics secret:
 

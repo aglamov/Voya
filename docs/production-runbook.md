@@ -13,7 +13,8 @@ This is the release path for the current account-free MVP: Trips, Import, Assist
 | Nearby public events | Ticketmaster Discovery | Consumer Key |
 | Watches, deduplication, rate limits | Upstash Redis | REST URL and token |
 | Push delivery | Apple APNs | `.p8` key, key ID, team ID, bundle ID |
-| Hosting and schedule | Vercel Pro | production deployment and `CRON_SECRET` |
+| Hosting | Vercel Hobby | production deployment |
+| Weather schedule | Upstash QStash Free | ten-minute POST schedule and `WEATHER_MONITOR_SECRET` |
 
 Use `.env.example` as the variable inventory. Store values only in Vercel and the relevant CI/Xcode secret store; never commit them.
 
@@ -21,8 +22,8 @@ Use `.env.example` as the variable inventory. Store values only in Vercel and th
 
 1. Link this repository to the existing Vercel project or run `vercel link` after `vercel login`.
 2. Add every required variable from `.env.example` to Production. Provider keys needed by previews may also be added to Preview.
-3. Use independent random values of at least 32 bytes for `CRON_SECRET`, `WEATHER_MONITOR_SECRET`, `FLIGHTAWARE_ALERT_WEBHOOK_SECRET`, `VOYA_ADMIN_SECRET`, and `VOYA_CLIENT_API_KEY`.
-4. Deploy production. `vercel.json` creates the weather monitor cron automatically.
+3. Use independent random values of at least 32 bytes for `WEATHER_MONITOR_SECRET`, `FLIGHTAWARE_ALERT_WEBHOOK_SECRET`, `VOYA_ADMIN_SECRET`, and `VOYA_CLIENT_API_KEY`.
+4. Deploy production, then create the QStash schedule described below.
 5. Set a low Vercel spend notification and hard limit appropriate for the MVP.
 
 The public app endpoints require a valid anonymous installation ID in production, enforce Upstash-backed hourly limits, cap payload sizes, and optionally require `VOYA_CLIENT_API_KEY`. The shared client key deters unsophisticated external traffic but is extractable from an app binary. App Attest is the next security upgrade once real usage justifies its challenge/assertion infrastructure.
@@ -50,7 +51,9 @@ The callback rejects requests when `FLIGHTAWARE_ALERT_WEBHOOK_SECRET` is absent 
 
 ## 5. Weather activation and budget
 
-Vercel invokes `/api/weather-monitor` every ten minutes. The endpoint accepts `CRON_SECRET`, prevents overlapping executions, groups nearby coordinates, deduplicates alert delivery, and rotates through at most `WEATHER_MAX_GROUPS_PER_RUN` groups per execution.
+QStash invokes `/api/weather-monitor` every ten minutes with `POST` and `Authorization: Bearer <WEATHER_MONITOR_SECRET>`. The endpoint prevents overlapping executions, groups nearby coordinates, deduplicates alert delivery, and rotates through at most `WEATHER_MAX_GROUPS_PER_RUN` groups per execution.
+
+Create the schedule with cron expression `*/10 * * * *`, destination `https://voya-lime.vercel.app/api/weather-monitor`, and zero custom retries if you want to stay strictly within predictable request counts; the free tier otherwise has ample room for its default retries.
 
 OpenWeather One Call 4.0 includes a finite free daily allowance. Start with the default limit of 12, inspect usage after TestFlight, and lower it if destinations become numerous. Invalid APNs tokens remove their weather watches automatically.
 
@@ -73,7 +76,7 @@ curl --fail-with-body \
   --header "Authorization: Bearer YOUR_WEATHER_MONITOR_SECRET"
 ```
 
-`/api/health` returns HTTP 200 only when every retained production provider, Redis, APNs production mode, cron protection, client protection, callback secret, and public URL are configured and Redis responds.
+`/api/health` returns HTTP 200 only when every retained production provider, Redis, APNs production mode, weather-schedule protection, callback secret, and public URL are configured and Redis responds. It reports the optional shared client-key protection separately.
 
 ## 7. Release smoke test
 
@@ -83,7 +86,7 @@ curl --fail-with-body \
 4. Open an itinerary item and verify weather and Ticketmaster cards do not show provider-configuration warnings.
 5. Confirm the device token created both flight and weather watches in the endpoint responses/logs.
 6. Send one APNs test through the same production credentials or use a controlled FlightAware callback fixture.
-7. Check Vercel Cron logs after at least one ten-minute interval.
+7. Check QStash delivery logs and Vercel function logs after at least one ten-minute interval.
 8. Verify `/api/health` returns HTTP 200.
 
 ## 8. App Store essentials

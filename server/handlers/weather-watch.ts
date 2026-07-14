@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { normalizeDeviceToken, redisCommand, storageConfigured } from "./_storage.js";
-import { geocodeWeatherLocation, normalizeCoordinates, weatherConfigured } from "./_weather.js";
-import { protectPublicEndpoint } from "./_security.js";
+import { normalizeDeviceToken, redisCommand, storageConfigured } from "../../api/_storage.js";
+import { geocodeWeatherLocation, normalizeCoordinates, weatherConfigured } from "../../api/_weather.js";
+import { protectPublicEndpoint } from "../../api/_security.js";
 
 export type StoredWeatherWatch = {
   id: string;

@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { redisCommand, storageConfigured } from "./_storage.js";
+import { redisCommand, storageConfigured } from "../../api/_storage.js";
 
 function firstHeader(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -63,7 +63,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  const ready = Object.values(checks).every(Boolean) && redisReachable;
+  const requiredChecks = Object.entries(checks)
+    .filter(([name]) => name !== "clientProtection")
+    .map(([, value]) => value);
+  const ready = requiredChecks.every(Boolean) && redisReachable;
   return res.status(ready ? 200 : 503).json({
     ready,
     environment: process.env.VERCEL_ENV ?? "local",

@@ -114,7 +114,7 @@ Required Vercel environment variables:
 Optional enrichment environment variables:
 
 - `OPENWEATHER_API_KEY`: enables weather cards through OpenWeather geocoding and One Call APIs.
-- `CRON_SECRET`: protects the Vercel Cron invocation of `/api/weather-monitor`; the schedule is declared in `vercel.json`.
+- `WEATHER_MONITOR_SECRET`: protects the QStash invocation of `/api/weather-monitor`.
 - `WEATHER_MONITOR_SECRET`: optional separate secret for manual weather-monitor diagnostics.
 - `WEATHER_MAX_GROUPS_PER_RUN`: optional OpenWeather cost ceiling; defaults to 12 coordinate groups per run.
 - `TICKETMASTER_API_KEY` or `TICKETMASTER_CONSUMER_KEY`: enables nearby public event cards and Ticketmaster event links through the Discovery API. Use the Consumer Key from Ticketmaster Developer; the Consumer Secret is not needed for Discovery event search.
@@ -146,7 +146,7 @@ Weather alert endpoints:
 
 - `POST /api/weather-watch` registers an upcoming destination or non-flight itinerary location for an APNs device. It geocodes the location with OpenWeather and stores a short-lived watch in Redis.
 - `GET/POST /api/weather-monitor` is the protected background job. It groups nearby watch points, resolves active OpenWeather alerts, deduplicates deliveries, and sends APNs notifications.
-- See [docs/weather-alerts.md](docs/weather-alerts.md) for the Vercel Cron schedule, alert behavior, and operational limitations.
+- See [docs/weather-alerts.md](docs/weather-alerts.md) for the QStash schedule, alert behavior, and operational limitations.
 
 iOS configuration:
 

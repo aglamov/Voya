@@ -1,13 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { timingSafeEqual } from "node:crypto";
-import { sendAPNsAlert } from "./_apns.js";
-import { redisCommand, storageConfigured } from "./_storage.js";
+import { sendAPNsAlert } from "../../api/_apns.js";
+import { redisCommand, storageConfigured } from "../../api/_storage.js";
 import {
   currentWeatherAt,
   type NormalizedWeatherAlert,
   weatherAlertDetails,
   weatherConfigured
-} from "./_weather.js";
+} from "../../api/_weather.js";
 import { weatherWatchKey, type StoredWeatherWatch } from "./weather-watch.js";
 
 function firstHeader(value: string | string[] | undefined) {
