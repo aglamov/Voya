@@ -30,7 +30,26 @@ type FlightAwareAlertPayload = {
   estimated_in?: string;
   actual_out?: string;
   actual_in?: string;
+  long_description?: string;
+  short_description?: string;
+  flight?: FlightAwareAlertFlight;
   [key: string]: unknown;
+};
+
+type FlightAwareAlertFlight = {
+  fa_flight_id?: string;
+  ident?: string;
+  ident_iata?: string;
+  gate_origin?: string;
+  gate_destination?: string;
+  terminal_origin?: string;
+  terminal_destination?: string;
+  scheduled_out?: string;
+  scheduled_in?: string;
+  estimated_out?: string;
+  estimated_in?: string;
+  actual_out?: string;
+  actual_in?: string;
 };
 
 function clean(value: unknown) {
@@ -79,20 +98,27 @@ function eventType(payload: FlightAwareAlertPayload) {
     ?? "flight_update";
 }
 
+function flightValue(
+  payload: FlightAwareAlertPayload,
+  key: keyof FlightAwareAlertFlight
+) {
+  return clean(payload.flight?.[key]) ?? clean(payload[key]);
+}
+
 function headline(payload: FlightAwareAlertPayload) {
-  const flight = clean(payload.ident_iata) ?? clean(payload.ident) ?? "Flight";
+  const flight = flightValue(payload, "ident_iata") ?? flightValue(payload, "ident") ?? "Flight";
   const event = eventType(payload).replace(/_/g, " ");
   return `${flight}: ${event}`;
 }
 
 function flightDate(payload: FlightAwareAlertPayload) {
   const candidates = [
-    clean(payload.scheduled_out),
-    clean(payload.estimated_out),
-    clean(payload.actual_out),
-    clean(payload.scheduled_in),
-    clean(payload.estimated_in),
-    clean(payload.actual_in)
+    flightValue(payload, "scheduled_out"),
+    flightValue(payload, "estimated_out"),
+    flightValue(payload, "actual_out"),
+    flightValue(payload, "scheduled_in"),
+    flightValue(payload, "estimated_in"),
+    flightValue(payload, "actual_in")
   ];
   for (const candidate of candidates) {
     const date = normalizeFlightDate(candidate);
@@ -102,6 +128,35 @@ function flightDate(payload: FlightAwareAlertPayload) {
   }
 
   return undefined;
+}
+
+export function normalizeFlightAwareAlert(payload: FlightAwareAlertPayload, now: Date = new Date()) {
+  return {
+    provider: "flightaware",
+    eventType: eventType(payload),
+    providerFlightId: flightValue(payload, "fa_flight_id"),
+    flightNumber: normalizeFlightNumber(flightValue(payload, "ident_iata") ?? flightValue(payload, "ident")),
+    flightDate: flightDate(payload),
+    headline: headline(payload),
+    detail: clean(payload.summary)
+      ?? clean(payload.short_description)
+      ?? clean(payload.long_description)
+      ?? clean(payload.description)
+      ?? clean(payload.status),
+    gate: {
+      departureTerminal: flightValue(payload, "terminal_origin"),
+      departureGate: flightValue(payload, "gate_origin"),
+      arrivalTerminal: flightValue(payload, "terminal_destination"),
+      arrivalGate: flightValue(payload, "gate_destination")
+    },
+    timing: {
+      estimatedDepartureAt: flightValue(payload, "estimated_out"),
+      estimatedArrivalAt: flightValue(payload, "estimated_in"),
+      actualDepartureAt: flightValue(payload, "actual_out"),
+      actualArrivalAt: flightValue(payload, "actual_in")
+    },
+    receivedAt: now.toISOString()
+  };
 }
 
 function stateKey(flightNumber: string, date?: string) {
@@ -246,28 +301,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const payload = req.body as FlightAwareAlertPayload;
-  const normalized = {
-    provider: "flightaware",
-    eventType: eventType(payload),
-    providerFlightId: clean(payload.fa_flight_id),
-    flightNumber: normalizeFlightNumber(clean(payload.ident_iata) ?? clean(payload.ident)),
-    flightDate: flightDate(payload),
-    headline: headline(payload),
-    detail: clean(payload.summary) ?? clean(payload.description) ?? clean(payload.status),
-    gate: {
-      departureTerminal: clean(payload.terminal_origin),
-      departureGate: clean(payload.gate_origin),
-      arrivalTerminal: clean(payload.terminal_destination),
-      arrivalGate: clean(payload.gate_destination)
-    },
-    timing: {
-      estimatedDepartureAt: clean(payload.estimated_out),
-      estimatedArrivalAt: clean(payload.estimated_in),
-      actualDepartureAt: clean(payload.actual_out),
-      actualArrivalAt: clean(payload.actual_in)
-    },
-    receivedAt: new Date().toISOString()
-  };
+  const normalized = normalizeFlightAwareAlert(payload);
 
   console.log("FlightAware alert received", normalized);
 

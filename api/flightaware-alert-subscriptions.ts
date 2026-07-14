@@ -1,4 +1,41 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { timingSafeEqual } from "node:crypto";
+
+function configuredManagementSecret() {
+  return process.env.VOYA_ADMIN_SECRET?.trim()
+    ?? process.env.FLIGHTAWARE_ALERT_WEBHOOK_SECRET?.trim();
+}
+
+function firstHeader(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function requestManagementSecret(req: VercelRequest) {
+  const querySecret = typeof req.query.secret === "string" ? req.query.secret.trim() : undefined;
+  const headerSecret = firstHeader(req.headers["x-voya-admin-secret"])?.trim();
+  const authorization = firstHeader(req.headers.authorization)?.trim();
+  const bearerSecret = authorization?.toLowerCase().startsWith("bearer ")
+    ? authorization.slice("bearer ".length).trim()
+    : undefined;
+
+  return querySecret || headerSecret || bearerSecret;
+}
+
+function secretsMatch(actual: string | undefined, expected: string) {
+  if (!actual) {
+    return false;
+  }
+
+  const encoder = new TextEncoder();
+  const actualBuffer = encoder.encode(actual);
+  const expectedBuffer = encoder.encode(expected);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function authorizeManagement(req: VercelRequest) {
+  const expected = configuredManagementSecret();
+  return !expected || secretsMatch(requestManagementSecret(req), expected);
+}
 
 function flightAwareApiKey() {
   return process.env.FLIGHTAWARE_AEROAPI_KEY?.trim();
@@ -46,6 +83,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET" && req.method !== "POST" && req.method !== "PUT" && req.method !== "DELETE") {
     res.setHeader("Allow", "GET, POST, PUT, DELETE");
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  if (!authorizeManagement(req)) {
+    return res.status(401).json({ error: "Unauthorized FlightAware alert management request." });
   }
 
   const result = await flightAwareRequest(alertPath(req), {
