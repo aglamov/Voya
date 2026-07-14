@@ -144,6 +144,7 @@ Required Vercel environment variables:
 Optional enrichment environment variables:
 
 - `OPENWEATHER_API_KEY`: enables weather cards through OpenWeather geocoding and One Call APIs.
+- `WEATHER_MONITOR_SECRET`: protects `GET/POST /api/weather-monitor`, which QStash should invoke every 10 minutes to resolve OpenWeather alert IDs, deduplicate them, and send APNs warnings for registered trip locations.
 - `TICKETMASTER_API_KEY` or `TICKETMASTER_CONSUMER_KEY`: enables nearby public event cards and Ticketmaster event links through the Discovery API. Use the Consumer Key from Ticketmaster Developer; the Consumer Secret is not needed for Discovery event search.
 - `FLIGHTAWARE_AEROAPI_KEY`: enables `GET/POST /api/flight-status` and `POST /api/booking-validation` through FlightAware AeroAPI for flight existence checks, airline schedules, gate assignments, gate times, baggage claim, delay fields, aircraft details, tracking data, and alert capability.
 - `GOOGLE_ROUTES_API_KEY` or `GOOGLE_MAPS_API_KEY`: enables `POST /api/mobility` through Google Routes API for live transfer duration, traffic-aware driving, public transit, walking, cycling, route comparison, and time-to-leave planning.
@@ -166,6 +167,12 @@ Flight support endpoints:
 Mobility support endpoints:
 
 - `POST /api/mobility` with origin, destination, target arrival/departure time, candidate modes, and Voya buffer settings. It returns provider-neutral route options, total duration, travel duration, buffer minutes, leave-by time, trade-offs, map handoff URLs, and a recommended mode. Without a Google key, it returns explicit provider warnings and usable map handoff URLs instead of fake ETAs.
+
+Weather alert endpoints:
+
+- `POST /api/weather-watch` registers an upcoming destination or non-flight itinerary location for an APNs device. It geocodes the location with OpenWeather and stores a short-lived watch in Redis.
+- `GET/POST /api/weather-monitor` is the protected background job. It groups nearby watch points, resolves active OpenWeather alerts, deduplicates deliveries, and sends APNs notifications.
+- See [docs/weather-alerts.md](docs/weather-alerts.md) for environment variables, QStash schedule setup, alert behavior, and operational limitations.
 
 iOS configuration:
 

@@ -11,7 +11,7 @@ import Vision
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var store: VoyaStore
-    @State private var selectedTab: VoyaTab = .inspire
+    @State private var selectedTab: VoyaTab = .trips
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -20,8 +20,6 @@ struct ContentView: View {
 
             Group {
                 switch selectedTab {
-                case .inspire:
-                    InspireView()
                 case .trips:
                     TripsView()
                 case .import:
@@ -42,11 +40,15 @@ struct ContentView: View {
                 selectedTab = .trips
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .voyaPushDeviceTokenDidChange)) { _ in
+            Task {
+                await VoyaPushRegistrationService.shared.syncWeatherWatches(for: store.trips, force: true)
+            }
+        }
     }
 }
 
 enum VoyaTab: String, CaseIterable, Identifiable {
-    case inspire = "Inspire"
     case trips = "Trips"
     case `import` = "Import"
     case assistant = "Assistant"
@@ -55,7 +57,6 @@ enum VoyaTab: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .inspire: String(localized: "Inspire")
         case .trips: String(localized: "Trips")
         case .import: String(localized: "Import")
         case .assistant: String(localized: "Assistant")
@@ -64,7 +65,6 @@ enum VoyaTab: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .inspire: "sparkles"
         case .trips: "calendar"
         case .import: "tray.and.arrow.down"
         case .assistant: "message.badge"

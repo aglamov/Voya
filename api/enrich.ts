@@ -4,6 +4,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import { getFlightStatus } from "./_flight.js";
 import { openAIModelFor } from "./_ai-models.js";
+import { weatherAlertDetails } from "./_weather.js";
 
 type EnrichmentCard = {
   title: string;
@@ -679,12 +680,25 @@ async function weatherCard(location: string | LocationLookup | undefined, isRuss
   const current = data.data?.[0];
   const temp = current?.temp;
   const description = current?.weather?.[0]?.description;
-  const alertCount = current?.alerts?.length ?? 0;
+  const alertIDs = current?.alerts ?? [];
+  const alerts = await Promise.all(alertIDs.slice(0, 5).map(async (id) => {
+    try {
+      return await weatherAlertDetails(id);
+    } catch (error) {
+      console.error(`OpenWeather alert ${id} lookup failed`, error);
+      return undefined;
+    }
+  }));
+  const alertNames = alerts.flatMap((alert) => alert ? [alert.event] : []);
+  const alertCount = alertIDs.length;
 
   return {
     title: isRussian ? "Погода" : "Weather",
     value: temp == null ? (isRussian ? "Прогноз готов" : "Forecast ready") : `${Math.round(temp)} C`,
-    detail: [description, alertCount > 0 ? (isRussian ? `${alertCount} погодных предупреждений` : `${alertCount} weather alert${alertCount === 1 ? "" : "s"}`) : undefined].filter(Boolean).join(" · "),
+    detail: [
+      description,
+      alertCount > 0 ? (alertNames.join(", ") || (isRussian ? `${alertCount} погодных предупреждений` : `${alertCount} weather alert${alertCount === 1 ? "" : "s"}`)) : undefined
+    ].filter(Boolean).join(" · "),
     kind: alertCount > 0 ? "warning" : "weather"
   };
 }
