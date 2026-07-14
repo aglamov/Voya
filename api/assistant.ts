@@ -3,6 +3,7 @@ import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { openAIModelFor } from "./_ai-models.js";
+import { protectPublicEndpoint } from "./_security.js";
 
 type AssistantSignal = {
   title: string;
@@ -233,6 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+  if (!await protectPublicEndpoint(req, res, { name: "assistant", hourlyIPLimit: 180, hourlyInstallLimit: 60, maxBodyBytes: 160_000 })) return;
 
   const body = req.body as AssistantRequest;
   const fallback = deterministicResponse(body);

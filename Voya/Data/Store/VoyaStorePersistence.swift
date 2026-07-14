@@ -44,7 +44,7 @@ extension VoyaStore {
             }
             syncTripNotifications()
             Task {
-                await VoyaPushRegistrationService.shared.syncWeatherWatches(for: trips)
+                await VoyaPushRegistrationService.shared.syncTripWatches(for: trips)
             }
         } catch {
             importMessage = String(localized: "Could not load saved trips")

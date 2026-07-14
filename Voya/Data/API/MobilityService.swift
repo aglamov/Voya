@@ -144,6 +144,7 @@ struct VercelMobilityService {
         }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("api/mobility"))
+        VoyaAPIConfiguration.authorize(&request)
         request.httpMethod = "POST"
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

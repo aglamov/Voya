@@ -3,6 +3,7 @@ import { openai } from "@ai-sdk/openai";
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
 import { openAIModelFor } from "./_ai-models.js";
+import { protectPublicEndpoint } from "./_security.js";
 
 const itemSchema = z.object({
   kind: z.enum(["flight", "hotel", "event", "transit"]),
@@ -104,6 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+  if (!await protectPublicEndpoint(req, res, { name: "extract", hourlyIPLimit: 60, hourlyInstallLimit: 20, maxBodyBytes: 70_000 })) return;
 
   const parsedRequest = requestSchema.safeParse(req.body);
   if (!parsedRequest.success) {

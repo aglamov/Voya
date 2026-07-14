@@ -20,6 +20,7 @@ struct VercelConfirmationExtractor {
         }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("api/extract"))
+        VoyaAPIConfiguration.authorize(&request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 35

@@ -14,7 +14,14 @@ type APNsSendResult = {
   sent: number;
   failed: number;
   errors: string[];
+  invalidDeviceTokens: string[];
 };
+
+class APNsDeliveryError extends Error {
+  constructor(message: string, readonly invalidToken: boolean) {
+    super(message);
+  }
+}
 
 function apnsConfig() {
   const keyId = process.env.APNS_KEY_ID?.trim();
@@ -128,7 +135,16 @@ async function sendOne(deviceToken: string, alert: APNsAlert, token: string, con
       if (status >= 200 && status < 300) {
         resolve();
       } else {
-        reject(new Error(responseBody || `APNs returned HTTP ${status}`));
+        let reason = responseBody;
+        try {
+          reason = (JSON.parse(responseBody) as { reason?: string }).reason ?? responseBody;
+        } catch {
+          // APNs may return an empty or non-JSON proxy response.
+        }
+        reject(new APNsDeliveryError(
+          reason || `APNs returned HTTP ${status}`,
+          reason === "BadDeviceToken" || reason === "Unregistered"
+        ));
       }
     });
     request.on("error", (error) => {
@@ -147,7 +163,8 @@ export async function sendAPNsAlert(deviceTokens: string[], alert: APNsAlert): P
       attempted: deviceTokens.length,
       sent: 0,
       failed: deviceTokens.length,
-      errors: deviceTokens.length ? ["APNs environment variables are not configured."] : []
+      errors: deviceTokens.length ? ["APNs environment variables are not configured."] : [],
+      invalidDeviceTokens: []
     };
   }
 
@@ -157,17 +174,24 @@ export async function sendAPNsAlert(deviceTokens: string[], alert: APNsAlert): P
     attempted: deviceTokens.length,
     sent: 0,
     failed: 0,
-    errors: []
+    errors: [],
+    invalidDeviceTokens: []
   };
 
-  for (const deviceToken of deviceTokens) {
-    try {
-      await sendOne(deviceToken, alert, token, config);
-      result.sent += 1;
-    } catch (error) {
-      result.failed += 1;
-      result.errors.push(error instanceof Error ? error.message : "APNs push failed.");
-    }
+  const uniqueTokens = [...new Set(deviceTokens)];
+  for (let index = 0; index < uniqueTokens.length; index += 10) {
+    await Promise.all(uniqueTokens.slice(index, index + 10).map(async (deviceToken) => {
+      try {
+        await sendOne(deviceToken, alert, token, config);
+        result.sent += 1;
+      } catch (error) {
+        result.failed += 1;
+        result.errors.push(error instanceof Error ? error.message : "APNs push failed.");
+        if (error instanceof APNsDeliveryError && error.invalidToken) {
+          result.invalidDeviceTokens.push(deviceToken);
+        }
+      }
+    }));
   }
 
   return result;

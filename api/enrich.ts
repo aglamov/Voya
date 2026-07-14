@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getFlightStatus } from "./_flight.js";
 import { openAIModelFor } from "./_ai-models.js";
 import { weatherAlertDetails } from "./_weather.js";
+import { protectPublicEndpoint } from "./_security.js";
 
 type EnrichmentCard = {
   title: string;
@@ -1423,6 +1424,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+  if (!await protectPublicEndpoint(req, res, { name: "enrich", hourlyIPLimit: 240, hourlyInstallLimit: 80, maxBodyBytes: 32_000 })) return;
 
   const body = req.body as EnrichmentRequest;
   const kind = clean(body.kind).toLowerCase();

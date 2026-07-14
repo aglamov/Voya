@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { normalizeDeviceToken, redisCommand, storageConfigured } from "./_storage.js";
 import { geocodeWeatherLocation, normalizeCoordinates, weatherConfigured } from "./_weather.js";
+import { protectPublicEndpoint } from "./_security.js";
 
 export type StoredWeatherWatch = {
   id: string;
@@ -90,6 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+  if (!await protectPublicEndpoint(req, res, { name: "weather-watch-client", hourlyIPLimit: 180, hourlyInstallLimit: 80, maxBodyBytes: 24_000 })) return;
 
   const payload = req.body as WeatherWatchPayload;
   const appInstallId = clean(payload.appInstallId);

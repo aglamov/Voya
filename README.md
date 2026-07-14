@@ -1,8 +1,8 @@
 # Voya
 
-Voya is an AI-powered iPhone travel companion for inspiration, planning, and live trip support.
+Voya is an AI-powered iPhone travel companion for organizing bookings and live trip support.
 
-It helps people discover meaningful trips, compare smart travel options, manually import booking confirmations, and stay supported throughout the journey with itinerary timelines, flight alerts, transport guidance, and contextual help.
+It helps people import booking confirmations, keep an itinerary, and stay supported throughout the journey with flight and weather alerts, transport guidance, and contextual help.
 
 Voya is not a booking platform. It does not sell flights, hotels, events, or tours directly. Instead, it helps users choose well, book on the platforms they trust, and then brings the trip back into one calm, useful place.
 
@@ -37,34 +37,6 @@ During a trip, it helps answer:
 
 ## Core Flows
 
-### Inspire Me
-
-The user describes the kind of trip they want, and Voya turns that intent into concrete options.
-
-Examples:
-
-- "I want a warm 4-day trip under $700."
-- "Find me a food-focused city with direct flights."
-- "Where can I go in November without extreme heat?"
-- "Plan a weekend around a concert or festival."
-
-Voya compares destinations using budget, flight availability, hotel prices, weather, seasonality, events, visas, transit, and user preferences.
-
-### Find Options
-
-Voya surfaces strong options and links out to trusted booking platforms.
-
-The app may compare:
-
-- Flights
-- Hotels
-- Events
-- Tours and experiences
-- Airport transfer options
-- Public transport convenience
-- Time-to-leave and transfer reliability
-- Weather and seasonality
-
 ### Import Confirmations
 
 After booking elsewhere, the user manually uploads confirmations into Voya.
@@ -97,8 +69,6 @@ Examples:
 ## MVP Scope
 
 - iPhone app.
-- AI trip inspiration.
-- Search and comparison using external APIs and deep links.
 - Manual confirmation upload.
 - AI parsing into structured itinerary items.
 - User confirmation and correction flow.
@@ -136,23 +106,27 @@ Required Vercel environment variables:
 
 - `OPENAI_API_KEY`: OpenAI API key.
 - `OPENAI_EXTRACT_MODEL`: optional model for confirmation extraction. Defaults to `gpt-5.5`.
-- `OPENAI_REPAIR_MODEL`: optional model for invalid JSON repair. Defaults to `gpt-4o-mini`.
-- `OPENAI_LOCATION_MODEL`: optional model for enrichment location normalization. Defaults to `gpt-4o-mini`.
-- `OPENAI_BRIEF_MODEL`: optional model for travel brief generation. Defaults to `gpt-4o-mini`.
+- `OPENAI_REPAIR_MODEL`: optional model for invalid JSON repair. Defaults to `gpt-5.4-mini`.
+- `OPENAI_LOCATION_MODEL`: optional model for enrichment location normalization. Defaults to `gpt-5.4-mini`.
+- `OPENAI_BRIEF_MODEL`: optional model for travel brief generation. Defaults to `gpt-5.4-mini`.
 - `OPENAI_MODEL`: optional global fallback used when a task-specific model variable is not set.
 
 Optional enrichment environment variables:
 
 - `OPENWEATHER_API_KEY`: enables weather cards through OpenWeather geocoding and One Call APIs.
-- `WEATHER_MONITOR_SECRET`: protects `GET/POST /api/weather-monitor`, which QStash should invoke every 10 minutes to resolve OpenWeather alert IDs, deduplicate them, and send APNs warnings for registered trip locations.
+- `CRON_SECRET`: protects the Vercel Cron invocation of `/api/weather-monitor`; the schedule is declared in `vercel.json`.
+- `WEATHER_MONITOR_SECRET`: optional separate secret for manual weather-monitor diagnostics.
+- `WEATHER_MAX_GROUPS_PER_RUN`: optional OpenWeather cost ceiling; defaults to 12 coordinate groups per run.
 - `TICKETMASTER_API_KEY` or `TICKETMASTER_CONSUMER_KEY`: enables nearby public event cards and Ticketmaster event links through the Discovery API. Use the Consumer Key from Ticketmaster Developer; the Consumer Secret is not needed for Discovery event search.
 - `FLIGHTAWARE_AEROAPI_KEY`: enables `GET/POST /api/flight-status` and `POST /api/booking-validation` through FlightAware AeroAPI for flight existence checks, airline schedules, gate assignments, gate times, baggage claim, delay fields, aircraft details, tracking data, and alert capability.
 - `GOOGLE_ROUTES_API_KEY` or `GOOGLE_MAPS_API_KEY`: enables `POST /api/mobility` through Google Routes API for live transfer duration, traffic-aware driving, public transit, walking, cycling, route comparison, and time-to-leave planning.
 - `UBER_CLIENT_ID` and `UBER_CLIENT_SECRET`: optional Uber developer credentials. `GET /api/uber-diagnostics` checks whether OAuth and estimates/products endpoints are accessible without exposing secrets.
-- `VOYA_API_PUBLIC_BASE_URL`: optional public backend URL used to describe the FlightAware alert callback endpoint, for example `https://voya-lime.vercel.app`.
-- `FLIGHTAWARE_ALERT_WEBHOOK_SECRET`: optional shared secret for `POST /api/flightaware-alerts`. When set, the callback must include the secret as `?secret=...`, `x-voya-webhook-secret`, or `Authorization: Bearer ...`.
-- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`: optional Redis storage for APNs device tokens, watched flights, FlightAware alert deduplication, and last known gate state. Without these, webhook responses are accepted but not persisted.
-- `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_PRIVATE_KEY`, and `APNS_ENV`: optional Apple Push Notification service credentials used by `POST /api/flightaware-alerts` to fan out traveler alerts after a FlightAware callback. Use `APNS_ENV=development` for debug builds and `APNS_ENV=production` for App Store/TestFlight builds.
+- `VOYA_API_PUBLIC_BASE_URL`: required public backend URL used for the FlightAware callback endpoint, for example `https://voya-lime.vercel.app`.
+- `FLIGHTAWARE_ALERT_WEBHOOK_SECRET`: required shared secret for `POST /api/flightaware-alerts`.
+- `VOYA_ADMIN_SECRET`: required for provider management and `/api/health` diagnostics.
+- `VOYA_CLIENT_API_KEY`: recommended release-client key used together with anonymous installation IDs and rate limits. This is an abuse deterrent, not a replacement for App Attest.
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`: required production Redis storage for rate limiting, watches, and deduplication.
+- `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_PRIVATE_KEY`, and `APNS_ENV`: required push credentials. Use `APNS_ENV=production` for TestFlight/App Store builds.
 - `VOYA_PUSH_TEST_DEVICE_TOKENS`: optional comma-separated APNs token fallback for testing webhook delivery before Redis-backed device registration is enabled.
 
 Flight support endpoints:
@@ -172,9 +146,12 @@ Weather alert endpoints:
 
 - `POST /api/weather-watch` registers an upcoming destination or non-flight itinerary location for an APNs device. It geocodes the location with OpenWeather and stores a short-lived watch in Redis.
 - `GET/POST /api/weather-monitor` is the protected background job. It groups nearby watch points, resolves active OpenWeather alerts, deduplicates deliveries, and sends APNs notifications.
-- See [docs/weather-alerts.md](docs/weather-alerts.md) for environment variables, QStash schedule setup, alert behavior, and operational limitations.
+- See [docs/weather-alerts.md](docs/weather-alerts.md) for the Vercel Cron schedule, alert behavior, and operational limitations.
 
 iOS configuration:
 
 - Set the Xcode build setting `VOYA_API_BASE_URL` to the deployed Vercel URL, for example `https://your-project.vercel.app`.
+- If `VOYA_CLIENT_API_KEY` is enabled in Vercel, inject the same value into the Release build setting without committing the secret.
 - If the URL is not configured or the AI request fails, Voya falls back to the built-in on-device parser so imports still work during development.
+
+Production setup and smoke tests are documented in [docs/production-runbook.md](docs/production-runbook.md).

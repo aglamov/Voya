@@ -95,6 +95,7 @@ struct VercelAssistantAIService {
         }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("api/assistant"))
+        VoyaAPIConfiguration.authorize(&request)
         request.httpMethod = "POST"
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

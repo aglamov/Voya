@@ -34,7 +34,7 @@ function secretsMatch(actual: string | undefined, expected: string) {
 
 function authorizeManagement(req: VercelRequest) {
   const expected = configuredManagementSecret();
-  return !expected || secretsMatch(requestManagementSecret(req), expected);
+  return Boolean(expected && secretsMatch(requestManagementSecret(req), expected));
 }
 
 function flightAwareApiKey() {
@@ -83,6 +83,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET" && req.method !== "POST" && req.method !== "PUT" && req.method !== "DELETE") {
     res.setHeader("Allow", "GET, POST, PUT, DELETE");
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  if (!configuredManagementSecret()) {
+    return res.status(503).json({ error: "FlightAware management secret is not configured." });
   }
 
   if (!authorizeManagement(req)) {

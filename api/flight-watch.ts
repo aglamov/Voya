@@ -7,6 +7,7 @@ import {
   redisCommand,
   storageConfigured
 } from "./_storage.js";
+import { protectPublicEndpoint } from "./_security.js";
 
 type FlightWatchPayload = {
   appInstallId?: string;
@@ -21,6 +22,17 @@ type FlightWatchPayload = {
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : undefined;
+}
+
+function validInstallID(value: unknown) {
+  const normalized = clean(value)?.toLowerCase();
+  return normalized && /^[0-9a-f-]{36}$/.test(normalized) ? normalized : undefined;
+}
+
+function watchTTL(date: string | undefined) {
+  if (!date) return 14 * 24 * 60 * 60;
+  const expiresAt = Date.parse(`${date}T23:59:59Z`) + 3 * 24 * 60 * 60 * 1000;
+  return Math.max(24 * 60 * 60, Math.min(120 * 24 * 60 * 60, Math.floor((expiresAt - Date.now()) / 1000)));
 }
 
 function flightAwareApiKey() {
@@ -90,6 +102,39 @@ function alertIdFromLocation(location: string | null) {
   return location?.match(/\/alerts\/(\d+)/)?.[1];
 }
 
+async function ensureFlightAwareEndpoint(apiKey: string) {
+  const targetURL = flightAwareAlertTargetURL();
+  if (!targetURL) {
+    return { ok: false as const, error: "Set VOYA_API_PUBLIC_BASE_URL and FLIGHTAWARE_ALERT_WEBHOOK_SECRET before enabling flight alerts." };
+  }
+
+  const configuredTarget = await redisCommand<string>(["GET", "voya:flightaware:alert-endpoint"]);
+  if (configuredTarget === targetURL) {
+    return { ok: true as const };
+  }
+
+  const response = await fetch("https://aeroapi.flightaware.com/aeroapi/alerts/endpoint", {
+    method: "PUT",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "x-apikey": apiKey
+    },
+    body: JSON.stringify({ url: targetURL })
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => undefined) as { detail?: string } | undefined;
+    return {
+      ok: false as const,
+      status: response.status,
+      error: data?.detail ?? `FlightAware alert endpoint setup failed with HTTP ${response.status}.`
+    };
+  }
+
+  await redisCommand(["SET", "voya:flightaware:alert-endpoint", targetURL]);
+  return { ok: true as const };
+}
+
 async function ensureFlightAwareAlert(
   key: string,
   flightNumber: string,
@@ -121,6 +166,18 @@ async function ensureFlightAwareAlert(
       subscribed: false,
       existing: false,
       error: "Set FLIGHTAWARE_AEROAPI_KEY to create FlightAware alert subscriptions."
+    };
+  }
+
+  const endpoint = await ensureFlightAwareEndpoint(apiKey);
+  if (!endpoint.ok) {
+    return {
+      requested: true,
+      configured: true,
+      subscribed: false,
+      existing: false,
+      status: endpoint.status,
+      error: endpoint.error
     };
   }
 
@@ -194,14 +251,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+  if (!await protectPublicEndpoint(req, res, { name: "flight-watch", hourlyIPLimit: 120, hourlyInstallLimit: 40, maxBodyBytes: 24_000 })) return;
 
   const payload = req.body as FlightWatchPayload;
   const flightNumber = normalizeFlightNumber(payload.flightNumber);
   const date = normalizeFlightDate(payload.date);
   const deviceToken = normalizeDeviceToken(payload.deviceToken);
+  const appInstallId = validInstallID(payload.appInstallId);
 
   if (!flightNumber) {
     return res.status(400).json({ error: "Invalid flight number." });
+  }
+  if (!appInstallId || !deviceToken) {
+    return res.status(400).json({ error: "A valid app installation ID and APNs device token are required." });
   }
 
   if (!storageConfigured()) {
@@ -221,6 +283,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const key = flightWatchKey(flightNumber, date);
+  const ttl = watchTTL(date);
   const now = new Date().toISOString();
   await redisCommand([
     "HSET",
@@ -237,23 +300,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     now
   ]);
   await redisCommand(["SADD", `voya:flight-watch-index:${flightNumber}`, key]);
+  await redisCommand(["EXPIRE", `voya:flight-watch:${key}:meta`, ttl]);
+  await redisCommand(["EXPIRE", `voya:flight-watch-index:${flightNumber}`, ttl]);
 
-  if (deviceToken) {
-    await redisCommand(["SADD", `voya:flight-watch:${key}:devices`, deviceToken]);
-    if (date) {
-      await redisCommand(["SADD", `voya:flight-watch:${flightWatchKey(flightNumber)}:devices`, deviceToken]);
-    }
-    await redisCommand([
-      "HSET",
-      `voya:push:device:${deviceToken}`,
-      "appInstallId",
-      clean(payload.appInstallId) ?? "",
-      "lastFlightWatch",
-      key,
-      "updatedAt",
-      now
-    ]);
+  await redisCommand(["SADD", `voya:flight-watch:${key}:devices`, deviceToken]);
+  await redisCommand(["EXPIRE", `voya:flight-watch:${key}:devices`, ttl]);
+  if (date) {
+    const genericDevicesKey = `voya:flight-watch:${flightWatchKey(flightNumber)}:devices`;
+    await redisCommand(["SADD", genericDevicesKey, deviceToken]);
+    await redisCommand(["EXPIRE", genericDevicesKey, ttl]);
   }
+  await redisCommand([
+    "HSET",
+    `voya:push:device:${deviceToken}`,
+    "appInstallId",
+    appInstallId,
+    "lastFlightWatch",
+    key,
+    "updatedAt",
+    now
+  ]);
 
   const alertWatch = payload.subscribeToAlerts
     ? await ensureFlightAwareAlert(
@@ -269,7 +335,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     accepted: true,
     stored: true,
     flightKey: key,
-    deviceLinked: Boolean(deviceToken),
+    deviceLinked: true,
     alertWatch,
     updatedAt: now
   });

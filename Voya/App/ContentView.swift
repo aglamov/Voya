@@ -42,7 +42,17 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .voyaPushDeviceTokenDidChange)) { _ in
             Task {
-                await VoyaPushRegistrationService.shared.syncWeatherWatches(for: store.trips, force: true)
+                await VoyaPushRegistrationService.shared.syncTripWatches(for: store.trips, force: true)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .voyaNotificationOpened)) { notification in
+            selectedTab = .trips
+            if let rawTripID = notification.userInfo?["tripID"] as? String,
+               let tripID = UUID(uuidString: rawTripID),
+               store.trips.contains(where: { $0.id == tripID }) {
+                store.selectedTripID = tripID
+            } else {
+                _ = store.selectCurrentTripIfAvailable()
             }
         }
     }

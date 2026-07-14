@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { sendAPNsAlert } from "./_apns.js";
 import {
   fallbackPushTokens,
+  flightWatchKey,
   normalizeFlightDate,
   normalizeFlightNumber,
   redisCommand,
@@ -88,7 +89,7 @@ function secretsMatch(actual: string | undefined, expected: string) {
 
 function authorizeWebhook(req: VercelRequest) {
   const expected = configuredWebhookSecret();
-  return !expected || secretsMatch(requestWebhookSecret(req), expected);
+  return Boolean(expected && secretsMatch(requestWebhookSecret(req), expected));
 }
 
 function eventType(payload: FlightAwareAlertPayload) {
@@ -150,6 +151,8 @@ export function normalizeFlightAwareAlert(payload: FlightAwareAlertPayload, now:
       arrivalGate: flightValue(payload, "gate_destination")
     },
     timing: {
+      scheduledDepartureAt: flightValue(payload, "scheduled_out"),
+      scheduledArrivalAt: flightValue(payload, "scheduled_in"),
       estimatedDepartureAt: flightValue(payload, "estimated_out"),
       estimatedArrivalAt: flightValue(payload, "estimated_in"),
       actualDepartureAt: flightValue(payload, "actual_out"),
@@ -168,12 +171,37 @@ type StoredFlightAlertState = {
   arrivalGate?: string;
   departureTerminal?: string;
   arrivalTerminal?: string;
+  scheduledDepartureAt?: string;
+  scheduledArrivalAt?: string;
+  estimatedDepartureAt?: string;
+  estimatedArrivalAt?: string;
   eventType?: string;
   updatedAt?: string;
 };
 
 function changed(previous: string | undefined, next: string | undefined) {
   return Boolean(previous && next && previous !== next);
+}
+
+function shiftMinutes(previous: string | undefined, next: string | undefined) {
+  if (!previous || !next) return undefined;
+  const difference = Math.round((Date.parse(next) - Date.parse(previous)) / 60_000);
+  return Number.isFinite(difference) ? difference : undefined;
+}
+
+function meaningfulTimeShift(normalized: { timing: { scheduledDepartureAt?: string; scheduledArrivalAt?: string; estimatedDepartureAt?: string; estimatedArrivalAt?: string } }, previous?: StoredFlightAlertState) {
+  const departureShift = shiftMinutes(
+    previous?.estimatedDepartureAt ?? normalized.timing.scheduledDepartureAt,
+    normalized.timing.estimatedDepartureAt
+  );
+  const arrivalShift = shiftMinutes(
+    previous?.estimatedArrivalAt ?? normalized.timing.scheduledArrivalAt,
+    normalized.timing.estimatedArrivalAt
+  );
+  const meaningful = [departureShift, arrivalShift]
+    .filter((value): value is number => value !== undefined)
+    .sort((lhs, rhs) => Math.abs(rhs) - Math.abs(lhs))[0];
+  return meaningful !== undefined && Math.abs(meaningful) >= 15 ? meaningful : undefined;
 }
 
 function pushCopy(
@@ -186,6 +214,12 @@ function pushCopy(
       arrivalTerminal?: string;
       arrivalGate?: string;
     };
+    timing: {
+      scheduledDepartureAt?: string;
+      scheduledArrivalAt?: string;
+      estimatedDepartureAt?: string;
+      estimatedArrivalAt?: string;
+    };
     detail?: string;
     headline: string;
   },
@@ -196,6 +230,7 @@ function pushCopy(
   const departureGate = normalized.gate.departureGate;
   const arrivalGate = normalized.gate.arrivalGate;
   const departureTerminal = normalized.gate.departureTerminal;
+  const timeShift = meaningfulTimeShift(normalized, previous);
 
   if (departureGate && previous?.departureGate && previous.departureGate !== departureGate) {
     return {
@@ -232,6 +267,20 @@ function pushCopy(
     };
   }
 
+  if (departureTerminal && previous?.departureTerminal && previous.departureTerminal !== departureTerminal) {
+    return {
+      title: `${flight} terminal changed`,
+      body: `Departure terminal ${previous.departureTerminal} -> ${departureTerminal}.`
+    };
+  }
+
+  if (normalized.gate.arrivalTerminal && previous?.arrivalTerminal && previous.arrivalTerminal !== normalized.gate.arrivalTerminal) {
+    return {
+      title: `${flight} arrival terminal changed`,
+      body: `Arrival terminal ${previous.arrivalTerminal} -> ${normalized.gate.arrivalTerminal}.`
+    };
+  }
+
   if (event.includes("cancel")) {
     return {
       title: `${flight} cancelled`,
@@ -250,6 +299,15 @@ function pushCopy(
     return {
       title: `${flight} schedule update`,
       body: normalized.detail ?? normalized.headline
+    };
+  }
+
+
+  if (timeShift !== undefined) {
+    const direction = timeShift > 0 ? "later" : "earlier";
+    return {
+      title: `${flight} schedule changed`,
+      body: normalized.detail ?? `Estimated time moved ${Math.abs(timeShift)} minutes ${direction}.`
     };
   }
 
@@ -296,6 +354,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  if (!configuredWebhookSecret()) {
+    return res.status(503).json({ error: "FlightAware webhook secret is not configured." });
+  }
+
   if (!authorizeWebhook(req)) {
     return res.status(401).json({ error: "Unauthorized FlightAware alert callback." });
   }
@@ -323,6 +385,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     arrivalGate: normalized.gate.arrivalGate,
     departureTerminal: normalized.gate.departureTerminal,
     arrivalTerminal: normalized.gate.arrivalTerminal,
+    scheduledDepartureAt: normalized.timing.scheduledDepartureAt,
+    scheduledArrivalAt: normalized.timing.scheduledArrivalAt,
+    estimatedDepartureAt: normalized.timing.estimatedDepartureAt,
+    estimatedArrivalAt: normalized.timing.estimatedArrivalAt,
     eventType: normalized.eventType,
     updatedAt: normalized.receivedAt
   };
@@ -348,7 +414,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const hasNewGateInfo = Boolean((normalized.gate.departureGate && !previous?.departureGate)
     || (normalized.gate.arrivalGate && !previous?.arrivalGate));
   const eventLooksImportant = /gate|delay|schedule|cancel|divert/i.test(normalized.eventType);
-  const shouldPush = !duplicate && copy && (hasGateDiff || hasNewGateInfo || eventLooksImportant);
+  const hasTimeDiff = meaningfulTimeShift(normalized, previous) !== undefined;
+  const shouldPush = !duplicate && copy && (hasGateDiff || hasNewGateInfo || hasTimeDiff || eventLooksImportant);
   const storedTokens = await registeredTokensForFlight(flightNumber, normalized.flightDate);
   const testTokens = storedTokens.length ? [] : fallbackPushTokens();
   const deviceTokens = [...new Set([...storedTokens, ...testTokens])];
@@ -370,8 +437,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         attempted: deviceTokens.length,
         sent: 0,
         failed: 0,
-        errors: shouldPush ? ["No registered device tokens for this flight."] : ["Alert did not produce a new traveler-facing push."]
+        errors: shouldPush ? ["No registered device tokens for this flight."] : ["Alert did not produce a new traveler-facing push."],
+        invalidDeviceTokens: [] as string[]
       };
+
+  for (const token of push.invalidDeviceTokens) {
+    await redisCommand(["SREM", `voya:flight-watch:${flightWatchKey(flightNumber, normalized.flightDate)}:devices`, token]);
+    await redisCommand(["SREM", `voya:flight-watch:${flightWatchKey(flightNumber)}:devices`, token]);
+  }
 
   return res.status(202).json({
     accepted: true,

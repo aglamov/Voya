@@ -2,7 +2,7 @@
 
 ## Architecture Decision
 
-Voya starts as a native iPhone app backed by a server-side travel intelligence layer.
+Voya is a native iPhone app backed by Vercel Functions. The production MVP remains local-first and account-free: SwiftData owns the confirmed itinerary on the device, while Upstash Redis stores only short-lived operational state for rate limits, APNs registrations, flight/weather watches, and deduplication.
 
 The iPhone app owns the user experience, local trip state, imports, review flows, and notifications. The backend owns AI orchestration, provider integrations, file processing, background monitoring, and secure access to third-party APIs.
 
@@ -12,9 +12,8 @@ The iPhone app owns the user experience, local trip state, imports, review flows
 flowchart TD
     iOS["iPhone App"] --> API["Voya Backend API"]
     API --> AI["AI Orchestration"]
-    API --> DB["PostgreSQL"]
-    API --> Files["Object Storage"]
-    API --> Jobs["Background Jobs"]
+    API --> DB["Upstash Redis operational state"]
+    API --> Jobs["Vercel Cron and provider webhooks"]
     Jobs --> Flight["Flight Status APIs"]
     Jobs --> Search["Travel Search APIs"]
     Jobs --> Maps["Maps and Transit APIs"]
@@ -36,14 +35,12 @@ Recommended stack:
 - APNs for push notifications
 - MapKit for native map presentation
 
-Primary app modules:
+Current release modules:
 
-- Inspire
 - Trips
 - Import
 - Review Extracted Data
 - Live Assistant
-- Profile and Preferences
 
 Current iOS source organization:
 
@@ -53,7 +50,7 @@ Current iOS source organization:
 - `Core/Utilities`: date/string helpers and other small shared utilities
 - `Core/DesignSystem`: shared visual components, colors, and app chrome
 - `Data`: app store, API clients, cache, and fixtures
-- `Features`: screen-level feature modules such as Inspire, Trips, Import, and Assistant
+- `Features`: screen-level feature modules such as Trips, Import, and Assistant; the unused Inspire source remains outside the release navigation
 - `Notifications`: local notification scheduling and reminder logic
 
 `VoyaStore` is intentionally kept as a thin observable state container. Its behavior is split into focused extensions under `Data/Store`:
@@ -72,15 +69,15 @@ Large SwiftUI screens should follow the same pattern: keep the screen container 
 
 The backend should exist from the beginning. It keeps API keys off device, runs background monitoring, handles AI extraction, stores source files, and normalizes third-party provider responses.
 
-Recommended starting stack:
+Current production stack:
 
-- TypeScript backend
-- Fastify or NestJS
-- PostgreSQL
-- S3-compatible object storage
-- Redis and BullMQ for background jobs
-- Sign in with Apple for authentication
+- TypeScript Vercel Functions
+- Upstash Redis for ephemeral operational state
+- Vercel Cron for weather monitoring
+- FlightAware webhooks for flight changes
 - APNs for notifications
+
+PostgreSQL, object storage, Sign in with Apple, and a user profile are intentionally deferred until the product needs multi-device sync, collaboration, server-owned trip history, or subscriptions. They are not required for the account-free MVP.
 
 ## Domain Model
 
@@ -222,9 +219,6 @@ GET /trips/:id/itinerary
 POST /trips/:id/itinerary
 PATCH /itinerary-items/:id
 
-POST /inspiration/search
-GET /recommendations/:id
-
 GET /trips/:id/alerts
 POST /push/register-device
 
@@ -239,7 +233,6 @@ Voya should hide external provider differences behind internal provider adapters
 
 Provider categories:
 
-- flight search and inspiration
 - flight status
 - hotel search and pricing
 - event discovery
@@ -255,16 +248,15 @@ Mobility services need a similar split between provider routing, Voya-owned tran
 
 ## Suggested Build Order
 
-1. Auth and user profile
-2. Trips and itinerary model
-3. Manual document upload
-4. AI extraction pipeline
-5. Review and confirm flow
-6. Flight status monitoring
-7. Push notifications
-8. Inspiration search
-9. Maps and transit routing
-10. Events discovery
+1. Trips and itinerary model
+2. Manual document import
+3. AI extraction pipeline
+4. Review and confirm flow
+5. Flight status monitoring and callbacks
+6. Weather monitoring and push notifications
+7. Maps and transit routing
+8. Events discovery
+9. Production hardening and TestFlight
 
 ## Non-Goals
 
@@ -275,12 +267,10 @@ Mobility services need a similar split between provider routing, Voya-owned tran
 - automatic email scanning
 - acting as an online travel agency
 
-## Open Technical Decisions
+## Deferred Technical Decisions
 
-- Exact backend framework: Fastify or NestJS
-- Initial flight status provider: recommended starting point is FlightAware AeroAPI behind a Voya-owned `FlightStatusProvider` adapter
 - Initial flight and hotel search provider
-- Object storage provider
-- OCR provider and fallback strategy
-- Whether local-first trip cache uses SwiftData or Core Data
+- Object storage provider if server-owned documents are introduced
+- Account and sync model if multi-device access is introduced
+- App Attest rollout for cryptographic client integrity
 - How much AI work can safely be streamed to the app

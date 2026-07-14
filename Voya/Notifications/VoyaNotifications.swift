@@ -1,6 +1,10 @@
 import Foundation
 import UserNotifications
 
+extension Notification.Name {
+    static let voyaNotificationOpened = Notification.Name("voya.notification-opened")
+}
+
 struct VoyaNotificationTrip: Sendable {
     let id: UUID
     let title: String
@@ -149,6 +153,25 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         [.banner, .list, .sound]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let userInfo = response.notification.request.content.userInfo
+        let remoteData = userInfo["voya"] as? [AnyHashable: Any]
+        let tripID = (remoteData?["tripId"] as? String)
+            ?? (remoteData?["tripID"] as? String)
+            ?? (userInfo["tripId"] as? String)
+            ?? (userInfo["tripID"] as? String)
+        await MainActor.run {
+            NotificationCenter.default.post(
+                name: .voyaNotificationOpened,
+                object: nil,
+                userInfo: tripID.map { ["tripID": $0] }
+            )
+        }
     }
 
     private func notificationRequests(for trip: VoyaNotificationTrip, now: Date) -> [UNNotificationRequest] {

@@ -188,6 +188,7 @@ struct VercelFlightLookupService {
         }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("api/flight-lookup"))
+        VoyaAPIConfiguration.authorize(&request)
         request.httpMethod = "POST"
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

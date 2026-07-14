@@ -10,12 +10,7 @@ final class VoyaAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        Task { @MainActor in
-            guard await VoyaNotificationScheduler.shared.requestAuthorizationIfNeeded() else {
-                return
-            }
-            application.registerForRemoteNotifications()
-        }
+        application.registerForRemoteNotifications()
         return true
     }
 
@@ -40,9 +35,10 @@ final class VoyaPushRegistrationService {
     private let baseURL: URL?
     private let userDefaults: UserDefaults
     private let deviceTokenKey = "voya.apns.device-token"
-    private let installIDKey = "voya.install-id"
     private let weatherWatchSignatureKey = "voya.weather-watch.signature"
     private let weatherWatchSyncedAtKey = "voya.weather-watch.synced-at"
+    private let flightWatchSignatureKey = "voya.flight-watch.signature"
+    private let flightWatchSyncedAtKey = "voya.flight-watch.synced-at"
 
     init(
         session: URLSession = .shared,
@@ -61,6 +57,52 @@ final class VoyaPushRegistrationService {
 
         if previousToken != token {
             NotificationCenter.default.post(name: .voyaPushDeviceTokenDidChange, object: nil)
+        }
+    }
+
+    func syncTripWatches(for trips: [Trip], now: Date = Date(), force: Bool = false) async {
+        await syncWeatherWatches(for: trips, now: now, force: force)
+        await syncFlightWatches(for: trips, now: now, force: force)
+    }
+
+    func syncFlightWatches(for trips: [Trip], now: Date = Date(), force: Bool = false) async {
+        guard let deviceToken = userDefaults.string(forKey: deviceTokenKey) else {
+            return
+        }
+
+        let flights = trips
+            .flatMap(\.items)
+            .filter { item in
+                guard item.kind == .flight else { return false }
+                if let endsAt = item.endsAt ?? item.startsAt, endsAt < now.addingTimeInterval(-12 * 60 * 60) {
+                    return false
+                }
+                if let startsAt = item.startsAt, startsAt > now.addingTimeInterval(60 * 24 * 60 * 60) {
+                    return false
+                }
+                return Self.firstFlightNumber(in: "\(item.title) \(item.location)") != nil
+            }
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+
+        let signature = Self.flightWatchSignature(for: flights, deviceToken: deviceToken)
+        let lastSignature = userDefaults.string(forKey: flightWatchSignatureKey)
+        let lastSync = userDefaults.object(forKey: flightWatchSyncedAtKey) as? Date
+        let isFresh = lastSync.map { now.timeIntervalSince($0) < 12 * 60 * 60 } ?? false
+        guard force || signature != lastSignature || !isFresh else {
+            return
+        }
+
+        var registrationSucceeded = true
+        for flight in flights {
+            let response = await registerFlightWatch(for: flight, subscribeToAlerts: true)
+            registrationSucceeded = registrationSucceeded
+                && response?.stored == true
+                && response?.alertWatch?.subscribed == true
+        }
+
+        if registrationSucceeded {
+            userDefaults.set(signature, forKey: flightWatchSignatureKey)
+            userDefaults.set(now, forKey: flightWatchSyncedAtKey)
         }
     }
 
@@ -192,6 +234,7 @@ final class VoyaPushRegistrationService {
 
         do {
             var request = URLRequest(url: baseURL.appendingPathComponent(path))
+            VoyaAPIConfiguration.authorize(&request)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.timeoutInterval = 15
@@ -217,6 +260,7 @@ final class VoyaPushRegistrationService {
 
         do {
             var request = URLRequest(url: baseURL.appendingPathComponent("api/weather-watch"))
+            VoyaAPIConfiguration.authorize(&request)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.timeoutInterval = 25
@@ -238,13 +282,7 @@ final class VoyaPushRegistrationService {
     }
 
     private var installID: String {
-        if let existing = userDefaults.string(forKey: installIDKey) {
-            return existing
-        }
-
-        let value = UUID().uuidString
-        userDefaults.set(value, forKey: installIDKey)
-        return value
+        VoyaAPIConfiguration.installID
     }
 
     private static func firstFlightNumber(in value: String) -> String? {
@@ -295,6 +333,20 @@ final class VoyaPushRegistrationService {
             }
             .joined(separator: ";;")
         return "\(deviceToken)|\(tripValues)"
+    }
+
+    private static func flightWatchSignature(for items: [ItineraryItem], deviceToken: String) -> String {
+        let values = items.map { item in
+            [
+                item.id.uuidString,
+                item.title,
+                item.location,
+                item.startsAt?.ISO8601Format() ?? "",
+                item.endsAt?.ISO8601Format() ?? "",
+                item.updatedAt.ISO8601Format()
+            ].joined(separator: "|")
+        }.joined(separator: ";")
+        return "\(deviceToken)|\(values)"
     }
 
     private static let flightDateFormatter: DateFormatter = {

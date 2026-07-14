@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getFlightStatus, flightLookupSchema } from "./_flight.js";
+import { protectPublicEndpoint } from "./_security.js";
 
 function queryValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -10,6 +11,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader("Allow", "GET, POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+  if (!await protectPublicEndpoint(req, res, { name: "flight-status", hourlyIPLimit: 360, hourlyInstallLimit: 120, maxBodyBytes: 24_000 })) return;
 
   const payload = req.method === "GET"
     ? {

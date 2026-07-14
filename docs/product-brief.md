@@ -2,7 +2,7 @@
 
 ## Vision
 
-Voya is an AI travel companion for iPhone that helps people discover inspiring trips, choose smart travel options, manually import their bookings, and feel supported during the journey.
+Voya is an AI travel companion for iPhone that helps people organize bookings and feel supported before and during the journey.
 
 The product exists for travelers who do not want another booking site. They want help deciding where to go, understanding trade-offs, keeping plans organized, and reacting calmly when travel changes.
 
@@ -18,9 +18,8 @@ Users book wherever they prefer. Voya helps them decide, then supports the trip 
 
 ## What Makes Voya Different
 
-Traditional itinerary apps mostly organize what the user already booked. Voya starts earlier and stays useful longer.
+Traditional itinerary apps mostly organize what the user already booked. Voya turns those plans into live, contextual assistance.
 
-- Before booking: inspiration, comparison, and recommendation.
 - After booking: confirmation parsing and itinerary building.
 - During travel: live alerts, routing, reminders, and contextual guidance.
 
@@ -37,26 +36,7 @@ Traditional itinerary apps mostly organize what the user already booked. Voya st
 
 ## Core User Jobs
 
-### 1. Find Inspiration
-
-The user wants to travel but does not know where to go.
-
-Voya should understand vague intent:
-
-- budget
-- dates
-- departure city or airport
-- travel style
-- climate preference
-- visa constraints
-- trip length
-- interests
-- tolerance for layovers
-- desired pace
-
-Then it should propose a small set of trips with clear reasons.
-
-### 2. Compare Practical Options
+### 1. Compare Practical Options
 
 The user wants to know what is actually worth booking.
 
@@ -74,7 +54,7 @@ Voya should compare the full trip, not only the flight:
 - total estimated cost
 - hidden trade-offs, such as long transfers or awkward arrival times
 
-### 3. Bring Bookings Into One Place
+### 2. Bring Bookings Into One Place
 
 After booking elsewhere, the user manually uploads confirmation documents.
 
@@ -88,7 +68,7 @@ Voya should support:
 
 AI should extract structured trip data and present it for review before saving.
 
-### 4. Support the Traveler Live
+### 3. Support the Traveler Live
 
 Voya should monitor itinerary items and help the user act.
 
@@ -100,7 +80,7 @@ Examples:
 - "The public transit route to your hotel takes 42 minutes."
 - "Your event starts at 19:30. The best route from the hotel leaves at 18:45."
 
-### 5. Move Between Trip Points
+### 4. Move Between Trip Points
 
 The user wants to know the best way to move through the trip, not just where each booking is.
 
@@ -206,9 +186,6 @@ The user can confirm, edit, or discard before the item enters the itinerary.
 ### Must Have
 
 - iPhone app
-- trip inspiration flow
-- destination recommendation cards
-- external booking links
 - manual confirmation upload
 - AI extraction into structured itinerary items
 - confirmation review and edit screen
@@ -228,6 +205,7 @@ The user can confirm, edit, or discard before the item enters the itinerary.
 
 ### Later
 
+- inspiration and pre-booking comparison
 - collaborative trips
 - offline itinerary mode
 - wallet integration

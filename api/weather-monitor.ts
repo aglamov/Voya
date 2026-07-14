@@ -25,15 +25,19 @@ function suppliedSecret(req: VercelRequest) {
 }
 
 function authorized(req: VercelRequest) {
-  const expected = process.env.WEATHER_MONITOR_SECRET?.trim();
   const actual = suppliedSecret(req);
-  if (!expected || !actual) {
+  const expectedSecrets = [process.env.CRON_SECRET, process.env.WEATHER_MONITOR_SECRET]
+    .map((value) => value?.trim())
+    .filter(Boolean) as string[];
+  if (!expectedSecrets.length || !actual) {
     return false;
   }
   const encoder = new TextEncoder();
   const lhs = encoder.encode(actual);
-  const rhs = encoder.encode(expected);
-  return lhs.length === rhs.length && timingSafeEqual(lhs, rhs);
+  return expectedSecrets.some((expected) => {
+    const rhs = encoder.encode(expected);
+    return lhs.length === rhs.length && timingSafeEqual(lhs, rhs);
+  });
 }
 
 function parsedWatch(raw: string | undefined) {
@@ -91,6 +95,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(503).json({ error: "OpenWeather and Upstash Redis must be configured." });
   }
 
+  const acquiredLock = await redisCommand<string | null>([
+    "SET",
+    "voya:weather-monitor:lock",
+    new Date().toISOString(),
+    "EX",
+    9 * 60,
+    "NX"
+  ]);
+  if (acquiredLock !== "OK") {
+    return res.status(202).json({ ok: true, skipped: true, reason: "Weather monitor is already running or recently completed." });
+  }
+
   const watchIds = await redisCommand<string[]>(["SMEMBERS", "voya:weather-watch:index"]);
   const watches: StoredWeatherWatch[] = [];
   let staleWatches = 0;
@@ -110,12 +126,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     groups.set(key, [...(groups.get(key) ?? []), watch]);
   }
 
+  const groupEntries = [...groups.entries()];
+  const configuredLimit = Number(process.env.WEATHER_MAX_GROUPS_PER_RUN ?? "12");
+  const groupLimit = Math.max(1, Math.min(100, Number.isFinite(configuredLimit) ? Math.floor(configuredLimit) : 12));
+  const storedCursor = Number(await redisCommand<string>(["GET", "voya:weather-monitor:cursor"]) ?? "0");
+  const cursor = groupEntries.length ? Math.max(0, storedCursor) % groupEntries.length : 0;
+  const selectedGroups = Array.from(
+    { length: Math.min(groupLimit, groupEntries.length) },
+    (_, offset) => groupEntries[(cursor + offset) % groupEntries.length]
+  );
+  if (groupEntries.length) {
+    await redisCommand(["SET", "voya:weather-monitor:cursor", (cursor + selectedGroups.length) % groupEntries.length]);
+  }
+
   let providerQueries = 0;
   let matchedAlerts = 0;
   let pushesSent = 0;
   const errors: string[] = [];
   const alertDetails = new Map<string, Promise<NormalizedWeatherAlert>>();
-  for (const groupedWatches of groups.values()) {
+  for (const [, groupedWatches] of selectedGroups) {
     const representative = groupedWatches[0];
     try {
       providerQueries += 1;
@@ -158,6 +187,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
           pushesSent += push.sent;
           errors.push(...push.errors);
+          if (push.invalidDeviceTokens.includes(watch.deviceToken)) {
+            await redisCommand(["SREM", "voya:weather-watch:index", watch.id]);
+            await redisCommand(["DEL", weatherWatchKey(watch.id)]);
+          }
           if (push.sent === 0) {
             await redisCommand(["DEL", deliveryKey]);
           }
@@ -174,6 +207,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     activeWatches: watches.length,
     staleWatchesRemoved: staleWatches,
     coordinateGroups: groups.size,
+    coordinateGroupsChecked: selectedGroups.length,
     providerQueries,
     matchedAlerts,
     pushesSent,

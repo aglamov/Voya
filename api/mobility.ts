@@ -1,11 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { buildMobilityPlan, mobilityPlanSchema } from "./_mobility.js";
+import { protectPublicEndpoint } from "./_security.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+  if (!await protectPublicEndpoint(req, res, { name: "mobility", hourlyIPLimit: 360, hourlyInstallLimit: 120, maxBodyBytes: 40_000 })) return;
 
   const parsedRequest = mobilityPlanSchema.safeParse(req.body);
   if (!parsedRequest.success) {

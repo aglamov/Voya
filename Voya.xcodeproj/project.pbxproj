@@ -610,6 +610,7 @@
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				VOYA_API_BASE_URL = "https://voya-lime.vercel.app";
+				VOYA_CLIENT_API_KEY = "";
 			};
 			name = Debug;
 		};
@@ -645,6 +646,7 @@
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				VOYA_API_BASE_URL = "https://voya-lime.vercel.app";
+				VOYA_CLIENT_API_KEY = "";
 			};
 			name = Release;
 		};

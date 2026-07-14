@@ -1,4 +1,4 @@
-const DEFAULT_FAST_MODEL = "gpt-4o-mini";
+const DEFAULT_FAST_MODEL = "gpt-5.4-mini";
 const DEFAULT_EXTRACTION_MODEL = "gpt-5.5";
 
 type AiTask = "extraction" | "jsonRepair" | "location" | "brief";

@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
 import { getFlightStatus, flightLookupSchema } from "./_flight.js";
+import { protectPublicEndpoint } from "./_security.js";
 
 const bookingValidationSchema = z.object({
   sourceName: z.string().min(1).max(240).optional(),
@@ -30,6 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+  if (!await protectPublicEndpoint(req, res, { name: "booking-validation", hourlyIPLimit: 180, hourlyInstallLimit: 60, maxBodyBytes: 40_000 })) return;
 
   const parsedRequest = bookingValidationSchema.safeParse(req.body);
   if (!parsedRequest.success) {
