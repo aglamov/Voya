@@ -4,6 +4,38 @@ import SwiftUI
 
 @MainActor
 extension VoyaStore {
+    func suggestedImportTripID(for incomingItems: [ItineraryItem]) -> UUID? {
+        guard let incomingRange = overallDateRange(for: incomingItems) else {
+            return nil
+        }
+
+        return trips.compactMap { trip -> (id: UUID, distance: TimeInterval, isSelected: Bool)? in
+            guard let tripRange = overallDateRange(for: trip.items),
+                  dateRangesAreNear(incomingItems, trip.items) else {
+                return nil
+            }
+
+            let distance: TimeInterval
+            if incomingRange.start <= tripRange.end, tripRange.start <= incomingRange.end {
+                distance = 0
+            } else {
+                distance = min(
+                    abs(incomingRange.start.timeIntervalSince(tripRange.end)),
+                    abs(tripRange.start.timeIntervalSince(incomingRange.end))
+                )
+            }
+
+            return (trip.id, distance, trip.id == selectedTripID)
+        }
+        .min { first, second in
+            if first.distance != second.distance {
+                return first.distance < second.distance
+            }
+            return first.isSelected && !second.isSelected
+        }?
+        .id
+    }
+
     func tripIndexForMerge(with incomingItems: [ItineraryItem]) -> Int? {
         if let selectedTripID,
            let selectedIndex = trips.firstIndex(where: { $0.id == selectedTripID }),

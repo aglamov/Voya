@@ -603,6 +603,9 @@ struct ExtractionReview: View {
     let preview: ExtractionPreview
     let isConfirming: Bool
     let statusMessage: String?
+    let trips: [Trip]
+    let suggestedTripID: UUID?
+    @Binding var destination: ImportTripDestination
     let onOpenSource: (SourceDocumentFile) -> Void
     let onItemChange: (ItineraryItem, ItineraryItemDraft) -> Void
     let onAddItem: () -> Void
@@ -632,6 +635,14 @@ struct ExtractionReview: View {
                 statusMessage: statusMessage,
                 onOpenSource: onOpenSource
             )
+
+            ImportTripDestinationPicker(
+                trips: trips,
+                suggestedTripID: suggestedTripID,
+                selection: $destination
+            )
+            .disabled(isConfirming)
+            .opacity(isConfirming ? 0.72 : 1)
 
             if !preview.warnings.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -689,7 +700,7 @@ struct ExtractionReview: View {
             .buttonStyle(.plain)
 
             Button(action: onConfirm) {
-                Label(isConfirming ? String(localized: "Checking flights") : String(localized: "Save to trip"), systemImage: isConfirming ? "airplane.circle" : "checkmark")
+                Label(confirmButtonTitle, systemImage: isConfirming ? "airplane.circle" : "checkmark")
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
@@ -707,6 +718,74 @@ struct ExtractionReview: View {
         .foregroundStyle(Color.voyaInk)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private var confirmButtonTitle: String {
+        if isConfirming {
+            return String(localized: "Checking flights")
+        }
+
+        switch destination {
+        case .newTrip:
+            return String(localized: "Create new trip")
+        case .existing:
+            return String(localized: "Save to trip")
+        }
+    }
+}
+
+struct ImportTripDestinationPicker: View {
+    let trips: [Trip]
+    let suggestedTripID: UUID?
+    @Binding var selection: ImportTripDestination
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Add to", systemImage: "calendar.badge.plus")
+                .font(.headline)
+                .foregroundStyle(Color.voyaInk)
+
+            Picker("Trip", selection: $selection) {
+                Label("Create new trip", systemImage: "plus.circle")
+                    .tag(ImportTripDestination.newTrip)
+
+                ForEach(trips) { trip in
+                    Text(optionTitle(for: trip))
+                        .tag(ImportTripDestination.existing(trip.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(Color.voyaInk)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 12)
+            .background(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+            Text(helperText)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.voyaMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(Color.voyaSky.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var helperText: String {
+        switch selection {
+        case .existing(let tripID) where tripID == suggestedTripID:
+            return String(localized: "Suggested based on the imported dates.")
+        case .existing:
+            return String(localized: "Imported items will be added to the selected trip.")
+        case .newTrip:
+            return String(localized: "A separate trip will be created from these items.")
+        }
+    }
+
+    private func optionTitle(for trip: Trip) -> String {
+        let dates = trip.dates.trimmingCharacters(in: .whitespacesAndNewlines)
+        let suffix = trip.id == suggestedTripID ? String(localized: "Suggested") : dates
+        return suffix.isEmpty ? trip.title : "\(trip.title) · \(suffix)"
     }
 }
 

@@ -70,7 +70,20 @@ extension VoyaStore {
             )
         }
 
+        if let preview = extractedPreview,
+           let suggestedTripID = suggestedImportTripID(for: preview.items) {
+            importTripDestination = .existing(suggestedTripID)
+        } else {
+            importTripDestination = .newTrip
+        }
+
         await enrichExtractedPreviewFlights()
+        if let preview = extractedPreview,
+           let suggestedTripID = suggestedImportTripID(for: preview.items) {
+            importTripDestination = .existing(suggestedTripID)
+        } else {
+            importTripDestination = .newTrip
+        }
         updateImportPreparationStep(
             .preview,
             state: .completed,
@@ -124,7 +137,13 @@ extension VoyaStore {
             return
         }
 
-        saveConfirmedExtraction(preview)
+        if case .existing(let tripID) = importTripDestination,
+           !trips.contains(where: { $0.id == tripID }) {
+            importMessage = String(localized: "The selected trip is no longer available. Choose another trip or create a new one.")
+            return
+        }
+
+        saveConfirmedExtraction(preview, destination: importTripDestination)
     }
 
     func enrichExtractedPreviewFlights() async {
@@ -255,10 +274,11 @@ extension VoyaStore {
         return String(localized: "Preparing \(status.sourceName)")
     }
 
-    func saveConfirmedExtraction(_ preview: ExtractionPreview) {
+    func saveConfirmedExtraction(_ preview: ExtractionPreview, destination: ImportTripDestination) {
         normalizePreviewItemsForStorage(preview.items)
 
-        if let matchingTripIndex = tripIndexForMerge(with: preview.items) {
+        if case .existing(let tripID) = destination,
+           let matchingTripIndex = trips.firstIndex(where: { $0.id == tripID }) {
             let trip = trips[matchingTripIndex]
             let sourceDocument: SourceDocument?
             if let sourceFile = preview.sourceFile {

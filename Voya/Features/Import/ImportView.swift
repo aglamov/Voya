@@ -97,6 +97,9 @@ struct ImportView: View {
                                 preview: preview,
                                 isConfirming: store.isConfirmingExtraction,
                                 statusMessage: store.importMessage,
+                                trips: store.trips,
+                                suggestedTripID: store.suggestedImportTripID(for: preview.items),
+                                destination: $store.importTripDestination,
                                 onOpenSource: openSourceDocument
                             ) { item, draft in
                                 store.updatePreviewItem(item, with: draft)

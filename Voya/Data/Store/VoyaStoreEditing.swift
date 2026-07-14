@@ -228,6 +228,7 @@ extension VoyaStore {
     func prepareForNextImport() {
         importSuccess = nil
         importMessage = nil
+        importTripDestination = .newTrip
         importPreparationStatus = nil
     }
 

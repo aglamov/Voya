@@ -121,6 +121,11 @@ struct ImportSuccess: Identifiable {
     var didCreateTrip: Bool
 }
 
+enum ImportTripDestination: Hashable {
+    case newTrip
+    case existing(UUID)
+}
+
 enum ImportPreparationStepState: Equatable {
     case pending
     case running
