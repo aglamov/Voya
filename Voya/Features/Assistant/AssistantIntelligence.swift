@@ -74,7 +74,7 @@ struct AssistantIntelligence {
         homeLocationAddress: String
     ) -> String {
         [
-            "assistant-ai-risk-brief-v3",
+            "assistant-staged-sources-v4",
             trip?.id.uuidString ?? "no-trip",
             trip?.updatedAt.timeIntervalSince1970.description ?? "0",
             itinerary.map { "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSince1970)" }.joined(separator: "|"),
@@ -157,6 +157,15 @@ struct AssistantSourceSummary: Identifiable {
     var severity: AlertSeverity
 }
 
+enum AssistantProcessingStage: Int, CaseIterable {
+    case local
+    case flights
+    case routes
+    case weather
+    case aiReview
+    case complete
+}
+
 @MainActor
 struct AssistantIntelligenceBuilder {
     let store: VoyaStore
@@ -166,12 +175,14 @@ struct AssistantIntelligenceBuilder {
         itinerary: [ItineraryItem],
         homeLocationName: String,
         homeLocationAddress: String,
-        modelContext: ModelContext?
+        modelContext: ModelContext?,
+        onProgress: ((AssistantProcessingStage) -> Void)? = nil
     ) async -> AssistantIntelligence {
         guard let trip else {
             return .empty
         }
 
+        onProgress?(.local)
         var alerts: [TravelAlert] = []
         var sourceCounts: [String: Int] = [:]
         var sourceSeverities: [String: AlertSeverity] = [:]
@@ -213,11 +224,13 @@ struct AssistantIntelligenceBuilder {
             append(alert)
         }
 
+        onProgress?(.flights)
         let flightAlerts = await flightStatusAlerts(for: itinerary)
         for alert in flightAlerts {
             append(alert)
         }
 
+        onProgress?(.routes)
         let transferAlerts = await mobilityAlerts(
             trip: trip,
             itinerary: itinerary,
@@ -228,6 +241,7 @@ struct AssistantIntelligenceBuilder {
             append(alert)
         }
 
+        onProgress?(.weather)
         weatherCards = await loadWeatherCards(
             itinerary: itinerary,
             modelContext: modelContext
@@ -280,6 +294,7 @@ struct AssistantIntelligenceBuilder {
             }
 
         var finalWeather = weather
+        onProgress?(.aiReview)
         let aiAdvice = await assistantAIAdvice(
             trip: trip,
             itinerary: itinerary,
@@ -296,6 +311,7 @@ struct AssistantIntelligenceBuilder {
             finalWeather.recommendation = aiAdvice.packingAdvice
         }
 
+        onProgress?(.complete)
         return AssistantIntelligence(
             assessment: assessment,
             alerts: sortedAlerts,
@@ -304,6 +320,32 @@ struct AssistantIntelligenceBuilder {
             aiAdvice: aiAdvice,
             generatedAt: Date(),
             isPlaceholder: false
+        )
+    }
+
+    func localSnapshot(trip: Trip?, itinerary: [ItineraryItem]) -> AssistantIntelligence {
+        guard let trip else { return .empty }
+        let alerts = localReadinessAlerts(trip: trip, itinerary: itinerary)
+        let ready = alerts.filter { $0.severity == .calm }.count
+        let watch = alerts.filter { $0.severity == .watch }.count
+        let action = alerts.filter { $0.severity == .action }.count
+        let assessment = tripAssessment(
+            trip: trip,
+            itinerary: itinerary,
+            alerts: alerts,
+            readySignals: ready,
+            watchSignals: watch,
+            actionSignals: action
+        )
+
+        return AssistantIntelligence(
+            assessment: assessment,
+            alerts: alerts,
+            weather: .empty,
+            sources: [],
+            aiAdvice: nil,
+            generatedAt: Date(),
+            isPlaceholder: true
         )
     }
 
@@ -483,16 +525,7 @@ struct AssistantIntelligenceBuilder {
                 )
 
                 guard let candidate = response.candidate else {
-                    alerts.append(
-                        TravelAlert(
-                            id: "flight-unverified-\(item.id.uuidString)",
-                            title: String(localized: "\(flightNumber) needs review"),
-                            message: response.warnings.first ?? response.validation.reasons.first ?? String(localized: "Flight provider did not return a matching live record."),
-                            severity: .watch,
-                            sourceTitle: String(localized: "Flight lookup"),
-                            sourceDetail: String(localized: "Provider validation state: \(response.validation.state).")
-                        )
-                    )
+                    alerts.append(flightStatusUnavailableAlert(for: item, flightNumber: flightNumber))
                     continue
                 }
 
@@ -501,20 +534,29 @@ struct AssistantIntelligenceBuilder {
                     alerts.append(flightPlaneAlert(for: item, candidate: candidate, plane: plane))
                 }
             } catch {
-                alerts.append(
-                    TravelAlert(
-                        id: "flight-provider-unavailable-\(item.id.uuidString)",
-                        title: String(localized: "\(flightNumber) status unavailable"),
-                        message: String(localized: "Live flight provider could not be reached. Saved itinerary data is still available."),
-                        severity: .watch,
-                        sourceTitle: String(localized: "Flight lookup"),
-                        sourceDetail: String(localized: "Request to /api/flight-lookup failed.")
-                    )
-                )
+                alerts.append(flightStatusUnavailableAlert(for: item, flightNumber: flightNumber))
             }
         }
 
         return alerts
+    }
+
+    private func flightStatusUnavailableAlert(for item: ItineraryItem, flightNumber: String) -> TravelAlert {
+        let secondsUntilDeparture = item.startsAt?.timeIntervalSinceNow ?? 0
+        let isNearDeparture = secondsUntilDeparture <= 48 * 60 * 60
+
+        return TravelAlert(
+            id: "flight-status-pending-\(item.id.uuidString)",
+            title: isNearDeparture
+                ? String(localized: "Check \(flightNumber) closer to departure")
+                : String(localized: "Live status for \(flightNumber) will appear later"),
+            message: isNearDeparture
+                ? String(localized: "The live provider has not confirmed this flight yet. Keep the saved booking and check the airline before leaving for the airport.")
+                : String(localized: "The flight is saved. Live terminal, gate, and delay information normally becomes useful closer to departure."),
+            severity: isNearDeparture ? .watch : .calm,
+            sourceTitle: String(localized: "Flight lookup"),
+            sourceDetail: String(localized: "Live provider data is not available for this flight window yet.")
+        )
     }
 
     private func flightAlert(for item: ItineraryItem, candidate: FlightLookupCandidate) -> TravelAlert {

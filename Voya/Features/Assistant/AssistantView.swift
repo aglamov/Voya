@@ -24,6 +24,7 @@ struct AssistantView: View {
     @State private var intelligence = AssistantIntelligence.empty
     @State private var isAnsweringQuestion = false
     @State private var focusedItemID: UUID?
+    @State private var processingStage: AssistantProcessingStage = .local
 
     private var trip: Trip? {
         store.currentOrUpcomingTrip ?? store.selectedTrip
@@ -99,13 +100,16 @@ struct AssistantView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HeaderBar(title: "Assistant", subtitle: trip?.title ?? String(localized: "Your trip at a glance"))
 
+                Text("Identified immediately")
+                    .font(.headline)
+                    .foregroundStyle(Color.voyaInk)
+
                 if let assistantItem {
                     Button {
                         itemBeingViewed = assistantItem
                     } label: {
                         AssistantNextBriefCard(
                             item: assistantItem,
-                            aiDescription: intelligence.aiAdvice?.nextItemDescription,
                             isRefreshing: isRefreshingIntelligence
                         )
                     }
@@ -118,11 +122,29 @@ struct AssistantView: View {
                     )
                 }
 
-                AssistantTripRisksCard(
-                    alerts: intelligence.alerts,
-                    aiAdvice: intelligence.aiAdvice,
-                    isRefreshing: isRefreshingIntelligence
+                if isRefreshingIntelligence {
+                    AssistantTripRisksCard(
+                        alerts: intelligence.alerts,
+                        aiAdvice: nil,
+                        isRefreshing: true
+                    )
+                }
+
+                AssistantSourcesProcessingCard(
+                    stage: processingStage,
+                    isProcessing: isRefreshingIntelligence || (trip != nil && intelligence.isPlaceholder),
+                    advice: intelligence.aiAdvice
                 )
+
+                if !isRefreshingIntelligence && !intelligence.isPlaceholder {
+                    AssistantWeatherPrepCard(weather: intelligence.weather)
+
+                    AssistantTripRisksCard(
+                        alerts: intelligence.alerts,
+                        aiAdvice: intelligence.aiAdvice,
+                        isRefreshing: false
+                    )
+                }
 
                 if !checkInActions.isEmpty {
                     AssistantCheckInCard(actions: checkInActions) { action in
@@ -296,11 +318,14 @@ struct AssistantView: View {
         if let cached = store.assistantIntelligenceCache[cacheKey] {
             intelligence = cached
             if !forceRefresh, cached.isFresh(for: trip) {
+                processingStage = .complete
                 return
             }
-        } else if intelligence.isPlaceholder {
-            intelligence = AssistantIntelligence.loading(trip: trip, itinerary: itinerary)
         }
+
+        let builder = AssistantIntelligenceBuilder(store: store)
+        intelligence = builder.localSnapshot(trip: trip, itinerary: itinerary)
+        processingStage = .local
 
         guard !store.refreshingAssistantIntelligenceKeys.contains(cacheKey) else {
             return
@@ -311,16 +336,19 @@ struct AssistantView: View {
             store.refreshingAssistantIntelligenceKeys.remove(cacheKey)
         }
 
-        let builder = AssistantIntelligenceBuilder(store: store)
         let refreshed = await builder.build(
             trip: trip,
             itinerary: itinerary,
             homeLocationName: homeLocationName,
             homeLocationAddress: homeLocationAddress,
-            modelContext: modelContext
+            modelContext: modelContext,
+            onProgress: { stage in
+                processingStage = stage
+            }
         )
         store.assistantIntelligenceCache[cacheKey] = refreshed
         intelligence = refreshed
+        processingStage = .complete
     }
 
     @MainActor
@@ -364,7 +392,6 @@ struct AssistantBoardingPassEntry: Identifiable {
 
 struct AssistantNextBriefCard: View {
     let item: ItineraryItem
-    let aiDescription: String?
     let isRefreshing: Bool
 
     var body: some View {
@@ -438,10 +465,6 @@ struct AssistantNextBriefCard: View {
     }
 
     private var guidance: String {
-        if let aiDescription = aiDescription?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
-            return aiDescription
-        }
-
         switch item.kind {
         case .flight:
             return String(localized: "Allow time for the airport, and check the terminal and gate before you leave.")
@@ -469,6 +492,97 @@ private struct AssistantBriefRow: View {
         }
         .font(.subheadline.weight(.medium))
         .foregroundStyle(Color.voyaInk)
+    }
+}
+
+struct AssistantSourcesProcessingCard: View {
+    let stage: AssistantProcessingStage
+    let isProcessing: Bool
+    let advice: AssistantAIAdvice?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack(spacing: 12) {
+                Image(systemName: isProcessing ? "sparkles" : "checkmark.seal.fill")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(isProcessing ? Color.voyaSky : Color.voyaTeal)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(isProcessing ? "Processing all sources" : "All-source analysis")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text(isProcessing ? "Building a complete picture of the trip" : completionSubtitle)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+            }
+
+            if isProcessing {
+                VStack(spacing: 10) {
+                    processingRow("Flight status and documents", stage: .flights)
+                    processingRow("Routes and critical connections", stage: .routes)
+                    processingRow("Weather along the itinerary", stage: .weather)
+                    processingRow("Final AI risk review", stage: .aiReview)
+                }
+                .padding(13)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            } else {
+                Text(resultText)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.voyaInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.voyaSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    @ViewBuilder
+    private func processingRow(_ title: LocalizedStringKey, stage rowStage: AssistantProcessingStage) -> some View {
+        HStack(spacing: 10) {
+            if stage == rowStage {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.voyaSky)
+                    .frame(width: 24, height: 24)
+            } else {
+                Image(systemName: stage.rawValue > rowStage.rawValue ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(stage.rawValue > rowStage.rawValue ? Color.voyaTeal : Color.voyaLine)
+                    .frame(width: 24, height: 24)
+            }
+
+            Text(title)
+                .font(.subheadline.weight(stage == rowStage ? .semibold : .medium))
+                .foregroundStyle(stage.rawValue >= rowStage.rawValue ? Color.voyaInk : Color.voyaMuted)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var completionSubtitle: String {
+        advice?.usedAI == true
+            ? String(localized: "OpenAI review complete")
+            : String(localized: "Available sources collected")
+    }
+
+    private var resultText: String {
+        if advice?.usedAI == true {
+            let sections = [advice?.nextItemDescription, advice?.riskOverview]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+            if !sections.isEmpty {
+                return sections.joined(separator: "\n\n")
+            }
+        }
+        return String(localized: "Route, weather, booking, and provider data have been collected. The summary below is based on the available facts.")
     }
 }
 
@@ -504,17 +618,6 @@ struct AssistantTripRisksCard: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Color.voyaMuted)
             } else {
-                if let riskOverview {
-                    Text(riskOverview)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color.voyaInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(13)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.voyaSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-                }
-
                 VStack(spacing: 0) {
                     ForEach(Array(risks.enumerated()), id: \.element.id) { index, alert in
                         HStack(alignment: .top, spacing: 11) {
@@ -577,11 +680,6 @@ struct AssistantTripRisksCard: View {
                 }
                 return lhs.title < rhs.title
             }
-    }
-
-    private var riskOverview: String? {
-        guard aiAdvice?.usedAI == true else { return nil }
-        return aiAdvice?.riskOverview?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 
     private func severityRank(_ severity: AlertSeverity) -> Int {
