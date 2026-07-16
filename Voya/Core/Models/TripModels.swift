@@ -223,3 +223,14 @@ final class Trip: Identifiable {
         self.endLocationAddress = endLocationAddress
     }
 }
+
+extension Trip {
+    var displayDates: String {
+        let dates = items.flatMap { [$0.startsAt, $0.endsAt].compactMap { $0 } }
+        guard let start = dates.min(), let end = dates.max() else {
+            return self.dates
+        }
+
+        return DateIntervalFormatter.localizedDateRange(start: start, end: end)
+    }
+}

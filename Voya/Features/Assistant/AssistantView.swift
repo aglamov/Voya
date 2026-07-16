@@ -23,6 +23,7 @@ struct AssistantView: View {
     @State private var boardingPassImportMessage: String?
     @State private var intelligence = AssistantIntelligence.empty
     @State private var isAnsweringQuestion = false
+    @State private var focusedItemID: UUID?
 
     private var trip: Trip? {
         store.currentOrUpcomingTrip ?? store.selectedTrip
@@ -40,13 +41,13 @@ struct AssistantView: View {
         } ?? itinerary.first
     }
 
-    private var attentionItems: [ItineraryItem] {
-        itinerary.filter { item in
-            item.startsAt == nil
-                || item.location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || item.location.localizedCaseInsensitiveContains("needed")
-                || item.status.localizedCaseInsensitiveContains("needs")
-        }
+    private var focusedItem: ItineraryItem? {
+        guard let focusedItemID else { return nil }
+        return itinerary.first { $0.id == focusedItemID }
+    }
+
+    private var assistantItem: ItineraryItem? {
+        focusedItem ?? nextItem
     }
 
     private var checkInActions: [FlightCheckInAction] {
@@ -96,26 +97,17 @@ struct AssistantView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
-                HeaderBar(title: "Assistant", subtitle: "Live support")
+                HeaderBar(title: "Assistant", subtitle: trip?.title ?? String(localized: "Your trip at a glance"))
 
-                AssistantStatusCard(
-                    trip: trip,
-                    nextItem: nextItem,
-                    intelligence: intelligence,
-                    isRefreshing: isRefreshingIntelligence
-                )
-
-                AssistantSummaryCard(intelligence: intelligence)
-
-                AssistantAssessmentCard(assessment: intelligence.assessment)
-
-                AssistantWeatherPrepCard(weather: intelligence.weather)
-
-                if let nextItem {
+                if let assistantItem {
                     Button {
-                        itemBeingViewed = nextItem
+                        itemBeingViewed = assistantItem
                     } label: {
-                        AssistantNextActionCard(item: nextItem)
+                        AssistantNextBriefCard(
+                            item: assistantItem,
+                            aiDescription: intelligence.aiAdvice?.nextItemDescription,
+                            isRefreshing: isRefreshingIntelligence
+                        )
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -125,6 +117,12 @@ struct AssistantView: View {
                         symbol: "message.badge"
                     )
                 }
+
+                AssistantTripRisksCard(
+                    alerts: intelligence.alerts,
+                    aiAdvice: intelligence.aiAdvice,
+                    isRefreshing: isRefreshingIntelligence
+                )
 
                 if !checkInActions.isEmpty {
                     AssistantCheckInCard(actions: checkInActions) { action in
@@ -150,12 +148,6 @@ struct AssistantView: View {
                     )
                 }
 
-                if !attentionItems.isEmpty {
-                    AssistantAttentionCard(items: Array(attentionItems.prefix(3))) { item in
-                        itemBeingViewed = item
-                    }
-                }
-
                 AssistantQuestionCard(
                     question: $assistantQuestion,
                     answer: assistantAnswer,
@@ -173,19 +165,6 @@ struct AssistantView: View {
                         }
                     }
                 )
-
-                VStack(spacing: 12) {
-                    ForEach(intelligence.alerts) { alert in
-                        AlertCard(alert: alert)
-                    }
-                }
-
-                if !intelligence.sources.isEmpty {
-                    AssistantSourceBreakdownCard(
-                        sources: intelligence.sources,
-                        generatedAt: intelligence.generatedAt
-                    )
-                }
 
                 HomeBaseSettingsCard(
                     homeLocationName: $homeLocationName,
@@ -220,6 +199,12 @@ struct AssistantView: View {
             handleBoardingPassImport(result)
         }
         .quickLookPreview($boardingPassPreviewURL)
+        .onAppear {
+            consumeAssistantFocus()
+        }
+        .onChange(of: store.assistantFocusItemID) { _, _ in
+            consumeAssistantFocus()
+        }
         .task(id: intelligenceRefreshID) {
             await refreshAssistantIntelligenceIfNeeded()
         }
@@ -232,6 +217,17 @@ struct AssistantView: View {
             String(localized: "What if my flight is delayed?"),
             String(localized: "What should I pack?")
         ]
+    }
+
+    private func consumeAssistantFocus() {
+        guard let itemID = store.assistantFocusItemID,
+              let item = itinerary.first(where: { $0.id == itemID }) else {
+            return
+        }
+
+        focusedItemID = itemID
+        assistantQuestion = "\(String(localized: "What should I do next?")) \(item.title)"
+        store.assistantFocusItemID = nil
     }
 
     private func answer(for question: String) -> String {
@@ -255,8 +251,8 @@ struct AssistantView: View {
             if let routeAlert = intelligence.alerts.first(where: { $0.sourceTitle == String(localized: "Mobility plan") }) {
                 return String(localized: "\(routeAlert.title). \(routeAlert.message)")
             }
-            if let nextItem {
-                return String(localized: "For \(nextItem.title), use the transfer card in Trips for live timing. Taxi and car stay concise; public transit shows the line, departure time, and stop to get off.")
+            if let assistantItem {
+                return String(localized: "For \(assistantItem.title), use the transfer card in Trips for live timing. Taxi and car stay concise; public transit shows the line, departure time, and stop to get off.")
             }
             return String(localized: "Add a timed itinerary item and route guidance will appear around it.")
         }
@@ -270,8 +266,8 @@ struct AssistantView: View {
             return String(localized: "\(intelligence.assessment.title). \(intelligence.assessment.detail)")
         }
 
-        if let nextItem {
-            return String(localized: "Next: \(nextItem.title) at \(nextItem.displayTime). Check the place, route, and status fields; if anything is uncertain, open the item and correct it before travel day.")
+        if let assistantItem {
+            return String(localized: "Next: \(assistantItem.title) at \(assistantItem.displayTime). Check the place, route, and status fields; if anything is uncertain, open the item and correct it before travel day.")
         }
 
         return String(localized: "\(trip.title) is saved, but it needs timed itinerary items before I can produce useful live guidance.")
@@ -364,6 +360,247 @@ struct AssistantBoardingPassEntry: Identifiable {
     var id: UUID { item.id }
     let item: ItineraryItem
     let document: SourceDocument?
+}
+
+struct AssistantNextBriefCard: View {
+    let item: ItineraryItem
+    let aiDescription: String?
+    let isRefreshing: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: item.kind.symbol)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 50, height: 50)
+                    .background(item.kind.timelineAccent)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Up next")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(item.kind.timelineAccent)
+                    Text(item.title)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(item.displayTime)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaMuted)
+                    .padding(.top, 5)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("What to know")
+                    .font(.headline)
+                    .foregroundStyle(Color.voyaInk)
+
+                if let location {
+                    AssistantBriefRow(symbol: "mappin.and.ellipse", text: location)
+                }
+                AssistantBriefRow(symbol: "info.circle.fill", text: guidance)
+                if let status {
+                    AssistantBriefRow(symbol: "doc.text.fill", text: status)
+                }
+            }
+            .padding(14)
+            .background(Color.voyaSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+
+            if isRefreshing {
+                Label("Checking the latest details…", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.voyaMuted)
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 18, y: 10)
+    }
+
+    private var location: String? {
+        let value = item.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, !value.localizedCaseInsensitiveContains("needed") else { return nil }
+        return value
+    }
+
+    private var status: String? {
+        item.status.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    private var guidance: String {
+        if let aiDescription = aiDescription?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            return aiDescription
+        }
+
+        switch item.kind {
+        case .flight:
+            return String(localized: "Allow time for the airport, and check the terminal and gate before you leave.")
+        case .hotel:
+            return String(localized: "Keep the address and check-in instructions handy for your arrival.")
+        case .event:
+            return String(localized: "Check the entrance, ticket, and how long it takes to reach the venue.")
+        case .transit:
+            return String(localized: "Check the departure stop and route shortly before you set off.")
+        }
+    }
+}
+
+private struct AssistantBriefRow: View {
+    let symbol: String
+    let text: String
+
+    var body: some View {
+        Label {
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: symbol)
+                .foregroundStyle(Color.voyaMuted)
+        }
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(Color.voyaInk)
+    }
+}
+
+struct AssistantTripRisksCard: View {
+    let alerts: [TravelAlert]
+    let aiAdvice: AssistantAIAdvice?
+    let isRefreshing: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: risks.isEmpty ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(risks.isEmpty ? Color.voyaTeal : Color.voyaCoral)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Trip risks")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text(riskSummary)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if risks.isEmpty {
+                Text(isRefreshing ? String(localized: "Checking the itinerary…") : String(localized: "Nothing important needs your attention right now."))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+            } else {
+                if let riskOverview {
+                    Text(riskOverview)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.voyaInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(13)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.voyaSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(Array(risks.enumerated()), id: \.element.id) { index, alert in
+                        HStack(alignment: .top, spacing: 11) {
+                            Image(systemName: alert.severity.symbol)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(alert.severity.color)
+                                .frame(width: 28, height: 28)
+                                .background(alert.severity.color.opacity(0.10))
+                                .clipShape(Circle())
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(alert.title)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(Color.voyaInk)
+                                Text(alert.message)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Color.voyaMuted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 11)
+
+                        if index < risks.count - 1 {
+                            Divider().padding(.leading, 39)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private var risks: [TravelAlert] {
+        var seen = Set<String>()
+        let aiRisks = (aiAdvice?.additionalRisks ?? []).map { risk in
+            TravelAlert(
+                id: "ai-risk-\(risk.title)-\(risk.description)",
+                title: risk.title,
+                message: risk.description,
+                severity: risk.severity == "action" ? .action : .watch
+            )
+        }
+
+        return (alerts + aiRisks)
+            .filter { $0.severity != .calm }
+            .filter { alert in
+                let key = alert.title
+                    .lowercased()
+                    .filter { $0.isLetter || $0.isNumber }
+                return seen.insert(key).inserted
+            }
+            .sorted { lhs, rhs in
+                if severityRank(lhs.severity) != severityRank(rhs.severity) {
+                    return severityRank(lhs.severity) > severityRank(rhs.severity)
+                }
+                return lhs.title < rhs.title
+            }
+    }
+
+    private var riskOverview: String? {
+        guard aiAdvice?.usedAI == true else { return nil }
+        return aiAdvice?.riskOverview?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    private func severityRank(_ severity: AlertSeverity) -> Int {
+        switch severity {
+        case .calm: 0
+        case .watch: 1
+        case .action: 2
+        }
+    }
+
+    private var riskSummary: String {
+        if isRefreshing && risks.isEmpty {
+            return String(localized: "Checking the whole trip")
+        }
+        if risks.isEmpty {
+            return String(localized: "No current concerns")
+        }
+        return String(localized: "\(risks.count) things to think about before the trip")
+    }
 }
 
 struct AssistantStatusCard: View {

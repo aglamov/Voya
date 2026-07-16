@@ -362,22 +362,48 @@ extension VoyaStore {
         let service = VercelFlightLookupService()
 
         for (index, item) in preview.items.enumerated() where item.kind == .flight {
-            guard let flightNumber = firstFlightNumber(in: "\(item.title) \(item.location)") else {
-                continue
-            }
-
             let route = airportRouteCodes(in: item.location)
             let referenceDate = item.startsAt ?? nearbyFlightDate(for: index, in: preview.items)
 
             do {
-                let response = try await service.lookup(
-                    flightNumber: flightNumber,
-                    date: referenceDate,
-                    originAirport: route?.origin,
-                    destinationAirport: route?.destination
-                )
+                let recognizedFlightNumber = firstFlightNumber(in: "\(item.title) \(item.location)")
+                let discoveredCandidate: FlightLookupCandidate?
+                let flightNumber: String
 
-                guard let candidate = response.candidate else {
+                if let recognizedFlightNumber {
+                    flightNumber = recognizedFlightNumber
+                    discoveredCandidate = nil
+                } else if let route, let referenceDate {
+                    let discovery = try await service.discover(
+                        originAirport: route.origin,
+                        destinationAirport: route.destination,
+                        departureAt: referenceDate
+                    )
+                    guard discovery.validation.state == "validated",
+                          discovery.validation.confidence >= 0.8,
+                          let candidate = discovery.candidate else {
+                        continue
+                    }
+                    flightNumber = candidate.flightNumber
+                    discoveredCandidate = candidate
+                } else {
+                    continue
+                }
+
+                let candidate: FlightLookupCandidate?
+                do {
+                    let response = try await service.lookup(
+                        flightNumber: flightNumber,
+                        date: referenceDate,
+                        originAirport: route?.origin,
+                        destinationAirport: route?.destination
+                    )
+                    candidate = response.candidate ?? discoveredCandidate
+                } catch {
+                    candidate = discoveredCandidate
+                }
+
+                guard let candidate else {
                     continue
                 }
 
@@ -395,7 +421,8 @@ extension VoyaStore {
     func apply(_ candidate: FlightLookupCandidate, toImportedFlight item: ItineraryItem) -> Bool {
         var didChange = false
 
-        if item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if firstFlightNumber(in: "\(item.title) \(item.location)") == nil
+            || item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || item.title.localizedCaseInsensitiveContains("destination")
             || item.title.localizedCaseInsensitiveContains(candidate.flightNumber) {
             let title = candidate.titleText

@@ -153,6 +153,7 @@ struct EmptyTripsCard: View {
 struct TripOperationsCard: View {
     let trip: Trip
     let itinerary: [ItineraryItem]
+    let onOpenAssistant: (ItineraryItem) -> Void
 
     private var sortedItems: [ItineraryItem] {
         itinerary.sorted { first, second in
@@ -198,10 +199,10 @@ struct TripOperationsCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Trip command")
+                    Text("Up next")
                         .font(.headline)
                         .foregroundStyle(Color.voyaInk)
-                    Text(commandSummary)
+                    Text(nextItem.map(nextActionSummary) ?? commandSummary)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.voyaMuted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -210,37 +211,44 @@ struct TripOperationsCard: View {
                 Spacer(minLength: 0)
             }
 
-            HStack(spacing: 8) {
-                TripMetricTile(title: "Items", value: "\(itinerary.count)", symbol: "checklist")
-                TripMetricTile(title: "Next", value: nextMetricText, symbol: "clock")
-                TripMetricTile(title: "Transfers", value: transferCountText, symbol: "tram")
-            }
-
             if let nextItem {
-                HStack(alignment: .center, spacing: 12) {
-                    Image(systemName: nextItem.kind.symbol)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(nextItem.kind.timelineAccent)
-                        .frame(width: 34, height: 34)
-                        .background(nextItem.kind.timelineAccent.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(nextItem.title.isEmpty ? String(localized: "Untitled item") : nextItem.title)
+                Button {
+                    onOpenAssistant(nextItem)
+                } label: {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: nextItem.kind.symbol)
                             .font(.subheadline.weight(.bold))
-                            .foregroundStyle(Color.voyaInk)
-                            .lineLimit(1)
-                        Text(nextItem.location.isEmpty ? String(localized: "Location needed") : nextItem.location)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Color.voyaMuted)
-                            .lineLimit(2)
-                    }
+                            .foregroundStyle(nextItem.kind.timelineAccent)
+                            .frame(width: 34, height: 34)
+                            .background(nextItem.kind.timelineAccent.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
 
-                    Spacer(minLength: 0)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(nextItem.title.isEmpty ? String(localized: "Untitled item") : nextItem.title)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                                .lineLimit(1)
+                            Text(nextItemDetail)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                                .lineLimit(2)
+                        }
+
+                        Spacer(minLength: 0)
+
+                        VStack(spacing: 3) {
+                            Image(systemName: "message.badge")
+                                .font(.subheadline.weight(.bold))
+                            Text("Assistant")
+                                .font(.caption2.weight(.bold))
+                        }
+                        .foregroundStyle(Color.voyaTeal)
+                    }
+                    .padding(12)
+                    .background(Color.voyaSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                .padding(12)
-                .background(Color.voyaSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .buttonStyle(.plain)
             }
 
         }
@@ -252,7 +260,7 @@ struct TripOperationsCard: View {
 
     private var commandSummary: String {
         if let destination = trip.destination?.trimmingCharacters(in: .whitespacesAndNewlines), !destination.isEmpty {
-            return String(localized: "\(destination) · \(trip.dates)")
+            return String(localized: "\(destination) · \(trip.displayDates)")
         }
 
         if let firstTimedItem, let lastTimedItem, firstTimedItem.id != lastTimedItem.id {
@@ -262,33 +270,26 @@ struct TripOperationsCard: View {
         return trip.summary.isEmpty ? String(localized: "Ready for itinerary review") : trip.summary
     }
 
-    private var transferCountText: String {
-        guard itinerary.count > 1 else {
-            return "0"
+    private func nextActionSummary(_ item: ItineraryItem) -> String {
+        guard let startsAt = item.startsAt else {
+            return String(localized: "Time needed")
         }
 
-        let transferCount = max(itinerary.count - 1, 0)
-        return "\(transferCount)"
+        return TripCommandDateFormatter.nextAction.string(from: startsAt)
     }
 
-    private var nextMetricText: String {
-        guard let nextItem else {
-            return String(localized: "Review")
-        }
-
-        guard let startsAt = nextItem.startsAt else {
-            return String(localized: "Set time")
-        }
-
-        return TripCommandDateFormatter.time.string(from: startsAt)
+    private var nextItemDetail: String {
+        guard let nextItem else { return "" }
+        let place = nextItem.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        return place.isEmpty ? String(localized: "Location needed") : place
     }
 }
 
 enum TripCommandDateFormatter {
-    static let time: DateFormatter = {
+    static let nextAction: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
-        formatter.dateFormat = "HH:mm"
+        formatter.locale = VoyaAppLocale.current
+        formatter.setLocalizedDateFormatFromTemplate("EEEjm")
         return formatter
     }()
 }

@@ -18,20 +18,40 @@ enum ItineraryDateFormatter {
 
     private static let displayFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
+        formatter.locale = VoyaAppLocale.current
         formatter.dateFormat = "MMM d, HH:mm"
         return formatter
     }()
 
     private static let timeOnlyFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
+        formatter.locale = VoyaAppLocale.current
         formatter.dateFormat = "HH:mm"
         return formatter
     }()
 }
 
 enum DateIntervalFormatter {
+    static func localizedDateRange(start: Date, end: Date) -> String {
+        let calendar = Calendar.autoupdatingCurrent
+        let monthDayFormatter = DateFormatter()
+        monthDayFormatter.locale = VoyaAppLocale.current
+        monthDayFormatter.setLocalizedDateFormatFromTemplate("dMMMM")
+
+        guard !calendar.isDate(start, inSameDayAs: end) else {
+            return monthDayFormatter.string(from: start)
+        }
+
+        if calendar.isDate(start, equalTo: end, toGranularity: .month) {
+            let dayFormatter = DateFormatter()
+            dayFormatter.locale = VoyaAppLocale.current
+            dayFormatter.setLocalizedDateFormatFromTemplate("d")
+            return "\(dayFormatter.string(from: start))–\(monthDayFormatter.string(from: end))"
+        }
+
+        return "\(monthDayFormatter.string(from: start)) – \(monthDayFormatter.string(from: end))"
+    }
+
     static func localizedDateRange(month: String, day: Int) -> String {
         String(localized: "\(month) \(day)")
     }
@@ -46,16 +66,21 @@ enum DateIntervalFormatter {
 }
 
 enum VoyaAppLocale {
+    static var current: Locale {
+        let identifier = Bundle.main.preferredLocalizations.first ?? Locale.autoupdatingCurrent.identifier
+        return Locale(identifier: identifier)
+    }
+
     static var currentIdentifier: String {
-        Locale.autoupdatingCurrent.identifier
+        current.identifier
     }
 
     static var currentLanguageCode: String {
-        Locale.autoupdatingCurrent.language.languageCode?.identifier ?? "en"
+        current.language.languageCode?.identifier ?? "en"
     }
 
     static var currentLanguageName: String {
-        Locale.autoupdatingCurrent.localizedString(forLanguageCode: currentLanguageCode) ?? currentLanguageCode
+        current.localizedString(forLanguageCode: currentLanguageCode) ?? currentLanguageCode
     }
 }
 

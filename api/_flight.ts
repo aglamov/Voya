@@ -9,6 +9,24 @@ export const flightLookupSchema = z.object({
 
 export type FlightLookup = z.infer<typeof flightLookupSchema>;
 
+export const flightDiscoverySchema = z.object({
+  originAirport: z.string().min(3).max(4),
+  destinationAirport: z.string().min(3).max(4),
+  departureAt: z.string().datetime({ offset: true })
+});
+
+export type FlightDiscovery = z.infer<typeof flightDiscoverySchema>;
+
+export type FlightDiscoveryResult = {
+  validation: {
+    state: "validated" | "not_found" | "ambiguous" | "provider_not_connected" | "provider_error";
+    confidence: number;
+    reasons: string[];
+  };
+  snapshot?: FlightSnapshot;
+  warnings: string[];
+};
+
 export type FlightSnapshotStatus =
   | "scheduled"
   | "boarding"
@@ -911,6 +929,135 @@ async function flightAwarePublishedSchedulesForIdent(lookup: FlightLookup, ident
   }
 
   return flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
+}
+
+async function flightAwarePublishedSchedulesForRoute(discovery: FlightDiscovery) {
+  const departure = new Date(discovery.departureAt);
+  const start = new Date(departure.getTime() - 3 * 60 * 60 * 1000);
+  const end = new Date(departure.getTime() + 3 * 60 * 60 * 1000);
+  const url = new URL(
+    `/aeroapi/schedules/${encodeURIComponent(start.toISOString())}/${encodeURIComponent(end.toISOString())}`,
+    "https://aeroapi.flightaware.com"
+  );
+  url.searchParams.set("origin", discovery.originAirport);
+  url.searchParams.set("destination", discovery.destinationAirport);
+  url.searchParams.set("include_codeshares", "true");
+  url.searchParams.set("include_regional", "true");
+  url.searchParams.set("max_pages", "2");
+
+  return flightAwareFetch(`${url.pathname.replace("/aeroapi", "")}${url.search}`);
+}
+
+function discoveryDeparture(snapshot: FlightSnapshot) {
+  return snapshot.scheduledDepartureAt
+    ?? snapshot.estimatedDepartureAt
+    ?? snapshot.actualDepartureAt;
+}
+
+function discoveryConfidence(deltaMinutes: number) {
+  if (deltaMinutes <= 15) return 0.97;
+  if (deltaMinutes <= 45) return 0.9;
+  if (deltaMinutes <= 90) return 0.8;
+  if (deltaMinutes <= 180) return 0.65;
+  return 0;
+}
+
+export async function discoverFlightNumber(discovery: FlightDiscovery): Promise<FlightDiscoveryResult> {
+  const normalizedDiscovery = {
+    ...discovery,
+    originAirport: discovery.originAirport.toUpperCase(),
+    destinationAirport: discovery.destinationAirport.toUpperCase()
+  };
+  const requestedDeparture = Date.parse(normalizedDiscovery.departureAt);
+  const result = await flightAwarePublishedSchedulesForRoute(normalizedDiscovery);
+
+  if (!result.connected) {
+    return {
+      validation: {
+        state: "provider_not_connected",
+        confidence: 0,
+        reasons: ["Set FLIGHTAWARE_AEROAPI_KEY to discover missing flight numbers."]
+      },
+      warnings: []
+    };
+  }
+  if (!result.ok) {
+    return {
+      validation: {
+        state: "provider_error",
+        confidence: 0,
+        reasons: [`FlightAware schedule discovery returned HTTP ${result.status}${result.error ? `: ${result.error}` : ""}.`]
+      },
+      warnings: []
+    };
+  }
+
+  const data = result.data as FlightAwareSchedulesResponse;
+  const seenServices = new Set<string>();
+  const ranked = (data.scheduled ?? [])
+    .map((schedule) => {
+      const snapshot = normalizeFlightAwarePublishedSchedule(schedule, schedule.ident_iata ?? schedule.ident_icao ?? schedule.ident ?? "");
+      const operatingIdent = schedule.actual_ident_iata ?? schedule.actual_ident_icao ?? schedule.actual_ident ?? undefined;
+      if (operatingIdent) {
+        snapshot.flightNumber = operatingIdent;
+        snapshot.flightIata = schedule.actual_ident_iata ?? undefined;
+        snapshot.flightIcao = schedule.actual_ident_icao ?? undefined;
+      }
+      return snapshot;
+    })
+    .map((snapshot) => {
+      const departureAt = discoveryDeparture(snapshot);
+      const departureMs = departureAt ? Date.parse(departureAt) : Number.NaN;
+      return {
+        snapshot,
+        deltaMinutes: Number.isNaN(departureMs) ? Number.POSITIVE_INFINITY : Math.abs(departureMs - requestedDeparture) / 60000
+      };
+    })
+    .filter(({ snapshot, deltaMinutes }) => Boolean(snapshot.flightNumber) && deltaMinutes <= 180)
+    .filter(({ snapshot }) => {
+      const serviceKey = `${cleanFlightNumber(snapshot.flightNumber)}:${discoveryDeparture(snapshot) ?? "unknown"}`;
+      if (seenServices.has(serviceKey)) return false;
+      seenServices.add(serviceKey);
+      return true;
+    })
+    .sort((left, right) => left.deltaMinutes - right.deltaMinutes);
+
+  const best = ranked[0];
+  if (!best) {
+    return {
+      validation: {
+        state: "not_found",
+        confidence: 0,
+        reasons: ["FlightAware did not find a published flight on this route within three hours of the imported departure time."]
+      },
+      warnings: []
+    };
+  }
+
+  const second = ranked[1];
+  const confidence = discoveryConfidence(best.deltaMinutes);
+  const isAmbiguous = Boolean(second && second.deltaMinutes - best.deltaMinutes < 30);
+  if (isAmbiguous || confidence < 0.8) {
+    return {
+      validation: {
+        state: "ambiguous",
+        confidence,
+        reasons: ["More than one FlightAware schedule is close to the imported route and time, so Voya did not guess the flight number."]
+      },
+      warnings: []
+    };
+  }
+
+  best.snapshot.confidence = confidence;
+  return {
+    validation: {
+      state: "validated",
+      confidence,
+      reasons: ["FlightAware matched the imported origin, destination, and departure time to one published flight."]
+    },
+    snapshot: best.snapshot,
+    warnings: []
+  };
 }
 
 async function flightAwarePublishedScheduleSnapshot(lookup: FlightLookup) {

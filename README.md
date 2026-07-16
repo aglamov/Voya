@@ -108,7 +108,7 @@ Required Vercel environment variables:
 - `OPENAI_EXTRACT_MODEL`: optional model for confirmation extraction. Defaults to `gpt-5.5`.
 - `OPENAI_REPAIR_MODEL`: optional model for invalid JSON repair. Defaults to `gpt-5.4-mini`.
 - `OPENAI_LOCATION_MODEL`: optional model for enrichment location normalization. Defaults to `gpt-5.4-mini`.
-- `OPENAI_BRIEF_MODEL`: optional model for travel brief generation. Defaults to `gpt-5.4-mini`.
+- `OPENAI_BRIEF_MODEL`: optional model for travel brief and second-pass risk assessment. Defaults to `gpt-5.6-terra`.
 - `OPENAI_MODEL`: optional global fallback used when a task-specific model variable is not set.
 
 Optional enrichment environment variables:

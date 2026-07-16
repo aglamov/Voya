@@ -9,8 +9,17 @@ struct AssistantAIAdvice: Codable {
     var answer: String
     var packingAdvice: String
     var nextActions: [String]
+    var nextItemDescription: String?
+    var riskOverview: String?
+    var additionalRisks: [AssistantAIRisk]?
     var confidence: Double
     var usedAI: Bool
+}
+
+struct AssistantAIRisk: Codable {
+    var title: String
+    var description: String
+    var severity: String
 }
 
 struct AssistantAIRequest: Encodable {
@@ -29,9 +38,16 @@ struct AssistantAIRequest: Encodable {
     struct TripContext: Encodable {
         var title: String
         var dates: String
+        var summary: String
         var destination: String?
         var startsAt: Date?
         var endsAt: Date?
+        var notes: String?
+        var sourceName: String
+        var startLocationName: String?
+        var startLocationAddress: String?
+        var endLocationName: String?
+        var endLocationAddress: String?
     }
 
     struct AssessmentContext: Encodable {
@@ -49,6 +65,10 @@ struct AssistantAIRequest: Encodable {
         var status: String
         var startsAt: Date?
         var endsAt: Date?
+        var confirmationCode: String?
+        var providerName: String?
+        var sourceName: String?
+        var extractedBookingData: String?
         var hasBoardingPass: Bool
         var hasSourceDocument: Bool
     }

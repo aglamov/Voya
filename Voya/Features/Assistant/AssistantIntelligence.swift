@@ -74,6 +74,7 @@ struct AssistantIntelligence {
         homeLocationAddress: String
     ) -> String {
         [
+            "assistant-ai-risk-brief-v3",
             trip?.id.uuidString ?? "no-trip",
             trip?.updatedAt.timeIntervalSince1970.description ?? "0",
             itinerary.map { "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSince1970)" }.joined(separator: "|"),
@@ -341,6 +342,22 @@ struct AssistantIntelligenceBuilder {
             )
         }
 
+        let uncoveredNights = uncoveredNightCount(trip: trip, itinerary: itinerary)
+        if uncoveredNights > 0 {
+            alerts.append(
+                TravelAlert(
+                    id: "local-accommodation-missing",
+                    title: String(localized: "No place to stay"),
+                    message: uncoveredNights == 1
+                        ? String(localized: "There is one overnight stay in this trip without accommodation. Decide where you will sleep and add the booking to the itinerary.")
+                        : String(localized: "There are \(uncoveredNights) nights in this trip without accommodation. Decide where you will sleep and add the bookings to the itinerary."),
+                    severity: .action,
+                    sourceTitle: String(localized: "Local itinerary"),
+                    sourceDetail: String(localized: "Compared overnight trip dates with saved hotel stays.")
+                )
+            )
+        }
+
         let checkInActions = itinerary.compactMap { item -> FlightCheckInAction? in
             guard store.boardingPassDocument(for: item) == nil else {
                 return nil
@@ -397,6 +414,41 @@ struct AssistantIntelligenceBuilder {
         }
 
         return alerts
+    }
+
+    private func uncoveredNightCount(trip: Trip, itinerary: [ItineraryItem]) -> Int {
+        let calendar = Calendar.autoupdatingCurrent
+        let startsAt = itinerary.compactMap(\.startsAt).min() ?? trip.startsAt
+        let endsAt = itinerary.compactMap { $0.endsAt ?? $0.startsAt }.max() ?? trip.endsAt
+        guard let startsAt, let endsAt, endsAt > startsAt else {
+            return 0
+        }
+
+        let hotels = itinerary.filter { $0.kind == .hotel && $0.startsAt != nil }
+        var day = calendar.startOfDay(for: startsAt)
+        var uncovered = 0
+
+        while let checkpoint = calendar.date(byAdding: .hour, value: 3, to: day), checkpoint < endsAt {
+            if checkpoint > startsAt {
+                let isCovered = hotels.contains { hotel in
+                    guard let checkIn = hotel.startsAt else { return false }
+                    let checkOut = hotel.endsAt
+                        ?? calendar.date(byAdding: .day, value: 1, to: checkIn)
+                        ?? checkIn
+                    return checkIn <= checkpoint && checkOut >= checkpoint
+                }
+                if !isCovered {
+                    uncovered += 1
+                }
+            }
+
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else {
+                break
+            }
+            day = nextDay
+        }
+
+        return uncovered
     }
 
     private func flightStatusAlerts(for itinerary: [ItineraryItem]) async -> [TravelAlert] {
@@ -877,9 +929,16 @@ struct AssistantIntelligenceBuilder {
             trip: AssistantAIRequest.TripContext(
                 title: trip.title,
                 dates: trip.dates,
+                summary: trip.summary,
                 destination: trip.destination,
                 startsAt: trip.startsAt,
-                endsAt: trip.endsAt
+                endsAt: trip.endsAt,
+                notes: trip.notes,
+                sourceName: trip.sourceName,
+                startLocationName: trip.startLocationName,
+                startLocationAddress: trip.startLocationAddress,
+                endLocationName: trip.endLocationName,
+                endLocationAddress: trip.endLocationAddress
             ),
             assessment: AssistantAIRequest.AssessmentContext(
                 score: assessment.score,
@@ -925,9 +984,20 @@ struct AssistantIntelligenceBuilder {
             status: item.status,
             startsAt: item.startsAt,
             endsAt: item.endsAt,
+            confirmationCode: item.confirmationCode,
+            providerName: item.providerName,
+            sourceName: item.sourceName,
+            extractedBookingData: compactAIContext(item.normalizedData ?? item.rawData),
             hasBoardingPass: store.boardingPassDocument(for: item) != nil,
             hasSourceDocument: store.sourceDocument(for: item) != nil
         )
+    }
+
+    private func compactAIContext(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty else {
+            return nil
+        }
+        return String(value.prefix(4_000))
     }
 
     private func nextItem(in itinerary: [ItineraryItem]) -> ItineraryItem? {

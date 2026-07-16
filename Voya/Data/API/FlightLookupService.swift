@@ -227,6 +227,39 @@ struct VercelFlightLookupService {
         return try JSONDecoder().decode(FlightLookupResponse.self, from: data)
     }
 
+    func discover(
+        originAirport: String,
+        destinationAirport: String,
+        departureAt: Date
+    ) async throws -> FlightLookupResponse {
+        guard let baseURL else {
+            throw VercelExtractionError.notConfigured
+        }
+
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/flight-discovery"))
+        VoyaAPIConfiguration.authorize(&request)
+        request.httpMethod = "POST"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.timeoutInterval = 25
+        request.httpBody = try JSONEncoder().encode(
+            FlightDiscoveryRequest(
+                originAirport: originAirport.trimmingCharacters(in: .whitespacesAndNewlines),
+                destinationAirport: destinationAirport.trimmingCharacters(in: .whitespacesAndNewlines),
+                departureAt: Self.flightTimestamp(from: departureAt)
+            )
+        )
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw VercelExtractionError.badResponse
+        }
+
+        return try JSONDecoder().decode(FlightLookupResponse.self, from: data)
+    }
+
     private static let flightDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -234,6 +267,12 @@ struct VercelFlightLookupService {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
+
+    private static func flightTimestamp(from date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: date)
+    }
 }
 
 struct FlightLookupRequest: Encodable {
@@ -241,6 +280,12 @@ struct FlightLookupRequest: Encodable {
     var date: String?
     var originAirport: String?
     var destinationAirport: String?
+}
+
+struct FlightDiscoveryRequest: Encodable {
+    var originAirport: String
+    var destinationAirport: String
+    var departureAt: String
 }
 
 struct ItemEnrichmentRequest: Encodable {

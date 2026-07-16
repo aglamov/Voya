@@ -21,7 +21,7 @@ struct ContentView: View {
             Group {
                 switch selectedTab {
                 case .trips:
-                    TripsView()
+                    TripsView(selectedTab: $selectedTab)
                 case .import:
                     ImportView(selectedTab: $selectedTab)
                 case .assistant:

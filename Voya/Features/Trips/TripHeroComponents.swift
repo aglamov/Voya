@@ -17,17 +17,21 @@ struct TripHeroCard: View {
         TripHeroSummary(trip: trip)
     }
 
+    private var displayTitle: String {
+        trip.destination?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? trip.title
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(trip.title)
+                    Text(displayTitle)
                         .font(.title2.bold())
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .shadow(color: .black.opacity(0.45), radius: 8, y: 2)
 
-                    Text(trip.dates)
+                    Text(trip.displayDates)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.86))
                         .lineLimit(1)
@@ -57,7 +61,7 @@ struct TripHeroCard: View {
                     .minimumScaleFactor(0.82)
                     .shadow(color: .black.opacity(0.45), radius: 8, y: 2)
 
-                Text(summary.firstUpText)
+                Text(summary.readinessText)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.86))
                     .lineLimit(1)
@@ -114,9 +118,10 @@ struct TripHeroSummary {
     let itemCountText: String
     let phaseText: String
     let firstUpText: String
+    let readinessText: String
 
     init(trip: Trip, now: Date = Date(), calendar: Calendar = .current) {
-        let range = TripDateRange(dates: trip.dates, now: now, calendar: calendar)
+        let range = TripDateRange(dates: trip.displayDates, now: now, calendar: calendar)
         let daysUntilStart = range.map { calendar.startOfDay(for: now).distanceInDays(to: calendar.startOfDay(for: $0.start), calendar: calendar) }
 
         if let range, calendar.isDate(now, inSameDayAs: range.start) {
@@ -145,6 +150,7 @@ struct TripHeroSummary {
         }
 
         itemCountText = String(localized: "\(trip.items.count) \(trip.items.count == 1 ? "item" : "items")")
+        readinessText = String(localized: "Plan is ready")
 
         if let firstItem = trip.items.first {
             firstUpText = String(localized: "First up: \(firstItem.title)")

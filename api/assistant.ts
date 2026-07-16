@@ -21,9 +21,16 @@ type AssistantRequest = {
   trip?: {
     title?: string;
     dates?: string;
+    summary?: string;
     destination?: string | null;
     startsAt?: string | null;
     endsAt?: string | null;
+    notes?: string | null;
+    sourceName?: string;
+    startLocationName?: string | null;
+    startLocationAddress?: string | null;
+    endLocationName?: string | null;
+    endLocationAddress?: string | null;
   };
   assessment?: {
     score?: number;
@@ -47,6 +54,10 @@ type AssistantRequest = {
     status?: string;
     startsAt?: string | null;
     endsAt?: string | null;
+    confirmationCode?: string | null;
+    providerName?: string | null;
+    sourceName?: string | null;
+    extractedBookingData?: string | null;
     hasBoardingPass?: boolean;
     hasSourceDocument?: boolean;
   }>;
@@ -73,9 +84,22 @@ type AssistantResponse = {
   answer: string;
   packingAdvice: string;
   nextActions: string[];
+  nextItemDescription: string;
+  riskOverview: string;
+  additionalRisks: Array<{
+    title: string;
+    description: string;
+    severity: "watch" | "action";
+  }>;
   confidence: number;
   usedAI: boolean;
 };
+
+const assistantRiskSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().min(1),
+  severity: z.enum(["watch", "action"])
+});
 
 const assistantResponseSchema = z.object({
   summary: z.string().min(1),
@@ -84,6 +108,9 @@ const assistantResponseSchema = z.object({
   answer: z.string().min(1),
   packingAdvice: z.string().min(1),
   nextActions: z.array(z.string().min(1)).min(1).max(5),
+  nextItemDescription: z.string().min(1),
+  riskOverview: z.string().min(1),
+  additionalRisks: z.array(assistantRiskSchema).max(5),
   confidence: z.number().min(0).max(1)
 });
 
@@ -177,6 +204,21 @@ function deterministicResponse(body: AssistantRequest): AssistantResponse {
     answer,
     packingAdvice,
     nextActions,
+    nextItemDescription: nextItemTitle
+      ? (isRussian
+        ? `Ближайший пункт — ${nextItemTitle}. Проверьте время, место и связанные с ним документы перед выходом.`
+        : `Your next item is ${nextItemTitle}. Check its timing, place, and related documents before you leave.`)
+      : (isRussian
+        ? "Ближайший пункт пока не определён: в маршруте не хватает события со временем."
+        : "The next item is not clear yet because the itinerary has no timed event."),
+    riskOverview: topAlert
+      ? (isRussian
+        ? `Главное сейчас: ${topAlert.title}. ${topAlert.message}`
+        : `The main concern is ${topAlert.title}. ${topAlert.message}`)
+      : (isRussian
+        ? "По сохранённым данным явных рисков сейчас нет."
+        : "There are no clear risks in the saved trip data right now."),
+    additionalRisks: [],
     confidence: body.alerts?.length ? 0.72 : 0.48,
     usedAI: false
   };
@@ -194,13 +236,18 @@ async function aiResponse(body: AssistantRequest, fallback: AssistantResponse): 
       model: openai(openAIModelFor("brief")),
       schema: assistantResponseSchema,
       schemaName: "VoyaAssistantDecision",
-      schemaDescription: "Travel assistant decision summary grounded only in trusted app/provider facts.",
+      schemaDescription: "Travel brief and second-pass risk assessment grounded only in trusted app and provider facts.",
       system: [
         "You are Voya, a practical travel assistant inside a travel app.",
         "Use only the provided facts. Do not invent gates, delays, routes, weather, prices, documents, opening hours, or policy details.",
         "Provider facts are more authoritative than user-facing labels. Missing facts should be named as missing.",
+        "Perform a second-pass risk assessment across the entire chronology: overnight gaps, impossible or tight transitions, missing accommodation, missing booking details, document gaps, route uncertainty, weather exposure, and dependencies between itinerary items.",
+        "Treat supplied alerts as already-detected risks. Preserve their meaning in riskOverview, but put only genuinely additional, non-duplicate findings in additionalRisks.",
+        "Never label a possibility as a fact. If evidence is incomplete, describe exactly what should be checked and use watch severity.",
+        "Write nextItemDescription as a calm, natural-language explanation of what is coming next and the two or three details that matter most.",
+        "Write riskOverview as a concise human summary of the whole trip, prioritizing concrete action over scores or technical signal names.",
         "Translate facts into decisions: what matters now, why it matters, what to pack, and what to do next.",
-        "Keep copy concise enough for a mobile assistant card.",
+        "Keep each field concise enough for a mobile assistant card and avoid repeating the same information across fields.",
         "If the user asks a question, answer it directly from the facts. If the facts do not support an answer, say what data is missing.",
         languageInstruction,
         "Return structured JSON only."

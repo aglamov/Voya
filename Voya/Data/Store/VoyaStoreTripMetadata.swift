@@ -24,7 +24,7 @@ extension VoyaStore {
 
     func destinationName(from items: [ItineraryItem]) -> String? {
         if let flight = items.first(where: { $0.kind == .flight }),
-           let destination = flight.location.components(separatedBy: " to ").last {
+           let destination = flightDestination(from: flight.location) {
             return cityName(from: destination)
         }
 
@@ -48,7 +48,7 @@ extension VoyaStore {
         guard let firstItem = items.first else { return nil }
 
         if firstItem.kind == .flight,
-           let destination = firstItem.location.components(separatedBy: " to ").last {
+           let destination = flightDestination(from: firstItem.location) {
             return cityName(from: destination)
         }
 
@@ -76,7 +76,7 @@ extension VoyaStore {
     func placeName(for item: ItineraryItem) -> String? {
         switch item.kind {
         case .flight, .transit:
-            if let destination = item.location.components(separatedBy: " to ").last {
+            if let destination = flightDestination(from: item.location) {
                 return cityName(from: destination)
             }
         case .hotel, .event:
@@ -107,23 +107,7 @@ extension VoyaStore {
     }
 
     func tripDates(from start: Date, to end: Date) -> String {
-        let calendar = Calendar.current
-        let startComponents = calendar.dateComponents([.month, .day], from: start)
-        let endComponents = calendar.dateComponents([.month, .day], from: end)
-        let startMonth = monthAbbreviation(for: startComponents.month)
-        let endMonth = monthAbbreviation(for: endComponents.month)
-        let startDay = startComponents.day ?? 1
-        let endDay = endComponents.day ?? startDay
-
-        guard startComponents.month != endComponents.month || startDay != endDay else {
-            return DateIntervalFormatter.localizedDateRange(month: startMonth, day: startDay)
-        }
-
-        if startComponents.month == endComponents.month {
-            return DateIntervalFormatter.localizedDateRange(month: startMonth, startDay: startDay, endDay: endDay)
-        }
-
-        return DateIntervalFormatter.localizedDateRange(startMonth: startMonth, startDay: startDay, endMonth: endMonth, endDay: endDay)
+        DateIntervalFormatter.localizedDateRange(start: start, end: end)
     }
 
     func monthAbbreviation(for month: Int?) -> String {
@@ -137,7 +121,7 @@ extension VoyaStore {
 
     static var localizedMonthSymbols: [String] {
         let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
+        formatter.locale = VoyaAppLocale.current
         return formatter.shortMonthSymbols
     }
 
@@ -227,6 +211,14 @@ extension VoyaStore {
     }
 
     func cityName(from location: String) -> String {
+        if let airportCode = location
+            .uppercased()
+            .split(whereSeparator: { !$0.isLetter })
+            .last(where: { $0.count == 3 }),
+           let city = Self.airportCities[String(airportCode)] {
+            return city
+        }
+
         let suffixes = [
             " Fiumicino", " Heathrow", " Gatwick", " Airport", " Terminal 1",
             " Terminal 2", " Terminal 3", " Terminal 4", " Terminal 5"
@@ -249,4 +241,21 @@ extension VoyaStore {
 
         return normalized.isEmpty ? nil : normalized
     }
+
+    private func flightDestination(from location: String) -> String? {
+        let normalized = location
+            .replacingOccurrences(of: "→", with: " to ")
+            .replacingOccurrences(of: "–", with: " to ")
+        let parts = normalized.components(separatedBy: " to ")
+        guard parts.count > 1 else { return nil }
+        return parts.last?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    private static let airportCities: [String: String] = [
+        "LTN": "London",
+        "LHR": "London",
+        "LGW": "London",
+        "STN": "London",
+        "LCY": "London"
+    ]
 }

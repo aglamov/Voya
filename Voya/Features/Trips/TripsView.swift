@@ -10,6 +10,7 @@ import Vision
 
 struct TripsView: View {
     @EnvironmentObject private var store: VoyaStore
+    @Binding var selectedTab: VoyaTab
     @AppStorage(VoyaPreferenceKey.homeLocationName) private var homeLocationName = "Home"
     @AppStorage(VoyaPreferenceKey.homeLocationAddress) private var homeLocationAddress = ""
     @AppStorage(VoyaPreferenceKey.hiddenTransferIDs) private var hiddenTransferIDsRaw = ""
@@ -60,7 +61,7 @@ struct TripsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HeaderBar(
                     title: "Trips",
-                    subtitle: displayedTrip.map { "\($0.title), \($0.dates)" } ?? emptySubtitle
+                    subtitle: displayedTrip.map { "\($0.destination?.nilIfEmpty ?? $0.title), \($0.displayDates)" } ?? emptySubtitle
                 )
 
                 Picker("Trips", selection: $tripListMode) {
@@ -94,7 +95,10 @@ struct TripsView: View {
                     }
 
                     let itinerary = store.itinerary(for: trip)
-                    TripOperationsCard(trip: trip, itinerary: itinerary)
+                    TripOperationsCard(trip: trip, itinerary: itinerary) { item in
+                        store.assistantFocusItemID = item.id
+                        selectedTab = .assistant
+                    }
 
                     HStack {
                         Text("Timeline")
