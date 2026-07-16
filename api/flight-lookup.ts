@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { getFlightStatus, flightLookupSchema, type FlightSnapshot } from "./_flight.js";
+import { getFlightHistoryStats, getFlightStatus, flightLookupSchema, type FlightSnapshot } from "./_flight.js";
 import { protectPublicEndpoint } from "./_security.js";
 
 function queryValue(value: string | string[] | undefined) {
@@ -58,6 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const status = await getFlightStatus(parsedRequest.data);
+    const history = status.intelligence.history ?? await getFlightHistoryStats(parsedRequest.data);
     const snapshot = status.snapshot;
     const departureAt = snapshot ? primaryDeparture(snapshot) : undefined;
     const arrivalAt = snapshot ? primaryArrival(snapshot) : undefined;
@@ -94,16 +95,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } : undefined,
       plane: status.plane,
       delayStats: status.delayStats,
-      reliability: status.intelligence.history ? {
-        sampleSize: status.intelligence.history.sampleSize,
-        averageDepartureDelayMinutes: status.intelligence.history.averageDepartureDelayMinutes,
-        averageArrivalDelayMinutes: status.intelligence.history.averageArrivalDelayMinutes,
-        delayed15Rate: status.intelligence.history.delayed15Rate,
-        cancelledCount: status.intelligence.history.cancelledCount,
-        divertedCount: status.intelligence.history.divertedCount,
-        typicalDepartureGate: status.intelligence.history.typicalDepartureGate,
-        typicalArrivalGate: status.intelligence.history.typicalArrivalGate,
-        typicalAircraftTypes: status.intelligence.history.typicalAircraftTypes
+      reliability: history ? {
+        sampleSize: history.sampleSize,
+        averageDepartureDelayMinutes: history.averageDepartureDelayMinutes,
+        averageArrivalDelayMinutes: history.averageArrivalDelayMinutes,
+        delayed15Rate: history.delayed15Rate,
+        cancelledCount: history.cancelledCount,
+        divertedCount: history.divertedCount,
+        typicalDepartureGate: history.typicalDepartureGate,
+        typicalArrivalGate: history.typicalArrivalGate,
+        typicalAircraftTypes: history.typicalAircraftTypes
       } : undefined,
       gate: status.gate,
       alerting: status.alerting,

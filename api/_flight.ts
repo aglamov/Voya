@@ -1310,6 +1310,15 @@ async function fetchHistoryStats(lookup: FlightLookup): Promise<FlightHistorySta
   };
 }
 
+export async function getFlightHistoryStats(lookup: FlightLookup): Promise<FlightHistoryStats | undefined> {
+  return fetchHistoryStats({
+    ...lookup,
+    flightNumber: cleanFlightNumber(lookup.flightNumber),
+    originAirport: lookup.originAirport?.toUpperCase(),
+    destinationAirport: lookup.destinationAirport?.toUpperCase()
+  });
+}
+
 async function fetchFlightIntelligence(lookup: FlightLookup, snapshot?: FlightSnapshot): Promise<FlightStatusResponse["intelligence"]> {
   const origin = snapshot?.originAirport ?? lookup.originAirport;
   const destination = snapshot?.destinationAirport ?? lookup.destinationAirport;

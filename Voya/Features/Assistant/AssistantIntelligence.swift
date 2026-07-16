@@ -74,7 +74,7 @@ struct AssistantIntelligence {
         homeLocationAddress: String
     ) -> String {
         [
-            "assistant-flight-insights-v5",
+            "assistant-independent-flight-history-v6",
             trip?.id.uuidString ?? "no-trip",
             trip?.updatedAt.timeIntervalSince1970.description ?? "0",
             itinerary.map { "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSince1970)" }.joined(separator: "|"),
@@ -524,18 +524,22 @@ struct AssistantIntelligenceBuilder {
                     destinationAirport: route?.destination
                 )
 
+                if let reliability = response.reliability {
+                    alerts.append(flightReliabilityAlert(for: item, flightNumber: flightNumber, reliability: reliability))
+                } else {
+                    alerts.append(flightReliabilityUnavailableAlert(for: item, flightNumber: flightNumber))
+                }
+
+                if let plane = response.plane {
+                    alerts.append(flightPlaneAlert(for: item, flightNumber: flightNumber, plane: plane))
+                }
+
                 guard let candidate = response.candidate else {
                     alerts.append(flightStatusUnavailableAlert(for: item, flightNumber: flightNumber))
                     continue
                 }
 
                 alerts.append(flightAlert(for: item, candidate: candidate))
-                if let reliability = response.reliability {
-                    alerts.append(flightReliabilityAlert(for: item, candidate: candidate, reliability: reliability))
-                }
-                if let plane = response.plane {
-                    alerts.append(flightPlaneAlert(for: item, candidate: candidate, plane: plane))
-                }
             } catch {
                 alerts.append(flightStatusUnavailableAlert(for: item, flightNumber: flightNumber))
             }
@@ -604,7 +608,7 @@ struct AssistantIntelligenceBuilder {
         )
     }
 
-    private func flightPlaneAlert(for item: ItineraryItem, candidate: FlightLookupCandidate, plane: FlightPlaneContext) -> TravelAlert {
+    private func flightPlaneAlert(for item: ItineraryItem, flightNumber: String, plane: FlightPlaneContext) -> TravelAlert {
         let severity: AlertSeverity
         switch plane.state {
         case "current_airborne", "inbound_airborne", "inbound_scheduled":
@@ -630,7 +634,7 @@ struct AssistantIntelligenceBuilder {
 
         return TravelAlert(
             id: "flight-plane-\(item.id.uuidString)",
-            title: String(localized: "\(candidate.flightNumber): \(planeHeadline(plane))"),
+            title: String(localized: "\(flightNumber): \(planeHeadline(plane))"),
             message: message.isEmpty ? String(localized: "Aircraft assignment and live position will appear closer to departure.") : message,
             severity: severity,
             sourceTitle: String(localized: "Flight lookup"),
@@ -641,7 +645,7 @@ struct AssistantIntelligenceBuilder {
 
     private func flightReliabilityAlert(
         for item: ItineraryItem,
-        candidate: FlightLookupCandidate,
+        flightNumber: String,
         reliability: FlightReliabilityStats
     ) -> TravelAlert {
         let delayedPercent = reliability.delayed15Rate.map { Int(($0 * 100).rounded()) }
@@ -665,12 +669,23 @@ struct AssistantIntelligenceBuilder {
         return TravelAlert(
             id: "flight-reliability-\(item.id.uuidString)",
             title: delayedPercent.map {
-                String(localized: "\(candidate.flightNumber): delayed in \($0)% of recent flights")
-            } ?? String(localized: "\(candidate.flightNumber): recent punctuality"),
+                String(localized: "\(flightNumber): delayed in \($0)% of recent flights")
+            } ?? String(localized: "\(flightNumber): recent punctuality"),
             message: details.joined(separator: " · "),
             severity: severity,
             sourceTitle: String(localized: "Flight history"),
             sourceDetail: String(localized: "Calculated from recent flights with the same flight number and available route match.")
+        )
+    }
+
+    private func flightReliabilityUnavailableAlert(for item: ItineraryItem, flightNumber: String) -> TravelAlert {
+        TravelAlert(
+            id: "flight-reliability-\(item.id.uuidString)",
+            title: String(localized: "\(flightNumber): not enough history yet"),
+            message: String(localized: "FlightAware did not return enough recent flights with this number and route to calculate a meaningful delay rate."),
+            severity: .calm,
+            sourceTitle: String(localized: "Flight history"),
+            sourceDetail: String(localized: "Historical data is requested independently of the future live flight status.")
         )
     }
 
