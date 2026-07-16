@@ -11,6 +11,17 @@ struct ItemEnrichment: Codable {
     var actions: [TravelAction]
     var routeLegs: [TravelRouteLeg]
     var imageURLs: [URL]
+    var nearbyEvents: [NearbyEvent]?
+}
+
+struct NearbyEvent: Codable, Identifiable {
+    var id: String
+    var name: String
+    var url: URL?
+    var localDate: String?
+    var localTime: String?
+    var venue: String?
+    var city: String?
 }
 
 struct ItemEnrichmentCard: Codable, Identifiable {

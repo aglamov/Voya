@@ -223,13 +223,21 @@ struct AssistantView: View {
             .padding(.top, 18)
         }
         .sheet(item: $itemBeingViewed) { item in
-            ItineraryItemDetailView(item: item, sourceDocument: store.sourceDocument(for: item)) { draft in
+            ItineraryItemDetailView(
+                tripID: store.trips.first(where: { trip in
+                    trip.items.contains(where: { $0.id == item.id })
+                })?.id,
+                item: item,
+                sourceDocument: store.sourceDocument(for: item)
+            ) { draft in
                 store.updateItineraryItem(
                     item,
                     kind: draft.kind,
                     title: draft.title,
                     startsAt: draft.effectiveStartsAt,
                     endsAt: draft.effectiveEndsAt,
+                    startsAtTimeZoneOffsetSeconds: draft.startsAtTimeZoneOffsetSeconds,
+                    endsAtTimeZoneOffsetSeconds: draft.endsAtTimeZoneOffsetSeconds,
                     location: draft.location,
                     status: draft.status,
                     confirmationCode: draft.confirmationCode,
@@ -599,13 +607,17 @@ struct AssistantSourcesProcessingCard: View {
     }
 
     private var completionSubtitle: String {
-        advice?.usedAI == true
-            ? String(localized: "OpenAI review complete")
-            : String(localized: "Available sources collected")
+        guard let advice, advice.usedAI else {
+            return String(localized: "Available sources collected")
+        }
+        if advice.isReliableEnoughToOverrideFacts {
+            return String(localized: "OpenAI review · \(advice.confidencePercent)% confidence")
+        }
+        return String(localized: "OpenAI review needs verification · \(advice.confidencePercent)%")
     }
 
     private var resultText: String {
-        if advice?.usedAI == true {
+        if advice?.usedAI == true, advice?.isReliableEnoughToOverrideFacts == true {
             let sections = [advice?.nextItemDescription, advice?.riskOverview]
                 .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
             if !sections.isEmpty {
@@ -756,7 +768,10 @@ struct AssistantTripRisksCard: View {
 
     private var risks: [TravelAlert] {
         var seen = Set<String>()
-        let aiRisks = (aiAdvice?.additionalRisks ?? []).map { risk in
+        let reliableAIRisks = aiAdvice?.isReliableEnoughToOverrideFacts == true
+            ? (aiAdvice?.additionalRisks ?? [])
+            : []
+        let aiRisks = reliableAIRisks.map { risk in
             TravelAlert(
                 id: "ai-risk-\(risk.title)-\(risk.description)",
                 title: risk.title,
@@ -837,7 +852,15 @@ struct AssistantStatusCard: View {
             HStack(spacing: 10) {
                 MetricPill(title: "Alerts", value: "\(activeAlertCount)")
                 MetricPill(title: "Risk", value: intelligence.assessment.riskLabel)
-                MetricPill(title: "Next", value: nextItem?.startsAt.map { MomentDateFormatter.time.string(from: $0) } ?? String(localized: "Set"))
+                MetricPill(
+                    title: "Next",
+                    value: nextItem?.startsAt.map {
+                        ItineraryDateFormatter.displayClock(
+                            date: $0,
+                            timeZoneOffsetSeconds: nextItem?.startsAtTimeZoneOffsetSeconds
+                        )
+                    } ?? String(localized: "Set")
+                )
             }
             .foregroundStyle(.white)
         }
@@ -886,7 +909,7 @@ struct AssistantSummaryCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: intelligence.aiAdvice?.usedAI == true ? "sparkles" : "text.badge.checkmark")
+                Image(systemName: intelligence.aiAdvice?.usedAI == true && intelligence.aiAdvice?.isReliableEnoughToOverrideFacts == true ? "sparkles" : "text.badge.checkmark")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
                     .frame(width: 42, height: 42)
@@ -927,12 +950,15 @@ struct AssistantSummaryCard: View {
     }
 
     private var summaryText: String {
-        intelligence.aiAdvice?.summary.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        (intelligence.aiAdvice?.isReliableEnoughToOverrideFacts == true
+            ? intelligence.aiAdvice?.summary.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            : nil)
             ?? intelligence.assessment.detail
     }
 
     private var nextActions: [String] {
-        Array((intelligence.aiAdvice?.nextActions ?? []).prefix(3))
+        guard intelligence.aiAdvice?.isReliableEnoughToOverrideFacts == true else { return [] }
+        return Array((intelligence.aiAdvice?.nextActions ?? []).prefix(3))
     }
 }
 

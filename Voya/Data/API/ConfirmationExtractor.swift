@@ -41,7 +41,15 @@ struct VercelConfirmationExtractor {
         }
 
         let decoded = try JSONDecoder().decode(VercelExtractionResponse.self, from: data)
-        let items = decoded.items.map(\.itineraryItem)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let items = decoded.items.map { extractedItem in
+            let item = extractedItem.itineraryItem
+            if let normalizedData = try? encoder.encode(extractedItem) {
+                item.normalizedData = String(data: normalizedData, encoding: .utf8)
+            }
+            return item
+        }
 
         return ExtractionPreview(
             sourceName: document.name,

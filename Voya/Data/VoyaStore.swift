@@ -16,6 +16,7 @@ final class VoyaStore: ObservableObject {
     @Published var trips: [Trip] = []
     @Published var selectedTripID: UUID?
     @Published var assistantFocusItemID: UUID?
+    @Published var notificationItemID: UUID?
     @Published var importMessage: String?
     @Published var importSuccess: ImportSuccess?
     @Published var importTripDestination: ImportTripDestination = .newTrip

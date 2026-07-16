@@ -9,6 +9,9 @@ import UIKit
 import Vision
 
 struct HeaderBar: View {
+    @AppStorage(VoyaPreferenceKey.homeLocationName) private var homeLocationName = "Home"
+    @AppStorage(VoyaPreferenceKey.homeLocationAddress) private var homeLocationAddress = ""
+    @State private var isShowingTravelSettings = false
     let title: String
     let subtitle: String
 
@@ -26,8 +29,9 @@ struct HeaderBar: View {
             Spacer()
 
             Button {
+                isShowingTravelSettings = true
             } label: {
-                Image(systemName: "person.crop.circle")
+                Image(systemName: "gearshape.fill")
                     .font(.title2)
                     .foregroundStyle(Color.voyaInk)
                     .frame(width: 44, height: 44)
@@ -35,6 +39,48 @@ struct HeaderBar: View {
                     .clipShape(Circle())
                     .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Travel settings")
+        }
+        .sheet(isPresented: $isShowingTravelSettings) {
+            ZStack {
+                AppBackground().ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Travel settings")
+                                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.voyaInk)
+                                Text("Defaults that make every route more useful.")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Color.voyaMuted)
+                            }
+                            Spacer()
+                            Button {
+                                isShowingTravelSettings = false
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.headline.weight(.bold))
+                                    .foregroundStyle(Color.voyaInk)
+                                    .frame(width: 42, height: 42)
+                                    .background(.white)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Close")
+                        }
+
+                        HomeBaseSettingsCard(
+                            homeLocationName: $homeLocationName,
+                            homeLocationAddress: $homeLocationAddress
+                        )
+                    }
+                    .padding(18)
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 }
@@ -104,7 +150,7 @@ struct TripChip: View {
                 Text(trip.title)
                     .font(.subheadline.weight(.bold))
                     .lineLimit(1)
-                Text(trip.dates)
+                Text(trip.displayDates)
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
             }
@@ -275,7 +321,10 @@ struct TripOperationsCard: View {
             return String(localized: "Time needed")
         }
 
-        return TripCommandDateFormatter.nextAction.string(from: startsAt)
+        return ItineraryDateFormatter.nextAction(
+            date: startsAt,
+            timeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds
+        )
     }
 
     private var nextItemDetail: String {
@@ -283,15 +332,6 @@ struct TripOperationsCard: View {
         let place = nextItem.location.trimmingCharacters(in: .whitespacesAndNewlines)
         return place.isEmpty ? String(localized: "Location needed") : place
     }
-}
-
-enum TripCommandDateFormatter {
-    static let nextAction: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = VoyaAppLocale.current
-        formatter.setLocalizedDateFormatFromTemplate("EEEjm")
-        return formatter
-    }()
 }
 
 struct TripMetricTile: View {

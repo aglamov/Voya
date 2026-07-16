@@ -21,15 +21,15 @@ function minutesBetween(start?: string, end?: string) {
 }
 
 function primaryDeparture(snapshot: FlightSnapshot) {
-  return snapshot.scheduledDepartureAt
+  return snapshot.actualDepartureAt
     ?? snapshot.estimatedDepartureAt
-    ?? snapshot.actualDepartureAt;
+    ?? snapshot.scheduledDepartureAt;
 }
 
 function primaryArrival(snapshot: FlightSnapshot) {
-  return snapshot.scheduledArrivalAt
+  return snapshot.actualArrivalAt
     ?? snapshot.estimatedArrivalAt
-    ?? snapshot.actualArrivalAt;
+    ?? snapshot.scheduledArrivalAt;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -71,7 +71,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         flightNumber: snapshot.flightIata ?? snapshot.flightNumber,
         flightIata: snapshot.flightIata,
         flightIcao: snapshot.flightIcao,
-        operatingFlightNumber: snapshot.codeshares?.[0],
         originAirport: snapshot.originAirport,
         originAirportIcao: snapshot.originAirportIcao,
         destinationAirport: snapshot.destinationAirport,
@@ -93,6 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         inboundProviderFlightId: snapshot.inboundProviderFlightId,
         confidence: status.validation.confidence
       } : undefined,
+      snapshot,
       plane: status.plane,
       delayStats: status.delayStats,
       reliability: history ? {
@@ -108,6 +108,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } : undefined,
       gate: status.gate,
       alerting: status.alerting,
+      intelligence: status.intelligence,
+      schedule: status.schedule,
+      nextActions: status.nextActions,
       warnings: status.warnings,
       provider: status.provider
     });

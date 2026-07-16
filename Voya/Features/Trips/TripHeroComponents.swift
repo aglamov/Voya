@@ -121,7 +121,7 @@ struct TripHeroSummary {
     let readinessText: String
 
     init(trip: Trip, now: Date = Date(), calendar: Calendar = .current) {
-        let range = TripDateRange(dates: trip.displayDates, now: now, calendar: calendar)
+        let range = TripDateRange(trip: trip, calendar: calendar)
         let daysUntilStart = range.map { calendar.startOfDay(for: now).distanceInDays(to: calendar.startOfDay(for: $0.start), calendar: calendar) }
 
         if let range, calendar.isDate(now, inSameDayAs: range.start) {
@@ -146,13 +146,17 @@ struct TripHeroSummary {
         } else if let days = range?.days, days > 0 {
             durationText = String(localized: "\(days) \(days == 1 ? "day" : "days")")
         } else {
-            durationText = trip.dates
+            durationText = trip.displayDates
         }
 
         itemCountText = String(localized: "\(trip.items.count) \(trip.items.count == 1 ? "item" : "items")")
         readinessText = String(localized: "Plan is ready")
 
-        if let firstItem = trip.items.first {
+        let firstItem = trip.items
+            .filter { $0.startsAt != nil }
+            .min { ($0.startsAt ?? .distantFuture) < ($1.startsAt ?? .distantFuture) }
+            ?? trip.items.first
+        if let firstItem {
             firstUpText = String(localized: "First up: \(firstItem.title)")
         } else {
             firstUpText = trip.summary
@@ -172,130 +176,16 @@ struct TripDateRange {
         max(0, Calendar.current.dateComponents([.day], from: start, to: end).day ?? 0)
     }
 
-    init?(dates: String, now: Date, calendar: Calendar) {
-        guard let parsed = Self.parse(dates) else {
+    init?(trip: Trip, calendar: Calendar) {
+        let explicitDates = [trip.startsAt, trip.endsAt].compactMap { $0 }
+        let itemDates = trip.items.flatMap { item in [item.startsAt, item.endsAt].compactMap { $0 } }
+        let dates = explicitDates.isEmpty ? itemDates : explicitDates
+        guard let first = dates.min(), let last = dates.max() else {
             return nil
         }
 
-        let currentYear = calendar.component(.year, from: now)
-        var startComponents = DateComponents(year: currentYear, month: parsed.startMonth, day: parsed.startDay)
-        var endComponents = DateComponents(year: currentYear, month: parsed.endMonth, day: parsed.endDay)
-
-        guard var start = calendar.date(from: startComponents),
-              var end = calendar.date(from: endComponents) else {
-            return nil
-        }
-
-        if end < start {
-            endComponents.year = currentYear + 1
-            guard let adjustedEnd = calendar.date(from: endComponents) else {
-                return nil
-            }
-            end = adjustedEnd
-        }
-
-        if end < calendar.startOfDay(for: now) {
-            startComponents.year = currentYear + 1
-            endComponents.year = endComponents.year.map { $0 + 1 }
-            guard let adjustedStart = calendar.date(from: startComponents),
-                  let adjustedEnd = calendar.date(from: endComponents) else {
-                return nil
-            }
-            start = adjustedStart
-            end = adjustedEnd
-        }
-
-        self.start = calendar.startOfDay(for: start)
-        self.end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: end) ?? end
-    }
-
-    private static func parse(_ value: String) -> (startMonth: Int, startDay: Int, endMonth: Int, endDay: Int)? {
-        let dates = parsedDates(in: value)
-        guard let first = dates.first else {
-            return nil
-        }
-
-        let last = dates.dropFirst().last ?? first
-        return (first.month, first.day, last.month, last.day)
-    }
-
-    private static func parsedDates(in value: String) -> [(month: Int, day: Int)] {
-        if let dayFirstDates = parsedDayFirstDates(in: value), !dayFirstDates.isEmpty {
-            return dayFirstDates
-        }
-
-        let monthPattern = #"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|январ[ьяе]?|феврал[ьяе]?|март[ае]?|апрел[ьяе]?|ма[йяе]|июн[ьяе]?|июл[ьяе]?|август[ае]?|сентябр[ьяе]?|октябр[ьяе]?|ноябр[ьяе]?|декабр[ьяе]?"#
-        let pattern = #"\b("# + monthPattern + #")\s+(\d{1,2})|[-–]\s*(\d{1,2})"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-            return []
-        }
-
-        var latestMonth: Int?
-        return regex.matches(in: value, range: NSRange(value.startIndex..., in: value)).compactMap { match in
-            if let monthRange = Range(match.range(at: 1), in: value),
-               let dayRange = Range(match.range(at: 2), in: value),
-               let month = monthNumber(String(value[monthRange])),
-               let day = Int(value[dayRange]) {
-                latestMonth = month
-                return (month, day)
-            }
-
-            if let dayRange = Range(match.range(at: 3), in: value),
-               let month = latestMonth,
-               let day = Int(value[dayRange]) {
-                return (month, day)
-            }
-
-            return nil
-        }
-    }
-
-    private static func parsedDayFirstDates(in value: String) -> [(month: Int, day: Int)]? {
-        let monthPattern = #"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|январ[ьяе]?|феврал[ьяе]?|март[ае]?|апрел[ьяе]?|ма[йяе]|июн[ьяе]?|июл[ьяе]?|август[ае]?|сентябр[ьяе]?|октябр[ьяе]?|ноябр[ьяе]?|декабр[ьяе]?"#
-        let pattern = #"(\d{1,2})(?:\s*[-–]\s*(\d{1,2}))?\s+("# + monthPattern + #")"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-              let match = regex.matches(in: value, range: NSRange(value.startIndex..., in: value)).first,
-              let monthRange = Range(match.range(at: 3), in: value),
-              let month = monthNumber(String(value[monthRange])),
-              let firstDayRange = Range(match.range(at: 1), in: value),
-              let firstDay = Int(value[firstDayRange]) else {
-            return nil
-        }
-
-        var dates = [(month: month, day: firstDay)]
-        if let secondDayRange = Range(match.range(at: 2), in: value),
-           let secondDay = Int(value[secondDayRange]) {
-            dates.append((month: month, day: secondDay))
-        }
-        return dates
-    }
-
-    private static func monthNumber(_ value: String) -> Int? {
-        let months = [
-            "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
-            "May": 5, "Jun": 6, "Jul": 7, "Aug": 8,
-            "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
-        ]
-        if let month = months[String(value.prefix(3).capitalized)] {
-            return month
-        }
-
-        let normalized = value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if normalized.hasPrefix("январ") { return 1 }
-        if normalized.hasPrefix("феврал") { return 2 }
-        if normalized.hasPrefix("март") { return 3 }
-        if normalized.hasPrefix("апрел") { return 4 }
-        if normalized.hasPrefix("ма") { return 5 }
-        if normalized.hasPrefix("июн") { return 6 }
-        if normalized.hasPrefix("июл") { return 7 }
-        if normalized.hasPrefix("август") { return 8 }
-        if normalized.hasPrefix("сентябр") { return 9 }
-        if normalized.hasPrefix("октябр") { return 10 }
-        if normalized.hasPrefix("ноябр") { return 11 }
-        if normalized.hasPrefix("декабр") { return 12 }
-        return nil
+        start = calendar.startOfDay(for: first)
+        end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: last) ?? last
     }
 }
 

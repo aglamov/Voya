@@ -33,6 +33,9 @@ struct TransferDetailView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     header
                     routeMapCard
+                    if plan != nil {
+                        providerCard
+                    }
                     bufferControlCard
 
                     if isLoading && plan == nil {
@@ -246,6 +249,41 @@ struct TransferDetailView: View {
         .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
     }
 
+    private var providerCard: some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: plan?.providerConnected == true ? "location.fill.viewfinder" : "map")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(plan?.providerConnected == true ? Color.voyaTeal : Color.voyaGold)
+                .frame(width: 34, height: 34)
+                .background((plan?.providerConnected == true ? Color.voyaTeal : Color.voyaGold).opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(plan?.providerConnected == true ? "Live route data" : "Map handoff")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.voyaInk)
+                Text(providerDetail)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var providerDetail: String {
+        guard let plan else { return "" }
+        let attribution = plan.options.compactMap(\.providerAttribution).first
+            ?? (plan.providerConnected ? plan.provider : String(localized: "No live provider connected"))
+        let updated = MobilityDateFormatter.date(from: plan.generatedAt).map {
+            String(localized: "Updated \(MobilityDateFormatter.time.string(from: $0))")
+        }
+        return [attribution, updated].compactMap { $0?.nilIfEmpty }.joined(separator: " · ")
+    }
+
     private func routePlace(_ title: LocalizedStringKey, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
@@ -325,6 +363,18 @@ struct TransferDetailView: View {
                 metric("Depart", departureTimeText(for: option) ?? "—")
                 metric("Arrive", arrivalTimeText(for: option) ?? "—")
                 metric("Travel", travelDurationText(option))
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    if let distance = option.distanceMeters {
+                        optionFact("arrow.left.and.right", distanceText(distance))
+                    }
+                    optionFact("clock.badge.checkmark", option.reliability.capitalized)
+                    optionFact("banknote", option.costLevel.capitalized)
+                    optionFact("leaf.fill", option.emissionsLevel.capitalized)
+                    optionFact("figure.seated.seatbelt", option.comfortLevel.capitalized)
+                }
             }
 
             if option.mode == .transit, !option.tradeoffs.isEmpty {
@@ -417,12 +467,40 @@ struct TransferDetailView: View {
     }
 
     private func routeStepDetail(_ step: MobilityRouteStep) -> String? {
+        var parts: [String] = []
         if let departureStop = step.departureStop,
            let arrivalStop = step.arrivalStop {
-            return "\(departureStop) → \(arrivalStop)"
+            parts.append("\(departureStop) → \(arrivalStop)")
+        } else if let detail = step.detail?.nilIfEmpty {
+            parts.append(detail)
         }
 
-        return step.detail
+        if let vehicleType = step.vehicleType?.nilIfEmpty {
+            parts.append(vehicleType.replacingOccurrences(of: "_", with: " ").capitalized)
+        }
+        if let distance = step.distanceMeters {
+            parts.append(distanceText(distance))
+        }
+
+        return parts.joined(separator: " · ").nilIfEmpty
+    }
+
+    private func optionFact(_ symbol: String, _ value: String) -> some View {
+        Label(value, systemImage: symbol)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(Color.voyaInk)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(Color.voyaSurface)
+            .clipShape(Capsule())
+    }
+
+    private func distanceText(_ meters: Int) -> String {
+        if meters < 1_000 {
+            return String(localized: "\(meters) m")
+        }
+        let kilometers = Double(meters) / 1_000
+        return kilometers < 10 ? String(format: "%.1f km", kilometers) : String(format: "%.0f km", kilometers)
     }
 
     private func publicTransitSteps(for option: MobilityRouteOption) -> [MobilityRouteStep]? {
@@ -455,12 +533,10 @@ struct TransferDetailView: View {
         let line = step.lineName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? step.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? String(localized: "public transport")
-        let departure = step.departureTime
-            .flatMap(MobilityDateFormatter.date(from:))
-            .map { MobilityDateFormatter.time.string(from: $0) }
-        let arrival = step.arrivalTime
-            .flatMap(MobilityDateFormatter.date(from:))
-            .map { MobilityDateFormatter.time.string(from: $0) }
+        let departure = step.departureTimeText?.nilIfEmpty
+            ?? step.departureTime.flatMap(MobilityDateFormatter.date(from:)).map { MobilityDateFormatter.time.string(from: $0) }
+        let arrival = step.arrivalTimeText?.nilIfEmpty
+            ?? step.arrivalTime.flatMap(MobilityDateFormatter.date(from:)).map { MobilityDateFormatter.time.string(from: $0) }
         let from = step.departureStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         let to = step.arrivalStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
 
@@ -483,6 +559,13 @@ struct TransferDetailView: View {
     }
 
     private func routeStepTimeText(_ step: MobilityRouteStep) -> String? {
+        if let departure = step.departureTimeText?.nilIfEmpty,
+           let arrival = step.arrivalTimeText?.nilIfEmpty {
+            return "\(departure)-\(arrival)"
+        }
+        if let departure = step.departureTimeText?.nilIfEmpty { return departure }
+        if let arrival = step.arrivalTimeText?.nilIfEmpty { return arrival }
+
         let departure = step.departureTime.flatMap(MobilityDateFormatter.date(from:))
         let arrival = step.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
 
@@ -559,12 +642,18 @@ struct TransferDetailView: View {
     }
 
     private func departureTimeText(for option: MobilityRouteOption) -> String? {
-        routeDepartureDate(for: option)
+        if let localized = option.steps?.compactMap(\.departureTimeText).first?.nilIfEmpty {
+            return localized
+        }
+        return routeDepartureDate(for: option)
             .map { MobilityDateFormatter.time.string(from: $0) }
     }
 
     private func arrivalTimeText(for option: MobilityRouteOption) -> String? {
-        routeArrivalDate(for: option)
+        if let localized = option.steps?.compactMap(\.arrivalTimeText).last?.nilIfEmpty {
+            return localized
+        }
+        return routeArrivalDate(for: option)
             .map { MobilityDateFormatter.time.string(from: $0) }
     }
 

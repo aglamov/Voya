@@ -4,7 +4,37 @@
 
 Область проверки: iOS-клиент `Voya`, Vercel API в `api/`, фоновые обработчики в `server/handlers/`, локальное SwiftData-хранилище и текущие экраны. Это статическая ревизия контрактов и всех точек использования; фактические production payloads и тарифные ограничения провайдеров не проверялись.
 
-## Краткий вывод
+## Статус после исправлений
+
+По результатам ревизии в приложение внесён первый production-hardening пакет:
+
+- `/api/flight-lookup` теперь передаёт полный structured snapshot (`snapshot`, `schedule`, `intelligence`, `nextActions`, provider metadata), а iOS сохраняет его отдельно от редактируемых booking facts в versioned кэше с TTL;
+- live-обновление больше не перезаписывает подтверждённое пользователем время рейса; actual/estimated/scheduled показываются как отдельные provider facts с локальным временем аэропорта;
+- исправлен приоритет live-времени на backend: actual → estimated → scheduled;
+- flight watch хранит связь device → trip → item, APNs несёт `tripId/itemId`, а открытие уведомления ведёт к конкретному сегменту и запускает обычную политику refresh;
+- flight detail снова показывает arrival gate, baggage, aircraft/position, route, disruptions, airport weather, reliability, warnings и next action; дополнительные enrichment cards больше не скрываются редизайном;
+- mobility plans получили versioned persisted cache; UI показывает distance, reliability, cost, emissions, comfort, vehicle/distance для шагов, provider timestamp и обязательную Google attribution;
+- Google transit times показываются из provider-local `localizedValues`, а не пересчитываются в часовой пояс телефона;
+- Ticketmaster возвращает и показывает до пяти структурированных событий вместо одного;
+- невалидный `imageURLs` fallback удалён: ссылки действий и карт больше не маскируются под изображения;
+- нормализованный JSON каждого распознанного booking item сохраняется для provenance и assistant context;
+- assistant confidence теперь виден пользователю, а низкоуверенный AI-ответ не заменяет детерминированную оценку поездки;
+- ISO 8601 offsets больше не отбрасываются: абсолютное время используется для сортировки, уведомлений и transfer calculations, а локальный offset — для показа и редактирования;
+- сортировка itinerary теперь учитывает полный абсолютный `Date`, а ключи дат включают год;
+- low-confidence import нельзя сохранить без явного подтверждения проверки сомнительных полей;
+- непарсибельная строка даты больше не попадает в hero: приложение честно показывает `Dates needed`;
+- dead account action заменён на рабочие travel settings, а пустой Trips screen получил прямой CTA к импорту.
+
+Открытые задачи после этого пакета:
+
+1. Проверить реальные production payloads, лимиты и деградации всех подключённых провайдеров; текущая проверка контрактов и симулятора не заменяет staging soak test.
+2. Расширить OpenWeather current conditions только после продуктового решения, какие поля превращаются в действия пользователя; сейчас контракт намеренно остаётся узким.
+3. Решить, нужен ли persisted cache для assistant advice; сейчас сохраняются provider facts и enrichment, но не ответ AI.
+4. Добавить contract fixtures, decode tests, snapshot/UI tests и безопасную completeness telemetry без PII.
+
+Ниже сохранена исходная карта потерь до исправлений — она нужна как регрессионный checklist.
+
+## Исходный краткий вывод
 
 Данные действительно теряются на нескольких границах:
 

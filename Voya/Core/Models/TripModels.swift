@@ -93,6 +93,8 @@ final class ItineraryItem: Identifiable {
     var status: String
     var startsAt: Date?
     var endsAt: Date?
+    var startsAtTimeZoneOffsetSeconds: Int?
+    var endsAtTimeZoneOffsetSeconds: Int?
     var sourceName: String?
     var sourceDocumentID: UUID?
     var boardingPassDocumentID: UUID?
@@ -104,6 +106,10 @@ final class ItineraryItem: Identifiable {
     var enrichmentRawData: String?
     var enrichmentUpdatedAt: Date?
     var enrichmentExpiresAt: Date?
+    var flightLookupCacheKey: String?
+    var flightLookupRawData: String?
+    var flightLookupUpdatedAt: Date?
+    var flightLookupExpiresAt: Date?
     var createdAt: Date
     var updatedAt: Date
 
@@ -115,6 +121,8 @@ final class ItineraryItem: Identifiable {
         status: String,
         startsAt: Date? = nil,
         endsAt: Date? = nil,
+        startsAtTimeZoneOffsetSeconds: Int? = nil,
+        endsAtTimeZoneOffsetSeconds: Int? = nil,
         sourceName: String? = nil,
         sourceDocumentID: UUID? = nil,
         boardingPassDocumentID: UUID? = nil,
@@ -126,6 +134,10 @@ final class ItineraryItem: Identifiable {
         enrichmentRawData: String? = nil,
         enrichmentUpdatedAt: Date? = nil,
         enrichmentExpiresAt: Date? = nil,
+        flightLookupCacheKey: String? = nil,
+        flightLookupRawData: String? = nil,
+        flightLookupUpdatedAt: Date? = nil,
+        flightLookupExpiresAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -136,6 +148,8 @@ final class ItineraryItem: Identifiable {
         self.status = status
         self.startsAt = startsAt
         self.endsAt = endsAt
+        self.startsAtTimeZoneOffsetSeconds = startsAtTimeZoneOffsetSeconds
+        self.endsAtTimeZoneOffsetSeconds = endsAtTimeZoneOffsetSeconds
         self.sourceName = sourceName
         self.sourceDocumentID = sourceDocumentID
         self.boardingPassDocumentID = boardingPassDocumentID
@@ -147,12 +161,23 @@ final class ItineraryItem: Identifiable {
         self.enrichmentRawData = enrichmentRawData
         self.enrichmentUpdatedAt = enrichmentUpdatedAt
         self.enrichmentExpiresAt = enrichmentExpiresAt
+        self.flightLookupCacheKey = flightLookupCacheKey
+        self.flightLookupRawData = flightLookupRawData
+        self.flightLookupUpdatedAt = flightLookupUpdatedAt
+        self.flightLookupExpiresAt = flightLookupExpiresAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
     var displayTime: String {
-        startsAt.map { ItineraryDateFormatter.displayTime(start: $0, end: endsAt) } ?? String(localized: "Time needed")
+        startsAt.map {
+            ItineraryDateFormatter.displayTime(
+                start: $0,
+                end: endsAt,
+                startTimeZoneOffsetSeconds: startsAtTimeZoneOffsetSeconds,
+                endTimeZoneOffsetSeconds: endsAtTimeZoneOffsetSeconds
+            )
+        } ?? String(localized: "Time needed")
     }
 }
 
@@ -226,11 +251,27 @@ final class Trip: Identifiable {
 
 extension Trip {
     var displayDates: String {
-        let dates = items.flatMap { [$0.startsAt, $0.endsAt].compactMap { $0 } }
-        guard let start = dates.min(), let end = dates.max() else {
-            return self.dates
+        let dates: [(date: Date, offset: Int?)] = items.flatMap { item in
+            [
+                item.startsAt.map { ($0, item.startsAtTimeZoneOffsetSeconds) },
+                item.endsAt.map { ($0, item.endsAtTimeZoneOffsetSeconds ?? item.startsAtTimeZoneOffsetSeconds) }
+            ].compactMap { $0 }
+        }
+        guard let start = dates.min(by: { $0.date < $1.date }),
+              let end = dates.max(by: { $0.date < $1.date }) else {
+            let fallbackDates = ItineraryDateParser.dates(from: self.dates)
+            guard let fallbackStart = fallbackDates.min(),
+                  let fallbackEnd = fallbackDates.max() else {
+                return String(localized: "Dates needed")
+            }
+            return DateIntervalFormatter.localizedDateRange(start: fallbackStart, end: fallbackEnd)
         }
 
-        return DateIntervalFormatter.localizedDateRange(start: start, end: end)
+        return DateIntervalFormatter.localizedDateRange(
+            start: start.date,
+            end: end.date,
+            startTimeZoneOffsetSeconds: start.offset,
+            endTimeZoneOffsetSeconds: end.offset
+        )
     }
 }

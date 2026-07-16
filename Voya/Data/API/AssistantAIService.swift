@@ -16,6 +16,16 @@ struct AssistantAIAdvice: Codable {
     var usedAI: Bool
 }
 
+extension AssistantAIAdvice {
+    var isReliableEnoughToOverrideFacts: Bool {
+        !usedAI || confidence >= 0.55
+    }
+
+    var confidencePercent: Int {
+        Int((max(0, min(1, confidence)) * 100).rounded())
+    }
+}
+
 struct AssistantAIRisk: Codable {
     var title: String
     var description: String

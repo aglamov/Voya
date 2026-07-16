@@ -3,53 +3,103 @@ import SwiftData
 import SwiftUI
 
 enum ItineraryDateFormatter {
-    static func displayTime(start: Date, end: Date?) -> String {
-        let startText = displayFormatter.string(from: start)
+    static func displayTime(
+        start: Date,
+        end: Date?,
+        startTimeZoneOffsetSeconds: Int? = nil,
+        endTimeZoneOffsetSeconds: Int? = nil
+    ) -> String {
+        let startTimeZone = timeZone(offsetSeconds: startTimeZoneOffsetSeconds)
+        let endTimeZone = timeZone(offsetSeconds: endTimeZoneOffsetSeconds ?? startTimeZoneOffsetSeconds)
+        let startText = formatter(dateFormat: "MMM d, HH:mm", timeZone: startTimeZone).string(from: start)
         guard let end else {
             return startText
         }
 
-        if Calendar.current.isDate(start, inSameDayAs: end) {
-            return "\(startText)-\(timeOnlyFormatter.string(from: end))"
+        if localDay(for: start, timeZone: startTimeZone) == localDay(for: end, timeZone: endTimeZone) {
+            let endText = formatter(dateFormat: "HH:mm", timeZone: endTimeZone).string(from: end)
+            return "\(startText)-\(endText)"
         }
 
-        return "\(startText)-\(displayFormatter.string(from: end))"
+        let endText = formatter(dateFormat: "MMM d, HH:mm", timeZone: endTimeZone).string(from: end)
+        return "\(startText)-\(endText)"
     }
 
-    private static let displayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = VoyaAppLocale.current
-        formatter.dateFormat = "MMM d, HH:mm"
-        return formatter
-    }()
+    static func displayClock(date: Date, timeZoneOffsetSeconds: Int?) -> String {
+        formatter(dateFormat: "HH:mm", timeZone: timeZone(offsetSeconds: timeZoneOffsetSeconds)).string(from: date)
+    }
 
-    private static let timeOnlyFormatter: DateFormatter = {
+    static func nextAction(date: Date, timeZoneOffsetSeconds: Int?) -> String {
         let formatter = DateFormatter()
         formatter.locale = VoyaAppLocale.current
-        formatter.dateFormat = "HH:mm"
+        formatter.timeZone = timeZone(offsetSeconds: timeZoneOffsetSeconds)
+        formatter.setLocalizedDateFormatFromTemplate("EEEjm")
+        return formatter.string(from: date)
+    }
+
+    static func timeZone(offsetSeconds: Int?) -> TimeZone {
+        offsetSeconds.flatMap(TimeZone.init(secondsFromGMT:)) ?? .autoupdatingCurrent
+    }
+
+    private static func formatter(dateFormat: String, timeZone: TimeZone) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = VoyaAppLocale.current
+        formatter.timeZone = timeZone
+        formatter.dateFormat = dateFormat
         return formatter
-    }()
+    }
+
+    private static func localDay(for date: Date, timeZone: TimeZone) -> DateComponents {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar.dateComponents([.year, .month, .day], from: date)
+    }
 }
 
 enum DateIntervalFormatter {
-    static func localizedDateRange(start: Date, end: Date) -> String {
-        let calendar = Calendar.autoupdatingCurrent
-        let monthDayFormatter = DateFormatter()
-        monthDayFormatter.locale = VoyaAppLocale.current
-        monthDayFormatter.setLocalizedDateFormatFromTemplate("dMMMM")
+    static func localizedDateRange(
+        start: Date,
+        end: Date,
+        startTimeZoneOffsetSeconds: Int? = nil,
+        endTimeZoneOffsetSeconds: Int? = nil
+    ) -> String {
+        let startTimeZone = ItineraryDateFormatter.timeZone(offsetSeconds: startTimeZoneOffsetSeconds)
+        let endTimeZone = ItineraryDateFormatter.timeZone(offsetSeconds: endTimeZoneOffsetSeconds ?? startTimeZoneOffsetSeconds)
+        let startComponents = localDateComponents(for: start, timeZone: startTimeZone)
+        let endComponents = localDateComponents(for: end, timeZone: endTimeZone)
 
-        guard !calendar.isDate(start, inSameDayAs: end) else {
-            return monthDayFormatter.string(from: start)
+        guard startComponents != endComponents else {
+            return monthDayFormatter(timeZone: startTimeZone).string(from: start)
         }
 
-        if calendar.isDate(start, equalTo: end, toGranularity: .month) {
-            let dayFormatter = DateFormatter()
-            dayFormatter.locale = VoyaAppLocale.current
-            dayFormatter.setLocalizedDateFormatFromTemplate("d")
-            return "\(dayFormatter.string(from: start))–\(monthDayFormatter.string(from: end))"
+        if startComponents.year == endComponents.year,
+           startComponents.month == endComponents.month {
+            return "\(dayFormatter(timeZone: startTimeZone).string(from: start))–\(monthDayFormatter(timeZone: endTimeZone).string(from: end))"
         }
 
-        return "\(monthDayFormatter.string(from: start)) – \(monthDayFormatter.string(from: end))"
+        return "\(monthDayFormatter(timeZone: startTimeZone).string(from: start)) – \(monthDayFormatter(timeZone: endTimeZone).string(from: end))"
+    }
+
+    private static func monthDayFormatter(timeZone: TimeZone) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = VoyaAppLocale.current
+        formatter.timeZone = timeZone
+        formatter.setLocalizedDateFormatFromTemplate("dMMMM")
+        return formatter
+    }
+
+    private static func dayFormatter(timeZone: TimeZone) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = VoyaAppLocale.current
+        formatter.timeZone = timeZone
+        formatter.setLocalizedDateFormatFromTemplate("d")
+        return formatter
+    }
+
+    private static func localDateComponents(for date: Date, timeZone: TimeZone) -> DateComponents {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar.dateComponents([.year, .month, .day], from: date)
     }
 
     static func localizedDateRange(month: String, day: Int) -> String {
@@ -129,10 +179,6 @@ enum ItineraryDateParser {
     }
 
     private static func isoDate(from value: String) -> Date? {
-        if let scheduledDate = scheduledDate(fromISODateTime: value) {
-            return scheduledDate
-        }
-
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         if let date = formatter.date(from: value) {
@@ -143,36 +189,30 @@ enum ItineraryDateParser {
         return formatter.date(from: value)
     }
 
-    private static func scheduledDate(fromISODateTime value: String) -> Date? {
-        let pattern = #"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$"#
+    static func timeZoneOffsetSeconds(from value: String?) -> Int? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+
+        if value.hasSuffix("Z") || value.hasSuffix("z") {
+            return 0
+        }
+
+        let pattern = #"([+-])(\d{2}):?(\d{2})$"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
-              let year = integerCapture(1, in: value, match: match),
-              let month = integerCapture(2, in: value, match: match),
-              let day = integerCapture(3, in: value, match: match),
-              let hour = integerCapture(4, in: value, match: match),
-              let minute = integerCapture(5, in: value, match: match) else {
+              let signRange = Range(match.range(at: 1), in: value),
+              let hourRange = Range(match.range(at: 2), in: value),
+              let minuteRange = Range(match.range(at: 3), in: value),
+              let hours = Int(value[hourRange]),
+              let minutes = Int(value[minuteRange]),
+              hours <= 23,
+              minutes <= 59 else {
             return nil
         }
 
-        return Calendar.current.date(
-            from: DateComponents(
-                year: year,
-                month: month,
-                day: day,
-                hour: hour,
-                minute: minute,
-                second: integerCapture(6, in: value, match: match) ?? 0
-            )
-        )
-    }
-
-    private static func integerCapture(_ index: Int, in value: String, match: NSTextCheckingResult) -> Int? {
-        guard let range = Range(match.range(at: index), in: value) else {
-            return nil
-        }
-
-        return Int(value[range])
+        let totalSeconds = (hours * 60 + minutes) * 60
+        return value[signRange] == "-" ? -totalSeconds : totalSeconds
     }
 
     private static func formatter(_ format: String) -> DateFormatter {

@@ -118,7 +118,9 @@ struct ItineraryItemDraft {
     var title: String
     var hasStartDate: Bool
     var startsAt: Date
+    var startsAtTimeZoneOffsetSeconds: Int?
     var endsAt: Date
+    var endsAtTimeZoneOffsetSeconds: Int?
     var hasEndDate: Bool
     var location: String
     var status: String
@@ -130,7 +132,9 @@ struct ItineraryItemDraft {
         title = item.title
         hasStartDate = item.startsAt != nil
         startsAt = item.startsAt ?? Date()
+        startsAtTimeZoneOffsetSeconds = item.startsAtTimeZoneOffsetSeconds
         endsAt = item.endsAt ?? item.startsAt ?? Date()
+        endsAtTimeZoneOffsetSeconds = item.endsAtTimeZoneOffsetSeconds
         hasEndDate = item.endsAt != nil
         location = item.location
         status = item.status
@@ -143,7 +147,9 @@ struct ItineraryItemDraft {
         title = ""
         hasStartDate = true
         startsAt = Date()
+        startsAtTimeZoneOffsetSeconds = nil
         endsAt = Date()
+        endsAtTimeZoneOffsetSeconds = nil
         hasEndDate = false
         location = ""
         status = ""
@@ -160,7 +166,22 @@ struct ItineraryItemDraft {
     }
 
     var displayTime: String {
-        effectiveStartsAt.map { ItineraryDateFormatter.displayTime(start: $0, end: effectiveEndsAt) } ?? String(localized: "Date needed")
+        effectiveStartsAt.map {
+            ItineraryDateFormatter.displayTime(
+                start: $0,
+                end: effectiveEndsAt,
+                startTimeZoneOffsetSeconds: startsAtTimeZoneOffsetSeconds,
+                endTimeZoneOffsetSeconds: endsAtTimeZoneOffsetSeconds
+            )
+        } ?? String(localized: "Date needed")
+    }
+
+    var startTimeZone: TimeZone {
+        ItineraryDateFormatter.timeZone(offsetSeconds: startsAtTimeZoneOffsetSeconds)
+    }
+
+    var endTimeZone: TimeZone {
+        ItineraryDateFormatter.timeZone(offsetSeconds: endsAtTimeZoneOffsetSeconds ?? startsAtTimeZoneOffsetSeconds)
     }
 
     func matches(_ other: ItineraryItemDraft) -> Bool {
@@ -168,7 +189,9 @@ struct ItineraryItemDraft {
             && title == other.title
             && hasStartDate == other.hasStartDate
             && startsAt == other.startsAt
+            && startsAtTimeZoneOffsetSeconds == other.startsAtTimeZoneOffsetSeconds
             && endsAt == other.endsAt
+            && endsAtTimeZoneOffsetSeconds == other.endsAtTimeZoneOffsetSeconds
             && hasEndDate == other.hasEndDate
             && location == other.location
             && status == other.status

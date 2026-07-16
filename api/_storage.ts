@@ -74,6 +74,17 @@ export function flightWatchKey(flightNumber: string, date?: string) {
   return `${flightNumber}:${date ?? "any"}`;
 }
 
+export function flightWatchTargetsKey(flightNumber: string, date?: string) {
+  return `voya:flight-watch:${flightWatchKey(flightNumber, date)}:targets`;
+}
+
+export type RegisteredFlightTarget = {
+  deviceToken: string;
+  appInstallId?: string;
+  tripId?: string;
+  itemId?: string;
+};
+
 export async function registeredTokensForFlight(flightNumber: string, date?: string) {
   const keys = [
     `voya:flight-watch:${flightWatchKey(flightNumber, date)}:devices`,
@@ -92,6 +103,54 @@ export async function registeredTokensForFlight(flightNumber: string, date?: str
   }
 
   return [...tokens];
+}
+
+function hashEntries(value: unknown): Array<[string, string]> {
+  if (Array.isArray(value)) {
+    const entries: Array<[string, string]> = [];
+    for (let index = 0; index + 1 < value.length; index += 2) {
+      if (typeof value[index] === "string" && typeof value[index + 1] === "string") {
+        entries.push([value[index], value[index + 1]]);
+      }
+    }
+    return entries;
+  }
+
+  if (value && typeof value === "object") {
+    return Object.entries(value).flatMap(([key, item]) => typeof item === "string" ? [[key, item]] : []);
+  }
+
+  return [];
+}
+
+export async function registeredTargetsForFlight(flightNumber: string, date?: string) {
+  const keys = [
+    flightWatchTargetsKey(flightNumber, date),
+    date ? flightWatchTargetsKey(flightNumber) : undefined
+  ].filter(Boolean) as string[];
+  const targets = new Map<string, RegisteredFlightTarget>();
+
+  for (const key of keys) {
+    const raw = await redisCommand<unknown>(["HGETALL", key]);
+    for (const [field, value] of hashEntries(raw)) {
+      const token = normalizeDeviceToken(field);
+      if (!token || targets.has(token)) continue;
+      try {
+        const parsed = JSON.parse(value) as Omit<RegisteredFlightTarget, "deviceToken">;
+        targets.set(token, { ...parsed, deviceToken: token });
+      } catch {
+        targets.set(token, { deviceToken: token });
+      }
+    }
+  }
+
+  for (const token of await registeredTokensForFlight(flightNumber, date)) {
+    if (!targets.has(token)) {
+      targets.set(token, { deviceToken: token });
+    }
+  }
+
+  return [...targets.values()];
 }
 
 export function fallbackPushTokens() {

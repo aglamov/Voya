@@ -6,36 +6,29 @@ import SwiftUI
 extension VoyaStore {
     func sortedItinerary(_ items: [ItineraryItem]) -> [ItineraryItem] {
         items.sorted { first, second in
-            let firstKey = sortKey(for: first)
-            let secondKey = sortKey(for: second)
-
-            if firstKey.date != secondKey.date {
-                return firstKey.date < secondKey.date
+            switch (first.startsAt, second.startsAt) {
+            case let (firstDate?, secondDate?) where firstDate != secondDate:
+                return firstDate < secondDate
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                break
             }
 
-            if firstKey.time != secondKey.time {
-                return firstKey.time < secondKey.time
+            let firstKind = kindSortOrder(first.kind)
+            let secondKind = kindSortOrder(second.kind)
+            if firstKind != secondKind {
+                return firstKind < secondKind
             }
 
-            return firstKey.kind < secondKey.kind
-        }
-    }
+            if first.createdAt != second.createdAt {
+                return first.createdAt < second.createdAt
+            }
 
-    func sortKey(for item: ItineraryItem) -> (date: Int, time: Int, kind: Int) {
-        if let startsAt = item.startsAt {
-            let components = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: startsAt)
-            return (
-                date: (components.month ?? 99) * 100 + (components.day ?? 99),
-                time: (components.hour ?? 23) * 60 + (components.minute ?? 59),
-                kind: kindSortOrder(item.kind)
-            )
+            return first.id.uuidString < second.id.uuidString
         }
-
-        return (
-            date: Int.max,
-            time: Int.max,
-            kind: kindSortOrder(item.kind)
-        )
     }
 
     func kindSortOrder(_ kind: ItineraryKind) -> Int {

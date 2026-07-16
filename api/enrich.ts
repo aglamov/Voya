@@ -24,6 +24,17 @@ type EnrichmentResponse = {
   actions: TravelAction[];
   routeLegs: TravelRouteLeg[];
   imageURLs: string[];
+  nearbyEvents: NearbyEvent[];
+};
+
+type NearbyEvent = {
+  id: string;
+  name: string;
+  url?: string;
+  localDate?: string;
+  localTime?: string;
+  venue?: string;
+  city?: string;
 };
 
 type TravelBriefSection = {
@@ -74,6 +85,7 @@ type LocationLookup = {
 };
 
 type TicketmasterEvent = {
+  id?: string;
   name?: string;
   url?: string;
   dates?: {
@@ -125,8 +137,7 @@ const travelBriefSchema = z.object({
     guidance: z.string().min(1),
     bufferMinutes: z.number().int().min(0).max(240).optional().nullable(),
     mapURL: z.string().url().optional().nullable()
-  })).max(4),
-  imageURLs: z.array(z.string().url()).max(4)
+  })).max(4)
 });
 
 type TravelBriefGenerated = z.infer<typeof travelBriefSchema>;
@@ -704,15 +715,15 @@ async function weatherCard(location: string | LocationLookup | undefined, isRuss
   };
 }
 
-async function eventsCard(location: string | LocationLookup | undefined, kind: string, startsAt?: string | number | null, endsAt?: string | number | null, isRussian = false): Promise<EnrichmentCard> {
+async function eventsContext(location: string | LocationLookup | undefined, kind: string, startsAt?: string | number | null, endsAt?: string | number | null, isRussian = false): Promise<{ card: EnrichmentCard; events: NearbyEvent[] }> {
   const apiKey = ticketmasterApiKey();
   if (!apiKey) {
-    return {
-      title: isRussian ? "События рядом" : "Nearby events",
-      value: isRussian ? "Не подключено" : "Not connected",
-      detail: isRussian ? "Добавьте TICKETMASTER_API_KEY или TICKETMASTER_CONSUMER_KEY в Vercel для контекста местных событий." : "Set TICKETMASTER_API_KEY or TICKETMASTER_CONSUMER_KEY on Vercel for local event context.",
-      kind: "events"
-    };
+    return { card: {
+        title: isRussian ? "События рядом" : "Nearby events",
+        value: isRussian ? "Не подключено" : "Not connected",
+        detail: isRussian ? "Добавьте TICKETMASTER_API_KEY или TICKETMASTER_CONSUMER_KEY в Vercel для контекста местных событий." : "Set TICKETMASTER_API_KEY or TICKETMASTER_CONSUMER_KEY on Vercel for local event context.",
+        kind: "events"
+      }, events: [] };
   }
 
   const url = new URL("https://app.ticketmaster.com/discovery/v2/events.json");
@@ -740,26 +751,40 @@ async function eventsCard(location: string | LocationLookup | undefined, kind: s
 
   const response = await fetch(url);
   if (!response.ok) {
-    return {
-      title: isRussian ? "События рядом" : "Nearby events",
-      value: isRussian ? "Недоступно" : "Unavailable",
-      detail: isRussian ? `Ticketmaster вернул ${response.status}.` : `Ticketmaster returned ${response.status}.`,
-      kind: "events"
-    };
+    return { card: {
+        title: isRussian ? "События рядом" : "Nearby events",
+        value: isRussian ? "Недоступно" : "Unavailable",
+        detail: isRussian ? `Ticketmaster вернул ${response.status}.` : `Ticketmaster returned ${response.status}.`,
+        kind: "events"
+      }, events: [] };
   }
 
   const data = await response.json() as { page?: { totalElements?: number }; _embedded?: { events?: TicketmasterEvent[] } };
   const events = data._embedded?.events ?? [];
   const firstEvent = events[0];
   const eventNames = events.map((event) => event.name).filter(Boolean).slice(0, 2);
+  const nearbyEvents = events.flatMap((event): NearbyEvent[] => {
+    const name = clean(event.name);
+    if (!name) return [];
+    const venue = event._embedded?.venues?.[0];
+    return [{
+      id: clean(event.id) || clean(event.url) || `${name}-${event.dates?.start?.localDate ?? ""}-${event.dates?.start?.localTime ?? ""}`,
+      name,
+      url: clean(event.url) || undefined,
+      localDate: clean(event.dates?.start?.localDate) || undefined,
+      localTime: clean(event.dates?.start?.localTime) || undefined,
+      venue: clean(venue?.name) || undefined,
+      city: clean(venue?.city?.name) || undefined
+    }];
+  });
 
-  return {
-    title: isRussian ? "События рядом" : "Nearby events",
-    value: isRussian ? `Найдено: ${data.page?.totalElements ?? 0}` : `${data.page?.totalElements ?? 0} found`,
-    detail: firstEvent ? eventDetail(firstEvent) : eventNames?.length ? eventNames.join(" · ") : (isRussian ? "Крупных публичных событий рядом не найдено." : "No major public events found nearby."),
-    actionURL: firstEvent?.url,
-    kind: "events"
-  };
+  return { card: {
+      title: isRussian ? "События рядом" : "Nearby events",
+      value: isRussian ? `Найдено: ${data.page?.totalElements ?? 0}` : `${data.page?.totalElements ?? 0} found`,
+      detail: firstEvent ? eventDetail(firstEvent) : eventNames?.length ? eventNames.join(" · ") : (isRussian ? "Крупных публичных событий рядом не найдено." : "No major public events found nearby."),
+      actionURL: firstEvent?.url,
+      kind: "events"
+    }, events: nearbyEvents };
 }
 
 function compactDate(value?: string | number | null) {
@@ -1125,7 +1150,9 @@ async function buildTravelBrief(kind: string, title: string, location: string, s
     sections,
     actions,
     routeLegs,
-    imageURLs: cards.map((card) => card.actionURL).filter((url): url is string => Boolean(url)).slice(0, 2)
+    // Action URLs often point to maps or ticket pages, not image assets. Keep this
+    // empty until a trusted image provider supplies verifiable image URLs.
+    imageURLs: []
   };
 
   const generated = await aiBrief(kind, title, location, status, cards, warnings, languageInstruction, locale);
@@ -1153,7 +1180,7 @@ async function buildTravelBrief(kind: string, title: string, location: string, s
       ? generatedActions.map((action) => ({ ...action, detail: cleanBriefText(action.detail) }))
       : fallback.actions,
     routeLegs: generatedRouteLegs.length ? generatedRouteLegs : fallback.routeLegs,
-    imageURLs: generated.imageURLs.length ? generated.imageURLs : fallback.imageURLs
+    imageURLs: []
   };
 }
 
@@ -1437,6 +1464,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const languageName = clean(body.languageName) || languageCode;
   const isRussian = languageCode.toLowerCase().startsWith("ru");
 
+  const [weather, eventContext] = await Promise.all([
+    weatherCard(lookupPlace, isRussian),
+    eventsContext(lookupPlace, kind, body.startsAt, body.endsAt, isRussian)
+  ]);
   const cards: EnrichmentCard[] = [
     {
       title: isRussian ? "Статус" : "Status",
@@ -1450,8 +1481,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       detail: location || (isRussian ? "Добавьте адрес, аэропорт, отель, место или город." : "Add an address, airport, hotel, venue, or city."),
       kind: "maps"
     },
-    await weatherCard(lookupPlace, isRussian),
-    await eventsCard(lookupPlace, kind, body.startsAt, body.endsAt, isRussian)
+    weather,
+    eventContext.card
   ];
 
   if (kind === "flight") {
@@ -1469,7 +1500,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     sections: brief.sections,
     actions: brief.actions,
     routeLegs: brief.routeLegs,
-    imageURLs: brief.imageURLs
+    imageURLs: brief.imageURLs,
+    nearbyEvents: eventContext.events
   };
 
   return res.status(200).json(response);

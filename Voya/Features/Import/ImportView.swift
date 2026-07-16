@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 import ImageIO
 import PDFKit
-import PhotosUI
+@preconcurrency import PhotosUI
 import QuickLook
 import UniformTypeIdentifiers
 import UIKit

@@ -70,6 +70,8 @@ extension VoyaStore {
         title: String,
         startsAt: Date?,
         endsAt: Date?,
+        startsAtTimeZoneOffsetSeconds: Int? = nil,
+        endsAtTimeZoneOffsetSeconds: Int? = nil,
         location: String,
         status: String,
         confirmationCode: String? = nil,
@@ -82,6 +84,8 @@ extension VoyaStore {
             status: normalizedStatus(status),
             startsAt: startsAt,
             endsAt: endsAt,
+            startsAtTimeZoneOffsetSeconds: startsAtTimeZoneOffsetSeconds,
+            endsAtTimeZoneOffsetSeconds: endsAtTimeZoneOffsetSeconds,
             sourceName: trip.sourceName,
             confirmationCode: confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             providerName: providerName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
@@ -101,6 +105,8 @@ extension VoyaStore {
         title: String,
         startsAt: Date?,
         endsAt: Date?,
+        startsAtTimeZoneOffsetSeconds: Int? = nil,
+        endsAtTimeZoneOffsetSeconds: Int? = nil,
         location: String,
         status: String,
         confirmationCode: String? = nil,
@@ -116,10 +122,14 @@ extension VoyaStore {
         item.title = normalizedTitle(title)
         item.startsAt = startsAt
         item.endsAt = endsAt
+        item.startsAtTimeZoneOffsetSeconds = startsAt == nil ? nil : startsAtTimeZoneOffsetSeconds
+        item.endsAtTimeZoneOffsetSeconds = endsAt == nil ? nil : endsAtTimeZoneOffsetSeconds
         item.location = normalizedLocation(location)
         item.status = normalizedStatus(status)
         item.confirmationCode = confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         item.providerName = providerName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        ItemEnrichmentCache.clear(for: item)
+        FlightLookupCache.clear(for: item)
         item.updatedAt = Date()
 
         trip.items = sortedItinerary(trip.items)
@@ -180,10 +190,14 @@ extension VoyaStore {
         item.title = draft.title
         item.startsAt = draft.effectiveStartsAt
         item.endsAt = draft.effectiveEndsAt
+        item.startsAtTimeZoneOffsetSeconds = draft.effectiveStartsAt == nil ? nil : draft.startsAtTimeZoneOffsetSeconds
+        item.endsAtTimeZoneOffsetSeconds = draft.effectiveEndsAt == nil ? nil : draft.endsAtTimeZoneOffsetSeconds
         item.location = draft.location
         item.status = draft.status
         item.confirmationCode = draft.confirmationCode.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         item.providerName = draft.providerName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        ItemEnrichmentCache.clear(for: item)
+        FlightLookupCache.clear(for: item)
         item.updatedAt = Date()
     }
 
@@ -193,6 +207,12 @@ extension VoyaStore {
             item.location = normalizedLocation(item.location)
             item.status = normalizedStatus(item.status)
             item.endsAt = item.startsAt == nil ? nil : item.endsAt
+            if item.startsAt == nil {
+                item.startsAtTimeZoneOffsetSeconds = nil
+            }
+            if item.endsAt == nil {
+                item.endsAtTimeZoneOffsetSeconds = nil
+            }
         }
     }
 

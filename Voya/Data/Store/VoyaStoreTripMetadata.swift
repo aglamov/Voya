@@ -94,20 +94,24 @@ extension VoyaStore {
     }
 
     func tripDates(for items: [ItineraryItem], fallback: String) -> String {
-        let storedDates = items.flatMap { item in
-            [item.startsAt, item.endsAt].compactMap { $0 }
+        let storedDates: [(date: Date, offset: Int?)] = items.flatMap { item in
+            [
+                item.startsAt.map { ($0, item.startsAtTimeZoneOffsetSeconds) },
+                item.endsAt.map { ($0, item.endsAtTimeZoneOffsetSeconds ?? item.startsAtTimeZoneOffsetSeconds) }
+            ].compactMap { $0 }
         }
 
-        if let first = storedDates.min(),
-           let last = storedDates.max() {
-            return tripDates(from: first, to: last)
+        if let first = storedDates.min(by: { $0.date < $1.date }),
+           let last = storedDates.max(by: { $0.date < $1.date }) {
+            return DateIntervalFormatter.localizedDateRange(
+                start: first.date,
+                end: last.date,
+                startTimeZoneOffsetSeconds: first.offset,
+                endTimeZoneOffsetSeconds: last.offset
+            )
         }
 
         return fallback
-    }
-
-    func tripDates(from start: Date, to end: Date) -> String {
-        DateIntervalFormatter.localizedDateRange(start: start, end: end)
     }
 
     func monthAbbreviation(for month: Int?) -> String {
@@ -161,21 +165,26 @@ extension VoyaStore {
 
     func dateKeys(for item: ItineraryItem) -> [String] {
         guard let startsAt = item.startsAt else { return [] }
-        let calendar = Calendar.current
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = ItineraryDateFormatter.timeZone(
+            offsetSeconds: item.startsAtTimeZoneOffsetSeconds
+        )
         let end = item.endsAt ?? startsAt
         let startOfStart = calendar.startOfDay(for: startsAt)
         let startOfEnd = calendar.startOfDay(for: end)
         let dayCount = min(calendar.dateComponents([.day], from: startOfStart, to: startOfEnd).day ?? 0, 30)
 
         return (0...max(0, dayCount)).compactMap { offset in
-            calendar.date(byAdding: .day, value: offset, to: startOfStart).flatMap(dateKey)
+            calendar.date(byAdding: .day, value: offset, to: startOfStart).flatMap {
+                dateKey(for: $0, calendar: calendar)
+            }
         }
     }
 
-    func dateKey(for date: Date) -> String? {
-        let components = Calendar.current.dateComponents([.month, .day], from: date)
-        guard let month = components.month, let day = components.day else { return nil }
-        return "\(month)-\(day)"
+    func dateKey(for date: Date, calendar: Calendar = .current) -> String? {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        guard let year = components.year, let month = components.month, let day = components.day else { return nil }
+        return "\(year)-\(month)-\(day)"
     }
 
     func dateRangesAreNear(_ firstItems: [ItineraryItem], _ secondItems: [ItineraryItem]) -> Bool {

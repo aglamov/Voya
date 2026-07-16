@@ -4,11 +4,13 @@ import { sendAPNsAlert } from "./_apns.js";
 import {
   fallbackPushTokens,
   flightWatchKey,
+  flightWatchTargetsKey,
   normalizeFlightDate,
   normalizeFlightNumber,
   redisCommand,
-  registeredTokensForFlight,
-  storageConfigured
+  registeredTargetsForFlight,
+  storageConfigured,
+  type RegisteredFlightTarget
 } from "./_storage.js";
 
 type FlightAwareAlertPayload = {
@@ -416,25 +418,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const eventLooksImportant = /gate|delay|schedule|cancel|divert/i.test(normalized.eventType);
   const hasTimeDiff = meaningfulTimeShift(normalized, previous) !== undefined;
   const shouldPush = !duplicate && copy && (hasGateDiff || hasNewGateInfo || hasTimeDiff || eventLooksImportant);
-  const storedTokens = await registeredTokensForFlight(flightNumber, normalized.flightDate);
-  const testTokens = storedTokens.length ? [] : fallbackPushTokens();
-  const deviceTokens = [...new Set([...storedTokens, ...testTokens])];
-  const push = shouldPush && deviceTokens.length
-    ? await sendAPNsAlert(deviceTokens, {
-        title: copy.title,
-        body: copy.body,
-        threadId: flightNumber,
-        data: {
-          provider: "flightaware",
-          eventType: normalized.eventType,
-          flightNumber,
-          flightDate: normalized.flightDate,
-          gate: normalized.gate
-        }
-      })
+  const storedTargets = await registeredTargetsForFlight(flightNumber, normalized.flightDate);
+  const testTokens = storedTargets.length ? [] : fallbackPushTokens();
+  const targets: RegisteredFlightTarget[] = storedTargets.length
+    ? storedTargets
+    : testTokens.map((deviceToken) => ({ deviceToken }));
+  const deliveryResults: Awaited<ReturnType<typeof sendAPNsAlert>>[] = [];
+  if (shouldPush && targets.length) {
+    for (let index = 0; index < targets.length; index += 10) {
+      const batch = await Promise.all(targets.slice(index, index + 10).map((target) => sendAPNsAlert([target.deviceToken], {
+          title: copy.title,
+          body: copy.body,
+          threadId: flightNumber,
+          data: {
+            provider: "flightaware",
+            eventType: normalized.eventType,
+            flightNumber,
+            flightDate: normalized.flightDate,
+            gate: normalized.gate,
+            tripId: target.tripId,
+            itemId: target.itemId
+          }
+        })));
+      deliveryResults.push(...batch);
+    }
+  }
+  const push = deliveryResults.length
+    ? {
+        configured: deliveryResults.some((result) => result.configured),
+        attempted: deliveryResults.reduce((sum, result) => sum + result.attempted, 0),
+        sent: deliveryResults.reduce((sum, result) => sum + result.sent, 0),
+        failed: deliveryResults.reduce((sum, result) => sum + result.failed, 0),
+        errors: deliveryResults.flatMap((result) => result.errors),
+        invalidDeviceTokens: deliveryResults.flatMap((result) => result.invalidDeviceTokens)
+      }
     : {
         configured: false,
-        attempted: deviceTokens.length,
+        attempted: targets.length,
         sent: 0,
         failed: 0,
         errors: shouldPush ? ["No registered device tokens for this flight."] : ["Alert did not produce a new traveler-facing push."],
@@ -444,6 +464,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   for (const token of push.invalidDeviceTokens) {
     await redisCommand(["SREM", `voya:flight-watch:${flightWatchKey(flightNumber, normalized.flightDate)}:devices`, token]);
     await redisCommand(["SREM", `voya:flight-watch:${flightWatchKey(flightNumber)}:devices`, token]);
+    await redisCommand(["HDEL", flightWatchTargetsKey(flightNumber, normalized.flightDate), token]);
+    await redisCommand(["HDEL", flightWatchTargetsKey(flightNumber), token]);
   }
 
   return res.status(202).json({
@@ -452,7 +474,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     push: {
       duplicate,
       shouldPush: Boolean(shouldPush),
-      matchedRegisteredDevices: storedTokens.length,
+      matchedRegisteredDevices: storedTargets.length,
       matchedFallbackDevices: testTokens.length,
       ...push
     }

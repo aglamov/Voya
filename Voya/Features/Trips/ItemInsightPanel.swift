@@ -579,8 +579,114 @@ struct DetailedInsightBrief: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if !displayWarnings.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(displayWarnings, id: \.self) { warning in
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.voyaCoral)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(12)
+                .background(Color.voyaCoral.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+
             ForEach(displaySections) { section in
                 DetailedInsightSection(section: section)
+            }
+
+            if let nearbyEvents = enrichment.nearbyEvents, !nearbyEvents.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(isRussian ? "События рядом" : "Nearby events", systemImage: "ticket.fill")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaCoral)
+
+                    ForEach(nearbyEvents.prefix(5)) { event in
+                        Button {
+                            if let url = event.url { openURL(url) }
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(event.name)
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundStyle(Color.voyaInk)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text(eventDetail(event))
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(Color.voyaMuted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 0)
+                                if event.url != nil {
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(Color.voyaCoral)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(event.url == nil)
+                    }
+                }
+                .padding(14)
+                .background(Color.voyaCoral.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+
+            if !displayCards.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    Label(isRussian ? "Актуальные данные" : "Live context", systemImage: "waveform.path.ecg")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaTeal)
+
+                    ForEach(displayCards) { card in
+                        Button {
+                            if let actionURL = card.actionURL {
+                                openURL(actionURL)
+                            }
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: cardSymbol(card))
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(card.kind == "warning" ? Color.voyaCoral : Color.voyaTeal)
+                                    .frame(width: 24, height: 24)
+                                    .background((card.kind == "warning" ? Color.voyaCoral : Color.voyaTeal).opacity(0.10))
+                                    .clipShape(Circle())
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(card.title)
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(Color.voyaMuted)
+                                    Text(card.value)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(Color.voyaInk)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if let detail = card.detail?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+                                        Text(cleanInlineText(detail))
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(Color.voyaMuted)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+
+                                Spacer(minLength: 0)
+                                if card.actionURL != nil {
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(Color.voyaTeal)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(card.actionURL == nil)
+                    }
+                }
+                .padding(14)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
 
             if !displayActions.isEmpty {
@@ -635,6 +741,54 @@ struct DetailedInsightBrief: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         }
+    }
+
+    private var displayWarnings: [String] {
+        var seen = Set<String>()
+        return enrichment.warnings
+            .map { cleanInlineText($0) }
+            .filter { !$0.isEmpty && seen.insert(normalizedKey($0)).inserted }
+    }
+
+    private var displayCards: [ItemEnrichmentCard] {
+        let hiddenTitles: [String]
+        if itemKind == .flight {
+            hiddenTitles = [
+                "flight", "рейс", "gate", "выход", "delay", "задержка",
+                "weather", "погода", "aircraft location", "где самолет"
+            ]
+        } else {
+            hiddenTitles = ["status", "статус", "maps", "карты"]
+        }
+
+        var seen = Set<String>()
+        return enrichment.cards.filter { card in
+            let title = card.title.lowercased()
+            guard !hiddenTitles.contains(where: title.contains) else { return false }
+            let key = normalizedKey("\(card.title) \(card.value) \(card.detail ?? "")")
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func cardSymbol(_ card: ItemEnrichmentCard) -> String {
+        switch card.kind {
+        case "weather": "cloud.sun.fill"
+        case "events": "ticket.fill"
+        case "maps": "map.fill"
+        case "warning": "exclamationmark.triangle.fill"
+        case "flight": "airplane"
+        default: "sparkles"
+        }
+    }
+
+    private func eventDetail(_ event: NearbyEvent) -> String {
+        let time = [event.localDate, event.localTime?.prefix(5).description]
+            .compactMap { $0?.nilIfEmpty }
+            .joined(separator: " · ")
+            .nilIfEmpty
+        return [event.venue, event.city, time]
+            .compactMap { $0?.nilIfEmpty }
+            .joined(separator: " · ")
     }
 
     private var displaySections: [DetailedBriefSection] {

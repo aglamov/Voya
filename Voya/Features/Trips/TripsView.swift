@@ -243,11 +243,28 @@ struct TripsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
                 } else {
-                    EmptyTripsCard(
-                        title: tripListMode == .archive ? "Archive is empty" : "No upcoming trips",
-                        message: tripListMode == .archive ? "Past trips will appear here after they end." : "Import a confirmation to build your next itinerary.",
-                        symbol: tripListMode == .archive ? "archivebox" : "calendar.badge.plus"
-                    )
+                    VStack(spacing: 12) {
+                        EmptyTripsCard(
+                            title: tripListMode == .archive ? "Archive is empty" : "No upcoming trips",
+                            message: tripListMode == .archive ? "Past trips will appear here after they end." : "Import a confirmation to build your next itinerary.",
+                            symbol: tripListMode == .archive ? "archivebox" : "calendar.badge.plus"
+                        )
+
+                        if tripListMode == .upcoming {
+                            Button {
+                                selectedTab = .import
+                            } label: {
+                                Label("Import your first trip", systemImage: "tray.and.arrow.down.fill")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 52)
+                                    .foregroundStyle(.white)
+                                    .background(Color.voyaInk)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 18)
@@ -255,12 +272,17 @@ struct TripsView: View {
         }
         .onAppear {
             selectDisplayedTripIfNeeded()
+            openNotificationItemIfNeeded()
         }
         .onChange(of: tripListMode) { _, _ in
             selectDisplayedTripIfNeeded()
         }
         .onChange(of: store.trips.count) { _, _ in
             selectDisplayedTripIfNeeded()
+            openNotificationItemIfNeeded()
+        }
+        .onChange(of: store.notificationItemID) { _, _ in
+            openNotificationItemIfNeeded()
         }
         .sheet(item: $tripBeingEdited) { trip in
             EditTripView(trip: trip) { draft in
@@ -287,6 +309,8 @@ struct TripsView: View {
                     title: draft.title,
                     startsAt: draft.effectiveStartsAt,
                     endsAt: draft.effectiveEndsAt,
+                    startsAtTimeZoneOffsetSeconds: draft.startsAtTimeZoneOffsetSeconds,
+                    endsAtTimeZoneOffsetSeconds: draft.endsAtTimeZoneOffsetSeconds,
                     location: draft.location,
                     status: draft.status,
                     confirmationCode: draft.confirmationCode,
@@ -295,13 +319,19 @@ struct TripsView: View {
             }
         }
         .sheet(item: $itemBeingViewed) { item in
-            ItineraryItemDetailView(item: item, sourceDocument: store.sourceDocument(for: item)) { draft in
+            ItineraryItemDetailView(
+                tripID: store.trips.first(where: { trip in trip.items.contains(where: { $0.id == item.id }) })?.id,
+                item: item,
+                sourceDocument: store.sourceDocument(for: item)
+            ) { draft in
                 store.updateItineraryItem(
                     item,
                     kind: draft.kind,
                     title: draft.title,
                     startsAt: draft.effectiveStartsAt,
                     endsAt: draft.effectiveEndsAt,
+                    startsAtTimeZoneOffsetSeconds: draft.startsAtTimeZoneOffsetSeconds,
+                    endsAtTimeZoneOffsetSeconds: draft.endsAtTimeZoneOffsetSeconds,
                     location: draft.location,
                     status: draft.status,
                     confirmationCode: draft.confirmationCode,
@@ -359,6 +389,19 @@ struct TripsView: View {
         store.selectedTripID = firstTrip.id
     }
 
+    private func openNotificationItemIfNeeded() {
+        guard let itemID = store.notificationItemID,
+              let trip = store.trips.first(where: { trip in trip.items.contains(where: { $0.id == itemID }) }),
+              let item = trip.items.first(where: { $0.id == itemID }) else {
+            return
+        }
+
+        tripListMode = store.isArchived(trip, at: Date()) ? .archive : .upcoming
+        store.selectedTripID = trip.id
+        itemBeingViewed = item
+        store.notificationItemID = nil
+    }
+
     @MainActor
     private func loadMobilityPlan(from originItem: ItineraryItem, to destinationItem: ItineraryItem, forceRefresh: Bool = false) async {
         guard let rawContext = VercelMobilityService.transferContext(from: originItem, to: destinationItem) else {
@@ -371,6 +414,13 @@ struct TripsView: View {
     @MainActor
     private func loadMobilityPlan(context: MobilityTransferContext, forceRefresh: Bool = false) async {
         if !forceRefresh, mobilityPlans[context.id] != nil {
+            return
+        }
+        if !forceRefresh, let cached = MobilityPlanCache.freshPlan(for: adjustedTransferContext(context)) {
+            mobilityPlans[context.id] = cached
+            if let option = cached.defaultOption {
+                await VoyaNotificationScheduler.shared.scheduleTransferNotification(context: adjustedTransferContext(context), option: option)
+            }
             return
         }
         guard forceRefresh || !loadingMobilityPlanIDs.contains(context.id) else {
@@ -391,6 +441,7 @@ struct TripsView: View {
                 return
             }
             mobilityPlans[context.id] = plan
+            MobilityPlanCache.store(plan, for: adjustedContext)
             if let option = plan.defaultOption {
                 await VoyaNotificationScheduler.shared.scheduleTransferNotification(context: adjustedContext, option: option)
             }
@@ -427,6 +478,7 @@ struct TripsView: View {
         mobilityPlans[context.id] = nil
         mobilityPlanErrors[context.id] = nil
         loadingMobilityPlanIDs.remove(context.id)
+        MobilityPlanCache.clear(for: context)
     }
 
     private var transferBufferOverrides: [String: Int] {

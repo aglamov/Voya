@@ -3,7 +3,7 @@ import SwiftData
 import SwiftUI
 
 enum ItemEnrichmentCache {
-    private static let schemaVersion = "travel-brief-v5"
+    private static let schemaVersion = "travel-brief-v6"
 
     static func key(for item: ItineraryItem) -> String {
         let dateFormatter = ISO8601DateFormatter()

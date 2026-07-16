@@ -70,21 +70,25 @@ final class VoyaPushRegistrationService {
             return
         }
 
-        let flights = trips
-            .flatMap(\.items)
-            .filter { item in
-                guard item.kind == .flight else { return false }
-                if let endsAt = item.endsAt ?? item.startsAt, endsAt < now.addingTimeInterval(-12 * 60 * 60) {
-                    return false
+        let flights: [(tripID: UUID, item: ItineraryItem)] = trips
+            .flatMap { trip in
+                trip.items.compactMap { item -> (tripID: UUID, item: ItineraryItem)? in
+                    guard item.kind == .flight else { return nil }
+                    if let endsAt = item.endsAt ?? item.startsAt, endsAt < now.addingTimeInterval(-12 * 60 * 60) {
+                        return nil
+                    }
+                    if let startsAt = item.startsAt, startsAt > now.addingTimeInterval(60 * 24 * 60 * 60) {
+                        return nil
+                    }
+                    guard Self.firstFlightNumber(in: "\(item.title) \(item.location)") != nil else {
+                        return nil
+                    }
+                    return (trip.id, item)
                 }
-                if let startsAt = item.startsAt, startsAt > now.addingTimeInterval(60 * 24 * 60 * 60) {
-                    return false
-                }
-                return Self.firstFlightNumber(in: "\(item.title) \(item.location)") != nil
             }
-            .sorted { $0.id.uuidString < $1.id.uuidString }
+            .sorted { $0.item.id.uuidString < $1.item.id.uuidString }
 
-        let signature = Self.flightWatchSignature(for: flights, deviceToken: deviceToken)
+        let signature = Self.flightWatchSignature(for: flights.map { $0.item }, deviceToken: deviceToken)
         let lastSignature = userDefaults.string(forKey: flightWatchSignatureKey)
         let lastSync = userDefaults.object(forKey: flightWatchSyncedAtKey) as? Date
         let isFresh = lastSync.map { now.timeIntervalSince($0) < 12 * 60 * 60 } ?? false
@@ -94,7 +98,7 @@ final class VoyaPushRegistrationService {
 
         var registrationSucceeded = true
         for flight in flights {
-            let response = await registerFlightWatch(for: flight, subscribeToAlerts: true)
+            let response = await registerFlightWatch(for: flight.item, tripID: flight.tripID, subscribeToAlerts: true)
             registrationSucceeded = registrationSucceeded
                 && response?.stored == true
                 && response?.alertWatch?.subscribed == true
@@ -176,6 +180,7 @@ final class VoyaPushRegistrationService {
 
     func registerFlightWatch(
         for item: ItineraryItem,
+        tripID: UUID? = nil,
         candidate: FlightLookupCandidate? = nil,
         subscribeToAlerts: Bool = false
     ) async -> FlightWatchRegistrationResponse? {
@@ -190,9 +195,10 @@ final class VoyaPushRegistrationService {
             payload: FlightWatchRegistrationPayload(
                 appInstallId: installID,
                 deviceToken: token,
+                tripId: tripID?.uuidString,
                 itemId: item.id.uuidString,
                 flightNumber: flightNumber,
-                date: item.startsAt.map { Self.flightDateFormatter.string(from: $0) },
+                date: Self.flightDate(for: item),
                 originAirport: candidate?.originAirport ?? candidate?.originAirportIcao,
                 destinationAirport: candidate?.destinationAirport ?? candidate?.destinationAirportIcao,
                 subscribeToAlerts: subscribeToAlerts
@@ -349,13 +355,19 @@ final class VoyaPushRegistrationService {
         return "\(deviceToken)|\(values)"
     }
 
-    private static let flightDateFormatter: DateFormatter = {
+    private static func flightDate(for item: ItineraryItem) -> String? {
+        guard let startsAt = item.startsAt else {
+            return nil
+        }
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = ItineraryDateFormatter.timeZone(
+            offsetSeconds: item.startsAtTimeZoneOffsetSeconds
+        )
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+        return formatter.string(from: startsAt)
+    }
 }
 
 private struct WeatherWatchRegistrationPayload: Encodable {
@@ -379,6 +391,7 @@ struct WeatherWatchRegistrationResponse: Decodable {
 private struct FlightWatchRegistrationPayload: Encodable {
     var appInstallId: String
     var deviceToken: String?
+    var tripId: String?
     var itemId: String
     var flightNumber: String
     var date: String?

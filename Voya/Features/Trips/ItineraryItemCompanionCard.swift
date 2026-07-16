@@ -306,11 +306,21 @@ struct ItemCompanionCard: View {
     }
 
     private var startTimeText: String {
-        item.startsAt.map { MomentDateFormatter.time.string(from: $0) } ?? String(localized: "--:--")
+        item.startsAt.map {
+            ItineraryDateFormatter.displayClock(
+                date: $0,
+                timeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds
+            )
+        } ?? String(localized: "--:--")
     }
 
     private var endTimeText: String {
-        item.endsAt.map { MomentDateFormatter.time.string(from: $0) } ?? String(localized: "--:--")
+        item.endsAt.map {
+            ItineraryDateFormatter.displayClock(
+                date: $0,
+                timeZoneOffsetSeconds: item.endsAtTimeZoneOffsetSeconds ?? item.startsAtTimeZoneOffsetSeconds
+            )
+        } ?? String(localized: "--:--")
     }
 
     private var flightRoute: FlightRouteDisplay? {

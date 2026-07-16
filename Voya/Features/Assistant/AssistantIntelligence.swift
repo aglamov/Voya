@@ -226,7 +226,7 @@ struct AssistantIntelligenceBuilder {
         }
 
         onProgress?(.flights)
-        let flightAlerts = await flightStatusAlerts(for: itinerary)
+        let flightAlerts = await flightStatusAlerts(for: itinerary, modelContext: modelContext)
         for alert in flightAlerts {
             append(alert)
         }
@@ -313,7 +313,7 @@ struct AssistantIntelligenceBuilder {
             question: nil
         )
 
-        if let aiAdvice {
+        if let aiAdvice, aiAdvice.isReliableEnoughToOverrideFacts {
             assessment.title = aiAdvice.assessmentTitle
             assessment.detail = aiAdvice.assessmentDetail
             finalWeather.recommendation = aiAdvice.packingAdvice
@@ -501,7 +501,7 @@ struct AssistantIntelligenceBuilder {
         return uncovered
     }
 
-    private func flightStatusAlerts(for itinerary: [ItineraryItem]) async -> [TravelAlert] {
+    private func flightStatusAlerts(for itinerary: [ItineraryItem], modelContext: ModelContext?) async -> [TravelAlert] {
         var alerts: [TravelAlert] = []
         let service = VercelFlightLookupService()
         let upcomingFlights = itinerary
@@ -525,14 +525,29 @@ struct AssistantIntelligenceBuilder {
 
             let route = store.airportRouteCodes(in: item.location)
             do {
-                let response = try await service.lookup(
-                    flightNumber: flightNumber,
-                    date: item.startsAt,
-                    originAirport: route?.origin,
-                    destinationAirport: route?.destination
-                )
+                let response: FlightLookupResponse
+                if let cached = FlightLookupCache.freshCachedResponse(for: item) {
+                    response = cached
+                } else {
+                    do {
+                        response = try await service.lookup(
+                            flightNumber: flightNumber,
+                            date: item.startsAt,
+                            dateTimeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds,
+                            originAirport: route?.origin,
+                            destinationAirport: route?.destination
+                        )
+                        FlightLookupCache.store(response, for: item)
+                        try? modelContext?.save()
+                    } catch {
+                        guard let stale = FlightLookupCache.cachedResponse(for: item) else {
+                            throw error
+                        }
+                        response = stale
+                    }
+                }
 
-                if let reliability = response.reliability {
+                if let reliability = response.reliability ?? response.intelligence?.history {
                     alerts.append(flightReliabilityAlert(for: item, flightNumber: flightNumber, reliability: reliability))
                 } else {
                     alerts.append(flightReliabilityUnavailableAlert(for: item, flightNumber: flightNumber))
@@ -749,7 +764,13 @@ struct AssistantIntelligenceBuilder {
 
         for context in contexts.prefix(5) {
             do {
-                let plan = try await service.planTransfer(context: context)
+                let plan: MobilityPlan
+                if let cached = MobilityPlanCache.freshPlan(for: context) {
+                    plan = cached
+                } else {
+                    plan = try await service.planTransfer(context: context)
+                    MobilityPlanCache.store(plan, for: context)
+                }
                 guard let option = plan.defaultOption else {
                     alerts.append(
                         TravelAlert(
@@ -1071,7 +1092,7 @@ struct AssistantIntelligenceBuilder {
             question: question?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             trip: AssistantAIRequest.TripContext(
                 title: trip.title,
-                dates: trip.dates,
+                dates: trip.displayDates,
                 summary: trip.summary,
                 destination: trip.destination,
                 startsAt: trip.startsAt,

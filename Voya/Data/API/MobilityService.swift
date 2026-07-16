@@ -30,7 +30,7 @@ enum MobilityRouteMode: String, Codable {
     }
 }
 
-struct MobilityPlan: Decodable {
+struct MobilityPlan: Codable {
     var providerConnected: Bool
     var provider: String
     var generatedAt: String
@@ -58,7 +58,7 @@ struct MobilityPlan: Decodable {
     }
 }
 
-struct MobilityRouteOption: Decodable, Identifiable {
+struct MobilityRouteOption: Codable, Identifiable {
     var id: String { "\(mode.rawValue)-\(durationMinutes ?? 0)-\(leaveBy ?? "")" }
     var mode: MobilityRouteMode
     var title: String
@@ -82,7 +82,7 @@ struct MobilityRouteOption: Decodable, Identifiable {
     var tone: String
 }
 
-struct MobilityRouteStep: Decodable, Identifiable {
+struct MobilityRouteStep: Codable, Identifiable {
     var id: String {
         "\(kind)-\(title)-\(departureStop ?? "")-\(arrivalStop ?? "")-\(departureTime ?? "")-\(arrivalTime ?? "")"
     }
@@ -98,9 +98,13 @@ struct MobilityRouteStep: Decodable, Identifiable {
     var arrivalStop: String?
     var departureTime: String?
     var arrivalTime: String?
+    var departureTimeText: String?
+    var arrivalTimeText: String?
+    var departureTimeZone: String?
+    var arrivalTimeZone: String?
 }
 
-struct MobilityRecommendation: Decodable {
+struct MobilityRecommendation: Codable {
     var mode: MobilityRouteMode
     var title: String
     var reason: String
@@ -400,4 +404,79 @@ struct MobilityPlanRequest: Encodable {
 
 struct MobilityPlace: Encodable {
     var address: String
+}
+
+enum MobilityPlanCache {
+    private struct Entry: Codable {
+        var signature: String
+        var expiresAt: Date
+        var plan: MobilityPlan
+    }
+
+    private static let storageKey = "voya.mobility-plan-cache.v1"
+
+    static func freshPlan(for context: MobilityTransferContext, now: Date = Date()) -> MobilityPlan? {
+        guard let entry = entries()[context.id],
+              entry.signature == signature(for: context),
+              entry.expiresAt > now else {
+            return nil
+        }
+        return entry.plan
+    }
+
+    static func store(_ plan: MobilityPlan, for context: MobilityTransferContext, now: Date = Date()) {
+        var values = entries().filter { $0.value.expiresAt > now.addingTimeInterval(-24 * 60 * 60) }
+        values[context.id] = Entry(
+            signature: signature(for: context),
+            expiresAt: expirationDate(for: context, now: now),
+            plan: plan
+        )
+        if values.count > 40 {
+            values = Dictionary(
+                uniqueKeysWithValues: values
+                    .sorted { $0.value.expiresAt > $1.value.expiresAt }
+                    .prefix(40)
+                    .map { ($0.key, $0.value) }
+            )
+        }
+        save(values)
+    }
+
+    static func clear(for context: MobilityTransferContext) {
+        var values = entries()
+        values[context.id] = nil
+        save(values)
+    }
+
+    private static func entries() -> [String: Entry] {
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+            return [:]
+        }
+        return (try? JSONDecoder().decode([String: Entry].self, from: data)) ?? [:]
+    }
+
+    private static func save(_ values: [String: Entry]) {
+        guard let data = try? JSONEncoder().encode(values) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    private static func signature(for context: MobilityTransferContext) -> String {
+        [
+            context.origin,
+            context.destination,
+            context.targetArrivalAt?.ISO8601Format() ?? "",
+            context.targetDepartureAt?.ISO8601Format() ?? "",
+            String(context.airportBufferMinutes),
+            String(context.taxiPickupBufferMinutes)
+        ].joined(separator: "|")
+    }
+
+    private static func expirationDate(for context: MobilityTransferContext, now: Date) -> Date {
+        let target = context.targetArrivalAt ?? context.targetDepartureAt
+        guard let target else { return now.addingTimeInterval(30 * 60) }
+        let interval = target.timeIntervalSince(now)
+        if interval <= 24 * 60 * 60 { return now.addingTimeInterval(10 * 60) }
+        if interval <= 7 * 24 * 60 * 60 { return now.addingTimeInterval(60 * 60) }
+        return now.addingTimeInterval(6 * 60 * 60)
+    }
 }

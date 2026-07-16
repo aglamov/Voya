@@ -165,11 +165,21 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
             ?? (remoteData?["tripID"] as? String)
             ?? (userInfo["tripId"] as? String)
             ?? (userInfo["tripID"] as? String)
+        let itemID = (remoteData?["itemId"] as? String)
+            ?? (remoteData?["itemID"] as? String)
+            ?? (userInfo["itemId"] as? String)
+            ?? (userInfo["itemID"] as? String)
+        let eventType = (remoteData?["eventType"] as? String)
+            ?? (userInfo["eventType"] as? String)
         await MainActor.run {
             NotificationCenter.default.post(
                 name: .voyaNotificationOpened,
                 object: nil,
-                userInfo: tripID.map { ["tripID": $0] }
+                userInfo: [
+                    "tripID": tripID,
+                    "itemID": itemID,
+                    "eventType": eventType
+                ].compactMapValues { $0 }
             )
         }
     }

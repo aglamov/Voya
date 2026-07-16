@@ -95,6 +95,8 @@ extension VoyaStore {
         normalizedKeyText(item.location).count
             + (item.status.localizedCaseInsensitiveContains("needs") ? 0 : 50)
             + (item.confirmationCode?.isEmpty == false ? 25 : 0)
+            + (item.normalizedData?.isEmpty == false ? 15 : 0)
+            + (item.flightLookupRawData?.isEmpty == false ? 15 : 0)
     }
 
     func areDuplicateItems(_ first: ItineraryItem, _ second: ItineraryItem) -> Bool {

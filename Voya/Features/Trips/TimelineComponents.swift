@@ -432,11 +432,26 @@ struct TransferRecommendationCard: View {
     }
 
     private func departureTimeText(for option: MobilityRouteOption) -> String? {
-        routeDepartureDate(for: option)
+        if let localized = option.steps?.compactMap(\.departureTimeText).first?.nilIfEmpty {
+            return localized
+        }
+        return routeDepartureDate(for: option)
             .map { MobilityDateFormatter.time.string(from: $0) }
     }
 
     private func routeTimeRangeText(for option: MobilityRouteOption) -> String? {
+        let localizedDeparture = option.steps?.compactMap(\.departureTimeText).first?.nilIfEmpty
+        let localizedArrival = option.steps?.compactMap(\.arrivalTimeText).last?.nilIfEmpty
+        if let localizedDeparture, let localizedArrival {
+            return "\(localizedDeparture)-\(localizedArrival)"
+        }
+        if let localizedDeparture {
+            return String(localized: "Leave \(localizedDeparture)")
+        }
+        if let localizedArrival {
+            return String(localized: "Arrive \(localizedArrival)")
+        }
+
         guard let departure = routeDepartureDate(for: option) else {
             return routeArrivalDate(for: option)
                 .map { String(localized: "Arrive \(MobilityDateFormatter.time.string(from: $0))") }
@@ -534,6 +549,13 @@ struct TransferRecommendationCard: View {
     }
 
     private func transitLegTimeText(_ step: MobilityRouteStep) -> String? {
+        if let departure = step.departureTimeText?.nilIfEmpty,
+           let arrival = step.arrivalTimeText?.nilIfEmpty {
+            return "\(departure)-\(arrival)"
+        }
+        if let departure = step.departureTimeText?.nilIfEmpty { return departure }
+        if let arrival = step.arrivalTimeText?.nilIfEmpty { return arrival }
+
         let departure = step.departureTime.flatMap(MobilityDateFormatter.date(from:))
         let arrival = step.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
 
@@ -557,12 +579,10 @@ struct TransferRecommendationCard: View {
         let line = step.lineName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? step.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? String(localized: "public transport")
-        let departure = step.departureTime
-            .flatMap(MobilityDateFormatter.date(from:))
-            .map { MobilityDateFormatter.time.string(from: $0) }
-        let arrival = step.arrivalTime
-            .flatMap(MobilityDateFormatter.date(from:))
-            .map { MobilityDateFormatter.time.string(from: $0) }
+        let departure = step.departureTimeText?.nilIfEmpty
+            ?? step.departureTime.flatMap(MobilityDateFormatter.date(from:)).map { MobilityDateFormatter.time.string(from: $0) }
+        let arrival = step.arrivalTimeText?.nilIfEmpty
+            ?? step.arrivalTime.flatMap(MobilityDateFormatter.date(from:)).map { MobilityDateFormatter.time.string(from: $0) }
         let from = step.departureStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         let to = step.arrivalStop?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
 

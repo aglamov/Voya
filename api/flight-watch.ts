@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
   flightWatchKey,
+  flightWatchTargetsKey,
   normalizeDeviceToken,
   normalizeFlightDate,
   normalizeFlightNumber,
@@ -13,6 +14,7 @@ type FlightWatchPayload = {
   appInstallId?: string;
   deviceToken?: string;
   itemId?: string;
+  tripId?: string;
   flightNumber?: string;
   date?: string;
   originAirport?: string;
@@ -258,6 +260,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const date = normalizeFlightDate(payload.date);
   const deviceToken = normalizeDeviceToken(payload.deviceToken);
   const appInstallId = validInstallID(payload.appInstallId);
+  const tripId = validInstallID(payload.tripId);
+  const itemId = validInstallID(payload.itemId);
 
   if (!flightNumber) {
     return res.status(400).json({ error: "Invalid flight number." });
@@ -305,10 +309,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   await redisCommand(["SADD", `voya:flight-watch:${key}:devices`, deviceToken]);
   await redisCommand(["EXPIRE", `voya:flight-watch:${key}:devices`, ttl]);
+  const target = JSON.stringify({ appInstallId, tripId, itemId });
+  await redisCommand(["HSET", flightWatchTargetsKey(flightNumber, date), deviceToken, target]);
+  await redisCommand(["EXPIRE", flightWatchTargetsKey(flightNumber, date), ttl]);
   if (date) {
     const genericDevicesKey = `voya:flight-watch:${flightWatchKey(flightNumber)}:devices`;
     await redisCommand(["SADD", genericDevicesKey, deviceToken]);
     await redisCommand(["EXPIRE", genericDevicesKey, ttl]);
+    await redisCommand(["HSET", flightWatchTargetsKey(flightNumber), deviceToken, target]);
+    await redisCommand(["EXPIRE", flightWatchTargetsKey(flightNumber), ttl]);
   }
   await redisCommand([
     "HSET",

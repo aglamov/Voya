@@ -68,6 +68,10 @@ export type MobilityRouteStep = {
   arrivalStop?: string;
   departureTime?: string;
   arrivalTime?: string;
+  departureTimeText?: string;
+  arrivalTimeText?: string;
+  departureTimeZone?: string;
+  arrivalTimeZone?: string;
 };
 
 export type MobilityPlanResponse = {
@@ -119,6 +123,16 @@ type GoogleRouteLegStep = {
       };
       arrivalTime?: string;
       departureTime?: string;
+    };
+    localizedValues?: {
+      departureTime?: {
+        time?: { text?: string };
+        timeZone?: string;
+      };
+      arrivalTime?: {
+        time?: { text?: string };
+        timeZone?: string;
+      };
     };
     transitLine?: {
       name?: string;
@@ -529,7 +543,11 @@ function routeStepsFromRoute(route: GoogleRoute, mode: RouteMode): MobilityRoute
         departureStop,
         arrivalStop,
         departureTime: stopDetails?.departureTime,
-        arrivalTime: stopDetails?.arrivalTime
+        arrivalTime: stopDetails?.arrivalTime,
+        departureTimeText: transit.localizedValues?.departureTime?.time?.text,
+        arrivalTimeText: transit.localizedValues?.arrivalTime?.time?.text,
+        departureTimeZone: transit.localizedValues?.departureTime?.timeZone,
+        arrivalTimeZone: transit.localizedValues?.arrivalTime?.timeZone
       };
     }
 
@@ -591,6 +609,10 @@ async function fetchGoogleRoute(request: MobilityPlanRequest, mode: RouteMode): 
         "routes.legs.steps.transitDetails.stopDetails.arrivalTime",
         "routes.legs.steps.transitDetails.stopDetails.departureStop.name",
         "routes.legs.steps.transitDetails.stopDetails.arrivalStop.name",
+        "routes.legs.steps.transitDetails.localizedValues.departureTime.time.text",
+        "routes.legs.steps.transitDetails.localizedValues.departureTime.timeZone",
+        "routes.legs.steps.transitDetails.localizedValues.arrivalTime.time.text",
+        "routes.legs.steps.transitDetails.localizedValues.arrivalTime.timeZone",
         "routes.legs.steps.transitDetails.transitLine.name",
         "routes.legs.steps.transitDetails.transitLine.nameShort",
         "routes.legs.steps.transitDetails.transitLine.vehicle.name.text",
@@ -731,7 +753,7 @@ function optionFromRoute(request: MobilityPlanRequest, mode: RouteMode, route: G
     comfortLevel: comfortLevelFor(mode),
     emissionsLevel: emissionsLevelFor(mode),
     provider: "google_routes",
-    providerAttribution: "Google Routes",
+    providerAttribution: `Powered by Google, ©${new Date().getUTCFullYear()} Google`,
     mapURL: mapsURL(request.origin, request.destination, mode),
     summary: durationMinutes == null
       ? "Route available in maps, but no duration was returned."

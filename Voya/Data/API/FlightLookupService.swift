@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import SwiftUI
 
-struct FlightLookupCandidate: Decodable {
+struct FlightLookupCandidate: Codable {
     var flightNumber: String
     var flightIata: String?
     var flightIcao: String?
@@ -34,6 +34,14 @@ struct FlightLookupCandidate: Decodable {
 
     var parsedArrivalAt: Date? {
         Self.parseDate(arrivalAt)
+    }
+
+    var departureTimeZoneOffsetSeconds: Int? {
+        ItineraryDateParser.timeZoneOffsetSeconds(from: departureAt)
+    }
+
+    var arrivalTimeZoneOffsetSeconds: Int? {
+        ItineraryDateParser.timeZoneOffsetSeconds(from: arrivalAt)
     }
 
     var routeText: String {
@@ -72,7 +80,7 @@ struct FlightLookupCandidate: Decodable {
     }
 }
 
-struct FlightPosition: Decodable {
+struct FlightPosition: Codable {
     var lat: Double
     var lon: Double
     var altitudeFeet: Double?
@@ -81,7 +89,7 @@ struct FlightPosition: Decodable {
     var updatedAt: String?
 }
 
-struct FlightPlaneSegment: Decodable {
+struct FlightPlaneSegment: Codable {
     var flightNumber: String?
     var originAirport: String?
     var destinationAirport: String?
@@ -97,7 +105,7 @@ struct FlightPlaneSegment: Decodable {
     var position: FlightPosition?
 }
 
-struct FlightPlaneContext: Decodable {
+struct FlightPlaneContext: Codable {
     var state: String
     var headline: String
     var detail: String
@@ -111,8 +119,133 @@ struct FlightPlaneContext: Decodable {
     var confidence: Double
 }
 
-struct FlightLookupResponse: Decodable {
-    struct Validation: Decodable {
+struct FlightSnapshot: Codable {
+    var provider: String
+    var dataMode: String?
+    var providerFlightId: String?
+    var providerStatus: String?
+    var airlineCode: String?
+    var flightNumber: String
+    var flightIata: String?
+    var flightIcao: String?
+    var operatingAirlineCode: String?
+    var codeshares: [String]?
+    var originAirport: String?
+    var originAirportIcao: String?
+    var destinationAirport: String?
+    var destinationAirportIcao: String?
+    var scheduledDepartureAt: String?
+    var scheduledTakeoffAt: String?
+    var scheduledLandingAt: String?
+    var scheduledArrivalAt: String?
+    var estimatedDepartureAt: String?
+    var estimatedTakeoffAt: String?
+    var estimatedLandingAt: String?
+    var estimatedArrivalAt: String?
+    var actualDepartureAt: String?
+    var actualTakeoffAt: String?
+    var actualLandingAt: String?
+    var actualArrivalAt: String?
+    var departureTerminal: String?
+    var departureGate: String?
+    var departureDelayMinutes: Int?
+    var arrivalTerminal: String?
+    var arrivalGate: String?
+    var arrivalDelayMinutes: Int?
+    var baggageClaim: String?
+    var aircraftType: String?
+    var aircraftRegistration: String?
+    var status: String
+    var delayMinutes: Int?
+    var cancellationReason: String?
+    var diversionAirport: String?
+    var inboundProviderFlightId: String?
+    var progressPercent: Double?
+    var routeDistanceNm: Double?
+    var filedAirspeedKnots: Double?
+    var filedAltitudeFeet: Double?
+    var filedRoute: String?
+    var filedEte: Int?
+    var position: FlightPosition?
+    var onTimeProbability: Double?
+    var confidence: Double
+    var sourceUpdatedAt: String?
+    var fetchedAt: String
+}
+
+struct FlightSchedule: Codable {
+    var scheduledDepartureAt: String?
+    var scheduledTakeoffAt: String?
+    var scheduledLandingAt: String?
+    var scheduledArrivalAt: String?
+    var estimatedDepartureAt: String?
+    var estimatedTakeoffAt: String?
+    var estimatedLandingAt: String?
+    var estimatedArrivalAt: String?
+    var actualDepartureAt: String?
+    var actualTakeoffAt: String?
+    var actualLandingAt: String?
+    var actualArrivalAt: String?
+}
+
+struct FlightAirportWeather: Codable {
+    var airport: String?
+    var observedAt: String?
+    var raw: String?
+    var summary: String?
+    var temperatureC: Double?
+    var wind: String?
+    var visibility: String?
+    var forecastIssuedAt: String?
+    var forecastSummary: String?
+}
+
+struct FlightDisruptionStats: Codable, Identifiable {
+    var id: String { "\(entityType)-\(entityId ?? entityName ?? "unknown")" }
+    var entityType: String
+    var entityId: String?
+    var entityName: String?
+    var cancellations: Int?
+    var delays: Int?
+    var total: Int?
+    var delayRate: Double?
+    var cancellationRate: Double?
+    var timePeriod: String
+}
+
+struct FlightRouteInsight: Codable {
+    var route: String?
+    var routeDistance: String?
+    var count: Int?
+    var aircraftTypes: [String]?
+    var filedAltitudeMinFeet: Double?
+    var filedAltitudeMaxFeet: Double?
+    var lastDepartureAt: String?
+}
+
+struct FlightIntelligence: Codable {
+    struct Weather: Codable {
+        var origin: FlightAirportWeather?
+        var destination: FlightAirportWeather?
+    }
+
+    var mode: String
+    var scheduleAvailableUntil: String?
+    var liveDataAvailableFrom: String?
+    var disruptions: [FlightDisruptionStats]
+    var history: FlightReliabilityStats?
+    var weather: Weather
+    var route: FlightRouteInsight?
+}
+
+struct FlightProviderStatus: Codable {
+    var name: String
+    var connected: Bool
+    var attribution: String
+}
+
+struct FlightLookupResponse: Codable {
+    struct Validation: Codable {
         var state: String
         var confidence: Double
         var reasons: [String]
@@ -120,22 +253,27 @@ struct FlightLookupResponse: Decodable {
 
     var validation: Validation
     var candidate: FlightLookupCandidate?
+    var snapshot: FlightSnapshot?
     var plane: FlightPlaneContext?
     var delayStats: FlightDelayStats?
     var reliability: FlightReliabilityStats?
     var gate: FlightGateStatus?
     var alerting: FlightAlertingStatus?
+    var intelligence: FlightIntelligence?
+    var schedule: FlightSchedule?
+    var nextActions: [String]?
     var warnings: [String]
+    var provider: FlightProviderStatus?
 }
 
-struct FlightDelayStats: Decodable {
+struct FlightDelayStats: Codable {
     var headline: String
     var delayMinutes: Int?
     var onTimeProbability: Double?
     var reasons: [String]
 }
 
-struct FlightReliabilityStats: Decodable {
+struct FlightReliabilityStats: Codable {
     var sampleSize: Int
     var averageDepartureDelayMinutes: Double?
     var averageArrivalDelayMinutes: Double?
@@ -145,9 +283,11 @@ struct FlightReliabilityStats: Decodable {
     var typicalDepartureGate: String?
     var typicalArrivalGate: String?
     var typicalAircraftTypes: [String]
+    var since: String?
+    var until: String?
 }
 
-struct FlightGateStatus: Decodable {
+struct FlightGateStatus: Codable {
     var departureTerminal: String?
     var departureGate: String?
     var arrivalTerminal: String?
@@ -157,12 +297,84 @@ struct FlightGateStatus: Decodable {
     var guidance: [String]
 }
 
-struct FlightAlertingStatus: Decodable {
+struct FlightAlertingStatus: Codable {
     var supported: Bool
     var source: String
     var events: [String]
     var webhookEndpoint: String
     var managementEndpoint: String
+}
+
+enum FlightLookupCache {
+    private static let schemaVersion = "flight-lookup-v1"
+
+    static func cachedResponse(for item: ItineraryItem) -> FlightLookupResponse? {
+        guard item.flightLookupCacheKey == key(for: item),
+              let rawData = item.flightLookupRawData,
+              let data = rawData.data(using: .utf8) else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(FlightLookupResponse.self, from: data)
+    }
+
+    static func freshCachedResponse(for item: ItineraryItem, now: Date = Date()) -> FlightLookupResponse? {
+        guard let expiresAt = item.flightLookupExpiresAt, expiresAt > now else {
+            return nil
+        }
+        return cachedResponse(for: item)
+    }
+
+    static func store(_ response: FlightLookupResponse, for item: ItineraryItem, now: Date = Date()) {
+        guard let data = try? JSONEncoder().encode(response),
+              let rawData = String(data: data, encoding: .utf8) else {
+            return
+        }
+
+        item.flightLookupCacheKey = key(for: item)
+        item.flightLookupRawData = rawData
+        item.flightLookupUpdatedAt = now
+        item.flightLookupExpiresAt = expirationDate(for: item, now: now)
+    }
+
+    static func clear(for item: ItineraryItem) {
+        item.flightLookupCacheKey = nil
+        item.flightLookupRawData = nil
+        item.flightLookupUpdatedAt = nil
+        item.flightLookupExpiresAt = nil
+    }
+
+    static func isFresh(for item: ItineraryItem, now: Date = Date()) -> Bool {
+        item.flightLookupCacheKey == key(for: item) && (item.flightLookupExpiresAt ?? .distantPast) > now
+    }
+
+    private static func key(for item: ItineraryItem) -> String {
+        let formatter = ISO8601DateFormatter()
+        return [
+            schemaVersion,
+            item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            item.location.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            item.startsAt.map(formatter.string(from:)) ?? ""
+        ].joined(separator: "|")
+    }
+
+    private static func expirationDate(for item: ItineraryItem, now: Date) -> Date {
+        guard let startsAt = item.startsAt else {
+            return now.addingTimeInterval(30 * 60)
+        }
+
+        let secondsUntilStart = startsAt.timeIntervalSince(now)
+        if secondsUntilStart < -12 * 60 * 60 {
+            return now.addingTimeInterval(24 * 60 * 60)
+        }
+        if secondsUntilStart <= 48 * 60 * 60 {
+            return now.addingTimeInterval(10 * 60)
+        }
+        if secondsUntilStart <= 7 * 24 * 60 * 60 {
+            return now.addingTimeInterval(60 * 60)
+        }
+        return now.addingTimeInterval(12 * 60 * 60)
+    }
 }
 
 struct VercelFlightLookupService {
@@ -180,6 +392,7 @@ struct VercelFlightLookupService {
     func lookup(
         flightNumber: String,
         date: Date?,
+        dateTimeZoneOffsetSeconds: Int? = nil,
         originAirport: String? = nil,
         destinationAirport: String? = nil
     ) async throws -> FlightLookupResponse {
@@ -197,7 +410,9 @@ struct VercelFlightLookupService {
         request.httpBody = try JSONEncoder().encode(
             FlightLookupRequest(
                 flightNumber: flightNumber.trimmingCharacters(in: .whitespacesAndNewlines),
-                date: date.map { Self.flightDateFormatter.string(from: $0) },
+                date: date.map {
+                    Self.flightDateString(from: $0, timeZoneOffsetSeconds: dateTimeZoneOffsetSeconds)
+                },
                 originAirport: originAirport?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 destinationAirport: destinationAirport?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             )
@@ -260,13 +475,14 @@ struct VercelFlightLookupService {
         return try JSONDecoder().decode(FlightLookupResponse.self, from: data)
     }
 
-    private static let flightDateFormatter: DateFormatter = {
+    private static func flightDateString(from date: Date, timeZoneOffsetSeconds: Int?) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = ItineraryDateFormatter.timeZone(offsetSeconds: timeZoneOffsetSeconds)
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+        return formatter.string(from: date)
+    }
 
     private static func flightTimestamp(from date: Date) -> String {
         let formatter = ISO8601DateFormatter()

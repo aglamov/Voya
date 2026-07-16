@@ -85,9 +85,21 @@ struct ImportOption: View {
 
 struct ImportActionTile: View {
     let symbol: String
-    let title: LocalizedStringKey
-    let subtitle: LocalizedStringKey
+    let title: LocalizedStringResource
+    let subtitle: LocalizedStringResource
     let tint: Color
+
+    nonisolated init(
+        symbol: String,
+        title: LocalizedStringResource,
+        subtitle: LocalizedStringResource,
+        tint: Color
+    ) {
+        self.symbol = symbol
+        self.title = title
+        self.subtitle = subtitle
+        self.tint = tint
+    }
 
     var body: some View {
         VStack(spacing: 9) {
@@ -611,6 +623,7 @@ struct ExtractionReview: View {
     let onAddItem: () -> Void
     let onDeleteItem: (ItineraryItem) -> Void
     let onConfirm: () -> Void
+    @State private var didReviewUncertainDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -619,9 +632,9 @@ struct ExtractionReview: View {
                     Text("Ready to review")
                         .font(.title3.bold())
                         .foregroundStyle(Color.voyaInk)
-                    Text("\(preview.type) · \(Int(preview.confidence * 100))% confidence")
+                    Text("\(preview.type) · \(confidenceLabel)")
                         .font(.subheadline)
-                        .foregroundStyle(Color.voyaMuted)
+                        .foregroundStyle(requiresExplicitReview ? Color.voyaCoral : Color.voyaMuted)
                 }
 
                 Spacer()
@@ -649,12 +662,12 @@ struct ExtractionReview: View {
                     ForEach(preview.warnings, id: \.self) { warning in
                         Label(warning, systemImage: "exclamationmark.triangle.fill")
                             .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Color.voyaGold)
+                            .foregroundStyle(requiresExplicitReview ? Color.voyaCoral : Color.voyaGold)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(12)
-                .background(Color.voyaGold.opacity(0.10))
+                .background((requiresExplicitReview ? Color.voyaCoral : Color.voyaGold).opacity(0.10))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
@@ -699,6 +712,24 @@ struct ExtractionReview: View {
             }
             .buttonStyle(.plain)
 
+            if requiresExplicitReview {
+                Toggle(isOn: $didReviewUncertainDetails) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("I checked the uncertain details")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                        Text("Confirm dates, places, flight numbers, and booking details before saving.")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(Color.voyaTeal)
+                .padding(12)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+
             Button(action: onConfirm) {
                 Label(confirmButtonTitle, systemImage: isConfirming ? "airplane.circle" : "checkmark")
                     .font(.subheadline.weight(.semibold))
@@ -707,11 +738,11 @@ struct ExtractionReview: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
                     .foregroundStyle(.white)
-                    .background(preview.items.isEmpty || isConfirming ? Color.voyaMuted : Color.voyaInk)
+                    .background(!canConfirm ? Color.voyaMuted : Color.voyaInk)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(preview.items.isEmpty || isConfirming)
+            .disabled(!canConfirm)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -726,12 +757,43 @@ struct ExtractionReview: View {
             return String(localized: "Checking flights")
         }
 
+        if requiresExplicitReview && !didReviewUncertainDetails {
+            return String(localized: "Review highlighted details")
+        }
+
         switch destination {
         case .newTrip:
             return String(localized: "Create new trip")
         case .existing:
             return String(localized: "Save to trip")
         }
+    }
+
+    private var requiresExplicitReview: Bool {
+        preview.confidence < 0.7 || !preview.warnings.isEmpty || preview.items.contains(where: needsReview)
+    }
+
+    private var canConfirm: Bool {
+        !preview.items.isEmpty
+            && !isConfirming
+            && (!requiresExplicitReview || didReviewUncertainDetails)
+    }
+
+    private var confidenceLabel: String {
+        let percent = Int((preview.confidence * 100).rounded())
+        if preview.confidence >= 0.85 {
+            return String(localized: "High confidence · \(percent)%")
+        }
+        if preview.confidence >= 0.7 {
+            return String(localized: "Check a few details · \(percent)%")
+        }
+        return String(localized: "Review required · \(percent)%")
+    }
+
+    private func needsReview(_ item: ItineraryItem) -> Bool {
+        let combined = "\(item.title) \(item.location) \(item.status)".lowercased()
+        let placeholders = ["needed", "unknown", "review", "неизвест", "нужно", "провер"]
+        return item.startsAt == nil || placeholders.contains(where: combined.contains)
     }
 }
 
@@ -784,7 +846,7 @@ struct ImportTripDestinationPicker: View {
     }
 
     private func optionTitle(for trip: Trip) -> String {
-        let dates = trip.dates.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dates = trip.displayDates.trimmingCharacters(in: .whitespacesAndNewlines)
         let suffix = trip.id == suggestedTripID ? String(localized: "Suggested") : dates
         return suffix.isEmpty ? trip.title : "\(trip.title) · \(suffix)"
     }
@@ -920,6 +982,7 @@ struct EditableItineraryItem: View {
 
                 if draft.hasStartDate {
                     dateTimePickerRow("Start", selection: $draft.startsAt)
+                        .environment(\.timeZone, draft.startTimeZone)
 
                     Toggle("End time", isOn: $draft.hasEndDate)
                         .font(.subheadline.weight(.medium))
@@ -928,6 +991,7 @@ struct EditableItineraryItem: View {
 
                     if draft.hasEndDate {
                         dateTimePickerRow("End", selection: $draft.endsAt, range: draft.startsAt...)
+                            .environment(\.timeZone, draft.endTimeZone)
                     }
                 }
             }

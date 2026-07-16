@@ -10,7 +10,7 @@ struct VercelExtractionRequest: Encodable {
     let languageName: String
 }
 
-struct VercelExtractionResponse: Decodable {
+struct VercelExtractionResponse: Codable {
     let type: String
     let title: String
     let normalizedDestination: String?
@@ -20,7 +20,7 @@ struct VercelExtractionResponse: Decodable {
     let warnings: [String]
 }
 
-struct VercelItineraryItem: Decodable {
+struct VercelItineraryItem: Codable {
     let kind: String
     let title: String
     let time: String?
@@ -41,6 +41,8 @@ struct VercelItineraryItem: Decodable {
             status: status,
             startsAt: parsedStartsAt,
             endsAt: parsedEndsAt,
+            startsAtTimeZoneOffsetSeconds: ItineraryDateParser.timeZoneOffsetSeconds(from: startsAt),
+            endsAtTimeZoneOffsetSeconds: ItineraryDateParser.timeZoneOffsetSeconds(from: endsAt),
             confirmationCode: confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             providerName: providerName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         )

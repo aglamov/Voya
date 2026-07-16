@@ -94,6 +94,7 @@ struct EditItineraryItemView: View {
                                 DatePicker("Start", selection: $draft.startsAt, displayedComponents: [.date, .hourAndMinute])
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(Color.voyaInk)
+                                    .environment(\.timeZone, draft.startTimeZone)
 
                                 Toggle("End time", isOn: $draft.hasEndDate)
                                     .font(.subheadline.weight(.medium))
@@ -104,6 +105,7 @@ struct EditItineraryItemView: View {
                                     DatePicker("End", selection: $draft.endsAt, in: draft.startsAt..., displayedComponents: [.date, .hourAndMinute])
                                         .font(.subheadline.weight(.medium))
                                         .foregroundStyle(Color.voyaInk)
+                                        .environment(\.timeZone, draft.endTimeZone)
                                 }
                             }
                         }
@@ -272,7 +274,11 @@ struct EditItineraryItemView: View {
         defer { isFlightLookupLoading = false }
 
         do {
-            let response = try await VercelFlightLookupService().lookup(flightNumber: flightNumber, date: draft.startsAt)
+            let response = try await VercelFlightLookupService().lookup(
+                flightNumber: flightNumber,
+                date: draft.startsAt,
+                dateTimeZoneOffsetSeconds: draft.startsAtTimeZoneOffsetSeconds
+            )
             flightLookupResult = response
             if response.candidate == nil {
                 flightLookupMessage = response.warnings.first ?? response.validation.reasons.first ?? String(localized: "No matching flight found for this date.")
@@ -294,11 +300,13 @@ struct EditItineraryItemView: View {
         if let departure = candidate.parsedDepartureAt {
             draft.hasStartDate = true
             draft.startsAt = departure
+            draft.startsAtTimeZoneOffsetSeconds = candidate.departureTimeZoneOffsetSeconds
         }
 
         if let arrival = candidate.parsedArrivalAt {
             draft.hasEndDate = true
             draft.endsAt = arrival
+            draft.endsAtTimeZoneOffsetSeconds = candidate.arrivalTimeZoneOffsetSeconds
         }
 
         flightLookupMessage = String(localized: "Flight details applied.")
@@ -310,7 +318,14 @@ struct EditItineraryItemView: View {
             parts.append(candidate.routeText)
         }
         if let departure = candidate.parsedDepartureAt {
-            parts.append(ItineraryDateFormatter.displayTime(start: departure, end: candidate.parsedArrivalAt))
+            parts.append(
+                ItineraryDateFormatter.displayTime(
+                    start: departure,
+                    end: candidate.parsedArrivalAt,
+                    startTimeZoneOffsetSeconds: candidate.departureTimeZoneOffsetSeconds,
+                    endTimeZoneOffsetSeconds: candidate.arrivalTimeZoneOffsetSeconds
+                )
+            )
         }
         if let duration = candidate.durationMinutes {
             parts.append(Self.durationText(minutes: duration))

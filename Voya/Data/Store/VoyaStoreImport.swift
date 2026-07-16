@@ -391,16 +391,20 @@ extension VoyaStore {
                 }
 
                 let candidate: FlightLookupCandidate?
+                let lookupResponse: FlightLookupResponse?
                 do {
                     let response = try await service.lookup(
                         flightNumber: flightNumber,
                         date: referenceDate,
+                        dateTimeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds,
                         originAirport: route?.origin,
                         destinationAirport: route?.destination
                     )
                     candidate = response.candidate ?? discoveredCandidate
+                    lookupResponse = response
                 } catch {
                     candidate = discoveredCandidate
+                    lookupResponse = nil
                 }
 
                 guard let candidate else {
@@ -409,6 +413,9 @@ extension VoyaStore {
 
                 if apply(candidate, toImportedFlight: item) {
                     updatedCount += 1
+                }
+                if let lookupResponse {
+                    FlightLookupCache.store(lookupResponse, for: item)
                 }
             } catch {
                 continue
@@ -437,22 +444,37 @@ extension VoyaStore {
             didChange = true
         }
 
-        if let departure = candidate.parsedDepartureAt,
-           item.startsAt == nil || abs(departure.timeIntervalSince(item.startsAt ?? departure)) > 60 {
+        if item.startsAt == nil,
+           let departure = candidate.parsedDepartureAt {
             item.startsAt = departure
+            item.startsAtTimeZoneOffsetSeconds = candidate.departureTimeZoneOffsetSeconds
+            didChange = true
+        }
+        if item.startsAt != nil,
+           let offset = candidate.departureTimeZoneOffsetSeconds,
+           item.startsAtTimeZoneOffsetSeconds == nil {
+            item.startsAtTimeZoneOffsetSeconds = offset
             didChange = true
         }
 
-        if let arrival = candidate.parsedArrivalAt,
-           item.endsAt == nil || abs(arrival.timeIntervalSince(item.endsAt ?? arrival)) > 60 {
+        if item.endsAt == nil,
+           let arrival = candidate.parsedArrivalAt {
             item.endsAt = arrival
+            item.endsAtTimeZoneOffsetSeconds = candidate.arrivalTimeZoneOffsetSeconds
+            didChange = true
+        }
+        if item.endsAt != nil,
+           let offset = candidate.arrivalTimeZoneOffsetSeconds,
+           item.endsAtTimeZoneOffsetSeconds == nil {
+            item.endsAtTimeZoneOffsetSeconds = offset
             didChange = true
         }
 
         let status = enrichedFlightStatus(from: candidate)
         if item.status.localizedCaseInsensitiveContains("needs")
-            || item.status.localizedCaseInsensitiveContains("terminal")
-            || item.status.localizedCaseInsensitiveContains("confirmed") {
+            || item.status.localizedCaseInsensitiveContains("unknown")
+            || item.status.localizedCaseInsensitiveContains("review")
+            || item.status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if item.status != status {
                 item.status = status
                 didChange = true

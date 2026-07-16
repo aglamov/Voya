@@ -51,8 +51,15 @@ struct ContentView: View {
                let tripID = UUID(uuidString: rawTripID),
                store.trips.contains(where: { $0.id == tripID }) {
                 store.selectedTripID = tripID
+            } else if let rawItemID = notification.userInfo?["itemID"] as? String,
+                      let itemID = UUID(uuidString: rawItemID),
+                      let trip = store.trips.first(where: { trip in trip.items.contains(where: { $0.id == itemID }) }) {
+                store.selectedTripID = trip.id
             } else {
                 _ = store.selectCurrentTripIfAvailable()
+            }
+            if let rawItemID = notification.userInfo?["itemID"] as? String {
+                store.notificationItemID = UUID(uuidString: rawItemID)
             }
         }
     }
