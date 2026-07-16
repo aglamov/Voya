@@ -74,7 +74,7 @@ struct AssistantIntelligence {
         homeLocationAddress: String
     ) -> String {
         [
-            "assistant-staged-sources-v4",
+            "assistant-flight-insights-v5",
             trip?.id.uuidString ?? "no-trip",
             trip?.updatedAt.timeIntervalSince1970.description ?? "0",
             itinerary.map { "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSince1970)" }.joined(separator: "|"),
@@ -530,6 +530,9 @@ struct AssistantIntelligenceBuilder {
                 }
 
                 alerts.append(flightAlert(for: item, candidate: candidate))
+                if let reliability = response.reliability {
+                    alerts.append(flightReliabilityAlert(for: item, candidate: candidate, reliability: reliability))
+                }
                 if let plane = response.plane {
                     alerts.append(flightPlaneAlert(for: item, candidate: candidate, plane: plane))
                 }
@@ -551,8 +554,8 @@ struct AssistantIntelligenceBuilder {
                 ? String(localized: "Check \(flightNumber) closer to departure")
                 : String(localized: "Live status for \(flightNumber) will appear later"),
             message: isNearDeparture
-                ? String(localized: "The live provider has not confirmed this flight yet. Keep the saved booking and check the airline before leaving for the airport.")
-                : String(localized: "The flight is saved. Live terminal, gate, and delay information normally becomes useful closer to departure."),
+                ? String(localized: "The live provider has not confirmed this flight yet. Check the airline before leaving for the airport; aircraft assignment and position will appear here when available.")
+                : String(localized: "The flight is saved. Live terminal, gate, delay, aircraft assignment, and position normally become available closer to departure."),
             severity: isNearDeparture ? .watch : .calm,
             sourceTitle: String(localized: "Flight lookup"),
             sourceDetail: String(localized: "Live provider data is not available for this flight window yet.")
@@ -617,18 +620,95 @@ struct AssistantIntelligenceBuilder {
             plane.aircraftType?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         ].compactMap { $0 }.joined(separator: " · ")
 
-        let message = [plane.detail, aircraft.nilIfEmpty]
+        let message = [planeLocationDescription(plane), aircraft.nilIfEmpty]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
             .joined(separator: " · ")
 
+        let mapURL = plane.position.flatMap { position in
+            URL(string: "https://maps.apple.com/?ll=\(position.lat),\(position.lon)")
+        }
+
         return TravelAlert(
             id: "flight-plane-\(item.id.uuidString)",
-            title: String(localized: "\(candidate.flightNumber): \(plane.headline)"),
+            title: String(localized: "\(candidate.flightNumber): \(planeHeadline(plane))"),
             message: message.isEmpty ? String(localized: "Aircraft assignment and live position will appear closer to departure.") : message,
             severity: severity,
             sourceTitle: String(localized: "Flight lookup"),
-            sourceDetail: String(localized: "\(Int(plane.confidence * 100))% aircraft context confidence.")
+            sourceDetail: String(localized: "\(Int(plane.confidence * 100))% aircraft context confidence."),
+            actionURL: mapURL
         )
+    }
+
+    private func flightReliabilityAlert(
+        for item: ItineraryItem,
+        candidate: FlightLookupCandidate,
+        reliability: FlightReliabilityStats
+    ) -> TravelAlert {
+        let delayedPercent = reliability.delayed15Rate.map { Int(($0 * 100).rounded()) }
+        var details: [String] = [String(localized: "Based on \(reliability.sampleSize) recent flights")]
+        if let delayedPercent {
+            details.append(String(localized: "\(delayedPercent)% were delayed by 15 minutes or more"))
+        }
+        if let average = reliability.averageArrivalDelayMinutes {
+            details.append(String(localized: "Average arrival delay \(Int(average.rounded())) min"))
+        } else if let average = reliability.averageDepartureDelayMinutes {
+            details.append(String(localized: "Average departure delay \(Int(average.rounded())) min"))
+        }
+        if reliability.cancelledCount > 0 {
+            details.append(String(localized: "\(reliability.cancelledCount) cancelled"))
+        }
+
+        let severity: AlertSeverity = (reliability.delayed15Rate ?? 0) >= 0.35 || reliability.cancelledCount > 0
+            ? .watch
+            : .calm
+
+        return TravelAlert(
+            id: "flight-reliability-\(item.id.uuidString)",
+            title: delayedPercent.map {
+                String(localized: "\(candidate.flightNumber): delayed in \($0)% of recent flights")
+            } ?? String(localized: "\(candidate.flightNumber): recent punctuality"),
+            message: details.joined(separator: " · "),
+            severity: severity,
+            sourceTitle: String(localized: "Flight history"),
+            sourceDetail: String(localized: "Calculated from recent flights with the same flight number and available route match.")
+        )
+    }
+
+    private func planeHeadline(_ plane: FlightPlaneContext) -> String {
+        switch plane.state {
+        case "current_airborne": return String(localized: "Your flight is airborne")
+        case "current_arrived": return String(localized: "Your flight has arrived")
+        case "inbound_airborne": return String(localized: "The aircraft is flying to your departure airport")
+        case "inbound_arrived": return String(localized: "The aircraft has arrived for your flight")
+        case "inbound_scheduled": return String(localized: "The aircraft has a flight before yours")
+        case "assigned": return String(localized: "Aircraft assigned")
+        case "not_assigned": return String(localized: "Aircraft not assigned yet")
+        default: return String(localized: "Aircraft position is not available yet")
+        }
+    }
+
+    private func planeLocationDescription(_ plane: FlightPlaneContext) -> String {
+        var details: [String] = []
+        if let inbound = plane.inboundFlight {
+            let route = [inbound.originAirport, inbound.destinationAirport]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+                .joined(separator: " → ")
+            if !route.isEmpty {
+                details.append(String(localized: "Previous segment: \(route)"))
+            }
+        }
+        if let progress = plane.progressPercent {
+            details.append(String(localized: "\(Int(progress.rounded()))% of the flight completed"))
+        }
+        if let position = plane.position {
+            if let altitude = position.altitudeFeet {
+                details.append(String(localized: "Altitude \(Int(altitude.rounded())) ft"))
+            }
+            details.append(String(localized: "Live position is available on the map"))
+        } else {
+            details.append(String(localized: "Live coordinates are not available yet"))
+        }
+        return details.joined(separator: " · ")
     }
 
     private func mobilityAlerts(

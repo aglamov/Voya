@@ -9,6 +9,7 @@ struct TravelAlert: Identifiable {
     let severity: AlertSeverity
     let sourceTitle: String?
     let sourceDetail: String?
+    let actionURL: URL?
 
     init(
         id: String = UUID().uuidString,
@@ -16,7 +17,8 @@ struct TravelAlert: Identifiable {
         message: String,
         severity: AlertSeverity,
         sourceTitle: String? = nil,
-        sourceDetail: String? = nil
+        sourceDetail: String? = nil,
+        actionURL: URL? = nil
     ) {
         self.id = id
         self.title = title
@@ -24,6 +26,7 @@ struct TravelAlert: Identifiable {
         self.severity = severity
         self.sourceTitle = sourceTitle
         self.sourceDetail = sourceDetail
+        self.actionURL = actionURL
     }
 }
 

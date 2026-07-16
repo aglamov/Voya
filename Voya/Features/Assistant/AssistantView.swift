@@ -95,6 +95,14 @@ struct AssistantView: View {
         store.refreshingAssistantIntelligenceKeys.contains(intelligenceRefreshID)
     }
 
+    private var flightInsights: [TravelAlert] {
+        intelligence.alerts.filter {
+            $0.id.hasPrefix("flight-reliability-")
+                || $0.id.hasPrefix("flight-plane-")
+                || $0.id.hasPrefix("flight-status-pending-")
+        }
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
@@ -138,6 +146,10 @@ struct AssistantView: View {
 
                 if !isRefreshingIntelligence && !intelligence.isPlaceholder {
                     AssistantWeatherPrepCard(weather: intelligence.weather)
+
+                    if !flightInsights.isEmpty {
+                        AssistantFlightInsightsCard(insights: flightInsights)
+                    }
 
                     AssistantTripRisksCard(
                         alerts: intelligence.alerts,
@@ -586,6 +598,75 @@ struct AssistantSourcesProcessingCard: View {
     }
 }
 
+struct AssistantFlightInsightsCard: View {
+    let insights: [TravelAlert]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "airplane.circle.fill")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Color.voyaSky)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Flight reliability and aircraft")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text("Recent punctuality and the assigned aircraft")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+            }
+
+            VStack(spacing: 0) {
+                ForEach(Array(insights.enumerated()), id: \.element.id) { index, insight in
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(alignment: .top, spacing: 9) {
+                            Image(systemName: insight.id.hasPrefix("flight-plane-") ? "location.fill" : "chart.bar.fill")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(insight.severity.color)
+                                .frame(width: 28, height: 28)
+                                .background(insight.severity.color.opacity(0.10))
+                                .clipShape(Circle())
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(insight.title)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(Color.voyaInk)
+                                Text(insight.message)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Color.voyaMuted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        if let url = insight.actionURL {
+                            Link(destination: url) {
+                                Label("Show aircraft on map", systemImage: "map.fill")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(Color.voyaSky)
+                            }
+                            .padding(.leading, 37)
+                        }
+                    }
+                    .padding(.vertical, 11)
+
+                    if index < insights.count - 1 {
+                        Divider().padding(.leading, 37)
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+}
+
 struct AssistantTripRisksCard: View {
     let alerts: [TravelAlert]
     let aiAdvice: AssistantAIAdvice?
@@ -668,6 +749,11 @@ struct AssistantTripRisksCard: View {
 
         return (alerts + aiRisks)
             .filter { $0.severity != .calm }
+            .filter {
+                !$0.id.hasPrefix("flight-plane-")
+                    && !$0.id.hasPrefix("flight-reliability-")
+                    && !$0.id.hasPrefix("flight-status-pending-")
+            }
             .filter { alert in
                 let key = alert.title
                     .lowercased()
