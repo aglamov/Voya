@@ -714,6 +714,7 @@ struct ExtractionReview: View {
             .disabled(preview.items.isEmpty || isConfirming)
         }
         .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.white)
         .foregroundStyle(Color.voyaInk)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -950,6 +951,7 @@ struct EditableItineraryItem: View {
             .padding(.top, 2)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onChange(of: draft.kind) { _, _ in commitDraft() }
@@ -980,38 +982,56 @@ struct EditableItineraryItem: View {
         selection: Binding<Date>,
         range: PartialRangeFrom<Date>? = nil
     ) -> some View {
-        HStack(spacing: 10) {
-            Text(label)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Color.voyaInk)
-                .frame(width: 82, alignment: .leading)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                dateTimePickerLabel(label)
+                    .frame(width: 82, alignment: .leading)
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
 
-            HStack(spacing: 8) {
-                if let range {
-                    DatePicker("", selection: selection, in: range, displayedComponents: [.date])
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
-                        .frame(minWidth: 128)
-                    DatePicker("", selection: selection, in: range, displayedComponents: [.hourAndMinute])
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
-                        .frame(minWidth: 100)
-                } else {
-                    DatePicker("", selection: selection, displayedComponents: [.date])
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
-                        .frame(minWidth: 128)
-                    DatePicker("", selection: selection, displayedComponents: [.hourAndMinute])
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
-                        .frame(minWidth: 100)
-                }
+                dateTimePickerControls(selection: selection, range: range)
             }
+
+            VStack(alignment: .leading, spacing: 8) {
+                dateTimePickerLabel(label)
+
+                dateTimePickerControls(selection: selection, range: range)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+    }
+
+    private func dateTimePickerLabel(_ label: LocalizedStringKey) -> some View {
+        Text(label)
             .font(.subheadline.weight(.medium))
             .foregroundStyle(Color.voyaInk)
+    }
+
+    @ViewBuilder
+    private func dateTimePickerControls(
+        selection: Binding<Date>,
+        range: PartialRangeFrom<Date>?
+    ) -> some View {
+        HStack(spacing: 8) {
+            if let range {
+                DatePicker("", selection: selection, in: range, displayedComponents: [.date])
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+                DatePicker("", selection: selection, in: range, displayedComponents: [.hourAndMinute])
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+            } else {
+                DatePicker("", selection: selection, displayedComponents: [.date])
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+                DatePicker("", selection: selection, displayedComponents: [.hourAndMinute])
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+            }
         }
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(Color.voyaInk)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func commitDraft() {
