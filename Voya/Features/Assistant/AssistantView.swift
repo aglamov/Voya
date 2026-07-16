@@ -25,6 +25,7 @@ struct AssistantView: View {
     @State private var isAnsweringQuestion = false
     @State private var focusedItemID: UUID?
     @State private var processingStage: AssistantProcessingStage = .local
+    @State private var progressiveFlightInsights: [TravelAlert] = []
 
     private var trip: Trip? {
         store.currentOrUpcomingTrip ?? store.selectedTrip
@@ -96,10 +97,23 @@ struct AssistantView: View {
     }
 
     private var flightInsights: [TravelAlert] {
-        intelligence.alerts.filter {
+        let source = isRefreshingIntelligence
+            ? progressiveFlightInsights
+            : intelligence.alerts.filter {
             $0.id.hasPrefix("flight-reliability-")
                 || $0.id.hasPrefix("flight-plane-")
                 || $0.id.hasPrefix("flight-status-pending-")
+        }
+
+        let pendingItemIDs = Set(source.compactMap { insight -> String? in
+            guard insight.id.hasPrefix("flight-status-pending-") else { return nil }
+            return String(insight.id.dropFirst("flight-status-pending-".count))
+        })
+
+        return source.filter { insight in
+            guard insight.id.hasPrefix("flight-plane-") else { return true }
+            let itemID = String(insight.id.dropFirst("flight-plane-".count))
+            return !pendingItemIDs.contains(itemID)
         }
     }
 
@@ -138,6 +152,10 @@ struct AssistantView: View {
                     )
                 }
 
+                if !flightInsights.isEmpty {
+                    AssistantFlightInsightsCard(insights: flightInsights)
+                }
+
                 AssistantSourcesProcessingCard(
                     stage: processingStage,
                     isProcessing: isRefreshingIntelligence || (trip != nil && intelligence.isPlaceholder),
@@ -146,10 +164,6 @@ struct AssistantView: View {
 
                 if !isRefreshingIntelligence && !intelligence.isPlaceholder {
                     AssistantWeatherPrepCard(weather: intelligence.weather)
-
-                    if !flightInsights.isEmpty {
-                        AssistantFlightInsightsCard(insights: flightInsights)
-                    }
 
                     AssistantTripRisksCard(
                         alerts: intelligence.alerts,
@@ -338,6 +352,7 @@ struct AssistantView: View {
         let builder = AssistantIntelligenceBuilder(store: store)
         intelligence = builder.localSnapshot(trip: trip, itinerary: itinerary)
         processingStage = .local
+        progressiveFlightInsights = []
 
         guard !store.refreshingAssistantIntelligenceKeys.contains(cacheKey) else {
             return
@@ -356,6 +371,9 @@ struct AssistantView: View {
             modelContext: modelContext,
             onProgress: { stage in
                 processingStage = stage
+            },
+            onFlightInsights: { insights in
+                progressiveFlightInsights = insights
             }
         )
         store.assistantIntelligenceCache[cacheKey] = refreshed

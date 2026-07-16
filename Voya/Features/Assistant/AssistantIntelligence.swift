@@ -74,7 +74,7 @@ struct AssistantIntelligence {
         homeLocationAddress: String
     ) -> String {
         [
-            "assistant-independent-flight-history-v6",
+            "assistant-progressive-flight-data-v7",
             trip?.id.uuidString ?? "no-trip",
             trip?.updatedAt.timeIntervalSince1970.description ?? "0",
             itinerary.map { "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSince1970)" }.joined(separator: "|"),
@@ -176,7 +176,8 @@ struct AssistantIntelligenceBuilder {
         homeLocationName: String,
         homeLocationAddress: String,
         modelContext: ModelContext?,
-        onProgress: ((AssistantProcessingStage) -> Void)? = nil
+        onProgress: ((AssistantProcessingStage) -> Void)? = nil,
+        onFlightInsights: (([TravelAlert]) -> Void)? = nil
     ) async -> AssistantIntelligence {
         guard let trip else {
             return .empty
@@ -229,6 +230,13 @@ struct AssistantIntelligenceBuilder {
         for alert in flightAlerts {
             append(alert)
         }
+        onFlightInsights?(
+            flightAlerts.filter {
+                $0.id.hasPrefix("flight-reliability-")
+                    || $0.id.hasPrefix("flight-plane-")
+                    || $0.id.hasPrefix("flight-status-pending-")
+            }
+        )
 
         onProgress?(.routes)
         let transferAlerts = await mobilityAlerts(
@@ -668,9 +676,7 @@ struct AssistantIntelligenceBuilder {
 
         return TravelAlert(
             id: "flight-reliability-\(item.id.uuidString)",
-            title: delayedPercent.map {
-                String(localized: "\(flightNumber): delayed in \($0)% of recent flights")
-            } ?? String(localized: "\(flightNumber): recent punctuality"),
+            title: String(localized: "\(flightNumber): delay history"),
             message: details.joined(separator: " · "),
             severity: severity,
             sourceTitle: String(localized: "Flight history"),
