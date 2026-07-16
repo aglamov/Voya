@@ -12,6 +12,8 @@ struct AssistantAIAdvice: Codable {
     var nextItemDescription: String?
     var riskOverview: String?
     var additionalRisks: [AssistantAIRisk]?
+    var suggestedQuestions: [String]?
+    var answerSources: [String]?
     var confidence: Double
     var usedAI: Bool
 }
@@ -32,6 +34,11 @@ struct AssistantAIRisk: Codable {
     var severity: String
 }
 
+struct AssistantConversationTurn: Codable, Hashable {
+    var role: String
+    var content: String
+}
+
 struct AssistantAIRequest: Encodable {
     var locale: String
     var languageCode: String
@@ -39,11 +46,14 @@ struct AssistantAIRequest: Encodable {
     var question: String?
     var trip: TripContext
     var assessment: AssessmentContext
+    var journey: JourneyContext
     var nextItem: ItineraryItemContext?
     var itinerary: [ItineraryItemContext]
     var alerts: [AlertContext]
     var weather: WeatherContext
+    var environment: [EnvironmentContext]
     var sources: [SourceContext]
+    var conversation: [AssistantConversationTurn]
 
     struct TripContext: Encodable {
         var title: String
@@ -55,9 +65,7 @@ struct AssistantAIRequest: Encodable {
         var notes: String?
         var sourceName: String
         var startLocationName: String?
-        var startLocationAddress: String?
         var endLocationName: String?
-        var endLocationAddress: String?
     }
 
     struct AssessmentContext: Encodable {
@@ -68,6 +76,20 @@ struct AssistantAIRequest: Encodable {
         var actionCount: Int
     }
 
+    struct JourneyContext: Encodable {
+        var phase: String
+        var phaseLabel: String
+        var title: String
+        var detail: String
+        var progress: Double
+        var completedItems: Int
+        var totalItems: Int
+        var location: String?
+        var status: String?
+        var timeSummary: String?
+        var timingContext: String?
+    }
+
     struct ItineraryItemContext: Encodable {
         var kind: String
         var title: String
@@ -75,10 +97,9 @@ struct AssistantAIRequest: Encodable {
         var status: String
         var startsAt: Date?
         var endsAt: Date?
-        var confirmationCode: String?
         var providerName: String?
         var sourceName: String?
-        var extractedBookingData: String?
+        var hasConfirmationCode: Bool
         var hasBoardingPass: Bool
         var hasSourceDocument: Bool
     }
@@ -96,6 +117,14 @@ struct AssistantAIRequest: Encodable {
         var summary: String
         var recommendation: String
         var items: [String]
+        var severity: String
+    }
+
+    struct EnvironmentContext: Encodable {
+        var kind: String
+        var title: String
+        var value: String
+        var detail: String?
         var severity: String
     }
 

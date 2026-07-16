@@ -3,15 +3,19 @@ import SwiftData
 import SwiftUI
 
 struct AssistantIntelligence {
+    var journey: AssistantJourneyStage
     var assessment: AssistantTripAssessment
     var alerts: [TravelAlert]
     var weather: AssistantWeatherPreparation
+    var environment: [AssistantEnvironmentSignal]
+    var recommendations: [AssistantRecommendation]
     var sources: [AssistantSourceSummary]
     var aiAdvice: AssistantAIAdvice?
     var generatedAt: Date
     var isPlaceholder: Bool
 
     static let empty = AssistantIntelligence(
+        journey: .empty,
         assessment: AssistantTripAssessment(
             score: 0,
             title: String(localized: "No active trip"),
@@ -23,6 +27,8 @@ struct AssistantIntelligence {
         ),
         alerts: [],
         weather: .empty,
+        environment: [],
+        recommendations: [],
         sources: [],
         aiAdvice: nil,
         generatedAt: Date(),
@@ -42,6 +48,7 @@ struct AssistantIntelligence {
         let score = itinerary.isEmpty ? 35 : max(55, 82 - missingRequiredFields * 9)
 
         return AssistantIntelligence(
+            journey: AssistantJourneyStage.make(trip: trip, itinerary: itinerary),
             assessment: AssistantTripAssessment(
                 score: score,
                 title: String(localized: "\(trip.title) support is updating"),
@@ -60,6 +67,8 @@ struct AssistantIntelligence {
                 severity: .watch,
                 sourceDetail: nil
             ),
+            environment: [],
+            recommendations: [],
             sources: [],
             aiAdvice: nil,
             generatedAt: Date(),
@@ -105,6 +114,272 @@ struct AssistantIntelligence {
         }
         return 6 * 60 * 60
     }
+}
+
+enum AssistantJourneyPhase: String {
+    case planning
+    case preparing
+    case active
+    case between
+    case completed
+
+    var symbol: String {
+        switch self {
+        case .planning: "list.bullet.clipboard"
+        case .preparing: "clock.badge.checkmark"
+        case .active: "location.fill.viewfinder"
+        case .between: "arrow.trianglehead.swap"
+        case .completed: "checkmark.seal.fill"
+        }
+    }
+}
+
+struct AssistantJourneyStage {
+    var phase: AssistantJourneyPhase
+    var phaseLabel: String
+    var title: String
+    var detail: String
+    var currentItemID: UUID?
+    var nextItemID: UUID?
+    var focusItemID: UUID?
+    var itemKind: ItineraryKind?
+    var progress: Double
+    var completedItems: Int
+    var totalItems: Int
+    var location: String?
+    var status: String?
+    var timeSummary: String?
+    var timingContext: String?
+
+    static let empty = AssistantJourneyStage(
+        phase: .planning,
+        phaseLabel: String(localized: "Planning"),
+        title: String(localized: "Add a trip to begin"),
+        detail: String(localized: "Voya will track each stage once itinerary items are available."),
+        currentItemID: nil,
+        nextItemID: nil,
+        focusItemID: nil,
+        itemKind: nil,
+        progress: 0,
+        completedItems: 0,
+        totalItems: 0,
+        location: nil,
+        status: nil,
+        timeSummary: nil,
+        timingContext: nil
+    )
+
+    static func make(trip: Trip, itinerary: [ItineraryItem], now: Date = Date()) -> AssistantJourneyStage {
+        let sorted = itinerary.sorted { lhs, rhs in
+            switch (lhs.startsAt, rhs.startsAt) {
+            case let (left?, right?): left < right
+            case (_?, nil): true
+            case (nil, _?): false
+            case (nil, nil): lhs.createdAt < rhs.createdAt
+            }
+        }
+        let timed = sorted.filter { $0.startsAt != nil }
+        let undated = sorted.filter { $0.startsAt == nil }
+
+        guard !timed.isEmpty else {
+            let focus = undated.first
+            return AssistantJourneyStage(
+                phase: .planning,
+                phaseLabel: String(localized: "Planning"),
+                title: focus?.title ?? String(localized: "Build the itinerary"),
+                detail: undated.isEmpty
+                    ? String(localized: "Import bookings so Voya can identify the current stage and prepare recommendations.")
+                    : String(localized: "Add dates and places to turn saved bookings into a live journey."),
+                currentItemID: nil,
+                nextItemID: focus?.id,
+                focusItemID: focus?.id,
+                itemKind: focus?.kind,
+                progress: 0,
+                completedItems: 0,
+                totalItems: sorted.count,
+                location: clean(focus?.location),
+                status: clean(focus?.status),
+                timeSummary: focus?.displayTime,
+                timingContext: String(localized: "Timing is still needed")
+            )
+        }
+
+        let current = timed.last { item in
+            guard let start = item.startsAt else { return false }
+            return start <= now && effectiveEnd(for: item, start: start) >= now
+        }
+        let previous = timed.last { item in
+            guard let start = item.startsAt else { return false }
+            return effectiveEnd(for: item, start: start) < now
+        }
+        let next = timed.first { ($0.startsAt ?? .distantPast) > now }
+        let completed = timed.filter { item in
+            guard let start = item.startsAt else { return false }
+            return effectiveEnd(for: item, start: start) < now
+        }.count
+
+        if let current {
+            let nextAfterCurrent = timed.first { ($0.startsAt ?? .distantPast) > (current.startsAt ?? now) && $0.id != current.id }
+            return AssistantJourneyStage(
+                phase: .active,
+                phaseLabel: activeLabel(for: current.kind),
+                title: current.title,
+                detail: activeGuidance(for: current.kind),
+                currentItemID: current.id,
+                nextItemID: nextAfterCurrent?.id,
+                focusItemID: current.id,
+                itemKind: current.kind,
+                progress: min(1, (Double(completed) + 0.5) / Double(max(1, timed.count))),
+                completedItems: completed,
+                totalItems: sorted.count,
+                location: clean(current.location),
+                status: clean(current.status),
+                timeSummary: current.displayTime,
+                timingContext: current.endsAt.map { relativeText(for: $0, now: now, prefix: String(localized: "Ends")) }
+            )
+        }
+
+        if let next {
+            let isBeforeTrip = previous == nil
+            return AssistantJourneyStage(
+                phase: isBeforeTrip ? .preparing : .between,
+                phaseLabel: isBeforeTrip ? String(localized: "Before the trip") : String(localized: "Between stages"),
+                title: next.title,
+                detail: isBeforeTrip
+                    ? String(localized: "Prepare documents, route, and timing before this first stage begins.")
+                    : String(localized: "Use this window to reset, check the route, and prepare for the next stage."),
+                currentItemID: nil,
+                nextItemID: next.id,
+                focusItemID: next.id,
+                itemKind: next.kind,
+                progress: Double(completed) / Double(max(1, timed.count)),
+                completedItems: completed,
+                totalItems: sorted.count,
+                location: clean(next.location),
+                status: clean(next.status),
+                timeSummary: next.displayTime,
+                timingContext: next.startsAt.map { relativeText(for: $0, now: now, prefix: String(localized: "Starts")) }
+            )
+        }
+
+        let last = timed.last
+        return AssistantJourneyStage(
+            phase: .completed,
+            phaseLabel: String(localized: "Trip complete"),
+            title: trip.destination?.nilIfEmpty ?? trip.title,
+            detail: String(localized: "The saved itinerary is complete. Keep documents available until every booking is settled."),
+            currentItemID: nil,
+            nextItemID: undated.first?.id,
+            focusItemID: undated.first?.id ?? last?.id,
+            itemKind: undated.first?.kind ?? last?.kind,
+            progress: 1,
+            completedItems: completed,
+            totalItems: sorted.count,
+            location: clean(undated.first?.location ?? last?.location),
+            status: clean(undated.first?.status ?? last?.status),
+            timeSummary: undated.first?.displayTime ?? last?.displayTime,
+            timingContext: undated.isEmpty ? String(localized: "All timed stages finished") : String(localized: "Untimed items still need review")
+        )
+    }
+
+    private static func effectiveEnd(for item: ItineraryItem, start: Date) -> Date {
+        if let endsAt = item.endsAt { return endsAt }
+        let duration: TimeInterval
+        switch item.kind {
+        case .flight: duration = 6 * 60 * 60
+        case .hotel: duration = 12 * 60 * 60
+        case .event: duration = 3 * 60 * 60
+        case .transit: duration = 4 * 60 * 60
+        }
+        return start.addingTimeInterval(duration)
+    }
+
+    private static func activeLabel(for kind: ItineraryKind) -> String {
+        switch kind {
+        case .flight: String(localized: "Flight in progress")
+        case .hotel: String(localized: "Stay in progress")
+        case .event: String(localized: "Event in progress")
+        case .transit: String(localized: "On the move")
+        }
+    }
+
+    private static func activeGuidance(for kind: ItineraryKind) -> String {
+        switch kind {
+        case .flight: String(localized: "Keep live status, arrival details, baggage, and the onward route close at hand.")
+        case .hotel: String(localized: "Keep the address, check-out time, local weather, and the next route visible.")
+        case .event: String(localized: "Keep entry details, venue guidance, and the route to the next stage ready.")
+        case .transit: String(localized: "Watch the line, stops, arrival time, and any connection after this transfer.")
+        }
+    }
+
+    private static func clean(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+              !value.localizedCaseInsensitiveContains("needed"),
+              !value.localizedCaseInsensitiveContains("unknown") else {
+            return nil
+        }
+        return value
+    }
+
+    private static func relativeText(for date: Date, now: Date, prefix: String) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return "\(prefix) \(formatter.localizedString(for: date, relativeTo: now))"
+    }
+}
+
+enum AssistantEnvironmentKind {
+    case place
+    case weather
+    case route
+    case event
+    case flight
+    case warning
+
+    var symbol: String {
+        switch self {
+        case .place: "mappin.and.ellipse"
+        case .weather: "cloud.sun.fill"
+        case .route: "arrow.triangle.turn.up.right.diamond.fill"
+        case .event: "ticket.fill"
+        case .flight: "airplane.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        }
+    }
+}
+
+struct AssistantEnvironmentSignal: Identifiable {
+    var id: String
+    var kind: AssistantEnvironmentKind
+    var title: String
+    var value: String
+    var detail: String?
+    var severity: AlertSeverity
+    var actionURL: URL?
+    var itemID: UUID?
+}
+
+enum AssistantRecommendationUrgency: String {
+    case now
+    case soon
+    case later
+
+    var label: String {
+        switch self {
+        case .now: String(localized: "Now")
+        case .soon: String(localized: "Soon")
+        case .later: String(localized: "Later")
+        }
+    }
+}
+
+struct AssistantRecommendation: Identifiable {
+    var id: String
+    var urgency: AssistantRecommendationUrgency
+    var title: String
+    var detail: String
+    var symbol: String
+    var itemID: UUID?
 }
 
 struct AssistantTripAssessment {
@@ -184,6 +459,7 @@ struct AssistantIntelligenceBuilder {
         }
 
         onProgress?(.local)
+        let journey = AssistantJourneyStage.make(trip: trip, itinerary: itinerary)
         var alerts: [TravelAlert] = []
         var sourceCounts: [String: Int] = [:]
         var sourceSeverities: [String: AlertSeverity] = [:]
@@ -302,15 +578,24 @@ struct AssistantIntelligenceBuilder {
             }
 
         var finalWeather = weather
+        let environment = environmentSignals(
+            journey: journey,
+            itinerary: itinerary,
+            weatherCards: weatherCards,
+            alerts: sortedAlerts
+        )
         onProgress?(.aiReview)
         let aiAdvice = await assistantAIAdvice(
             trip: trip,
             itinerary: itinerary,
             assessment: assessment,
+            journey: journey,
             alerts: sortedAlerts,
             weather: finalWeather,
+            environment: environment,
             sources: sources,
-            question: nil
+            question: nil,
+            conversation: []
         )
 
         if let aiAdvice, aiAdvice.isReliableEnoughToOverrideFacts {
@@ -321,9 +606,17 @@ struct AssistantIntelligenceBuilder {
 
         onProgress?(.complete)
         return AssistantIntelligence(
+            journey: journey,
             assessment: assessment,
             alerts: sortedAlerts,
             weather: finalWeather,
+            environment: environment,
+            recommendations: recommendations(
+                journey: journey,
+                itinerary: itinerary,
+                alerts: sortedAlerts,
+                aiAdvice: aiAdvice
+            ),
             sources: sources,
             aiAdvice: aiAdvice,
             generatedAt: Date(),
@@ -345,11 +638,25 @@ struct AssistantIntelligenceBuilder {
             watchSignals: watch,
             actionSignals: action
         )
+        let journey = AssistantJourneyStage.make(trip: trip, itinerary: itinerary)
 
         return AssistantIntelligence(
+            journey: journey,
             assessment: assessment,
             alerts: alerts,
             weather: .empty,
+            environment: environmentSignals(
+                journey: journey,
+                itinerary: itinerary,
+                weatherCards: [],
+                alerts: alerts
+            ),
+            recommendations: recommendations(
+                journey: journey,
+                itinerary: itinerary,
+                alerts: alerts,
+                aiAdvice: nil
+            ),
             sources: [],
             aiAdvice: nil,
             generatedAt: Date(),
@@ -419,9 +726,9 @@ struct AssistantIntelligenceBuilder {
                 TravelAlert(
                     id: "check-in-\(action.id.uuidString)",
                     title: String(localized: "Check in for \(action.flightNumber)"),
-                    message: action.confirmationCode.map {
-                        String(localized: "Online check-in should be open. Booking reference \($0) is saved.")
-                    } ?? String(localized: "Online check-in should be open. Have PNR and passenger last name ready."),
+                    message: action.confirmationCode == nil
+                        ? String(localized: "Online check-in should be open. Have PNR and passenger last name ready.")
+                        : String(localized: "Online check-in should be open. The booking reference is saved locally; have the passenger last name ready."),
                     severity: .watch,
                     sourceTitle: String(localized: "Local itinerary"),
                     sourceDetail: String(localized: "Calculated from flight time and booking fields.")
@@ -973,6 +1280,263 @@ struct AssistantIntelligenceBuilder {
         )
     }
 
+    private func environmentSignals(
+        journey: AssistantJourneyStage,
+        itinerary: [ItineraryItem],
+        weatherCards: [ItemEnrichmentCard],
+        alerts: [TravelAlert]
+    ) -> [AssistantEnvironmentSignal] {
+        let focusItem = journey.focusItemID.flatMap { focusID in
+            itinerary.first { $0.id == focusID }
+        }
+        var signals: [AssistantEnvironmentSignal] = []
+
+        func append(_ signal: AssistantEnvironmentSignal) {
+            let key = "\(signal.title.lowercased())|\(signal.value.lowercased())"
+            guard !signals.contains(where: {
+                "\($0.title.lowercased())|\($0.value.lowercased())" == key
+            }) else {
+                return
+            }
+            signals.append(signal)
+        }
+
+        if let location = journey.location {
+            append(
+                AssistantEnvironmentSignal(
+                    id: "stage-place-\(journey.focusItemID?.uuidString ?? "trip")",
+                    kind: .place,
+                    title: String(localized: "Stage location"),
+                    value: location,
+                    detail: journey.phase == .active
+                        ? String(localized: "This is the place Voya is using for live context right now.")
+                        : String(localized: "Weather, nearby events, and route guidance are matched to this place."),
+                    severity: .calm,
+                    actionURL: mapURL(for: location),
+                    itemID: journey.focusItemID
+                )
+            )
+        }
+
+        if let focusItem,
+           let enrichment = ItemEnrichmentCache.cachedEnrichment(for: focusItem) {
+            if let weather = enrichment.cards.first(where: {
+                $0.kind == "weather" || $0.title.localizedCaseInsensitiveContains("weather")
+            }) {
+                append(environmentSignal(from: weather, kind: .weather, itemID: focusItem.id))
+            }
+
+            for warning in enrichment.cards.filter({ $0.kind == "warning" }).prefix(1) {
+                append(environmentSignal(from: warning, kind: .warning, itemID: focusItem.id))
+            }
+
+            for event in (enrichment.nearbyEvents ?? []).prefix(2) {
+                let timing = [event.localDate, event.localTime]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+                    .joined(separator: " · ")
+                let place = [event.venue, event.city]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+                    .joined(separator: " · ")
+                append(
+                    AssistantEnvironmentSignal(
+                        id: "nearby-event-\(event.id)",
+                        kind: .event,
+                        title: String(localized: "Nearby event"),
+                        value: event.name,
+                        detail: [timing.nilIfEmpty, place.nilIfEmpty].compactMap { $0 }.joined(separator: " · ").nilIfEmpty,
+                        severity: .calm,
+                        actionURL: event.url,
+                        itemID: focusItem.id
+                    )
+                )
+            }
+        }
+
+        if !signals.contains(where: { $0.kind == .weather }), let weather = weatherCards.first {
+            append(environmentSignal(from: weather, kind: .weather, itemID: journey.focusItemID))
+        }
+
+        if let focusID = journey.focusItemID {
+            let identifier = focusID.uuidString
+            if let flight = alerts.first(where: {
+                ($0.id.hasPrefix("flight-status-") || $0.id.hasPrefix("flight-plane-") || $0.id.hasPrefix("flight-status-pending-"))
+                    && $0.id.hasSuffix(identifier)
+            }) {
+                append(
+                    AssistantEnvironmentSignal(
+                        id: "environment-\(flight.id)",
+                        kind: .flight,
+                        title: String(localized: "Live flight context"),
+                        value: flight.title,
+                        detail: flight.message,
+                        severity: flight.severity,
+                        actionURL: flight.actionURL,
+                        itemID: focusID
+                    )
+                )
+            }
+        }
+
+        let route = alerts.first(where: { alert in
+            alert.sourceTitle == String(localized: "Mobility plan")
+                && journey.focusItemID.map { alert.id.contains($0.uuidString) } == true
+        }) ?? alerts.first(where: { $0.sourceTitle == String(localized: "Mobility plan") })
+        if let route {
+            append(
+                AssistantEnvironmentSignal(
+                    id: "environment-\(route.id)",
+                    kind: .route,
+                    title: String(localized: "Route context"),
+                    value: route.title,
+                    detail: route.message,
+                    severity: route.severity,
+                    actionURL: route.actionURL,
+                    itemID: journey.focusItemID
+                )
+            )
+        }
+
+        return Array(signals.prefix(6))
+    }
+
+    private func environmentSignal(
+        from card: ItemEnrichmentCard,
+        kind: AssistantEnvironmentKind,
+        itemID: UUID?
+    ) -> AssistantEnvironmentSignal {
+        AssistantEnvironmentSignal(
+            id: "environment-card-\(card.id)-\(itemID?.uuidString ?? "trip")",
+            kind: kind,
+            title: card.title,
+            value: card.value,
+            detail: card.detail,
+            severity: card.kind == "warning" ? .watch : .calm,
+            actionURL: card.actionURL,
+            itemID: itemID
+        )
+    }
+
+    private func recommendations(
+        journey: AssistantJourneyStage,
+        itinerary: [ItineraryItem],
+        alerts: [TravelAlert],
+        aiAdvice: AssistantAIAdvice?
+    ) -> [AssistantRecommendation] {
+        var result: [AssistantRecommendation] = []
+
+        func append(_ recommendation: AssistantRecommendation) {
+            let normalized = recommendation.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty,
+                  !result.contains(where: {
+                      $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
+                  }) else {
+                return
+            }
+            result.append(recommendation)
+        }
+
+        for alert in alerts where alert.severity != .calm {
+            append(
+                AssistantRecommendation(
+                    id: "recommendation-\(alert.id)",
+                    urgency: alert.severity == .action ? .now : .soon,
+                    title: alert.title,
+                    detail: alert.message,
+                    symbol: alert.severity == .action ? "exclamationmark.circle.fill" : "clock.fill",
+                    itemID: relatedItemID(for: alert, itinerary: itinerary, journey: journey)
+                )
+            )
+            if result.count >= 4 { break }
+        }
+
+        if let aiAdvice, aiAdvice.isReliableEnoughToOverrideFacts {
+            for (index, action) in aiAdvice.nextActions.prefix(3).enumerated() {
+                let parts = action.split(separator: ":", maxSplits: 1).map {
+                    String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                append(
+                    AssistantRecommendation(
+                        id: "ai-recommendation-\(index)",
+                        urgency: result.isEmpty ? .soon : .later,
+                        title: parts.first?.nilIfEmpty ?? String(localized: "Travel recommendation"),
+                        detail: parts.count > 1
+                            ? parts[1]
+                            : String(localized: "Keep this in view as the trip progresses."),
+                        symbol: "sparkles",
+                        itemID: nil
+                    )
+                )
+            }
+        }
+
+        if result.isEmpty {
+            append(stageRecommendation(for: journey))
+        }
+
+        return Array(result.prefix(5))
+    }
+
+    private func relatedItemID(
+        for alert: TravelAlert,
+        itinerary: [ItineraryItem],
+        journey: AssistantJourneyStage
+    ) -> UUID? {
+        if let focusID = journey.focusItemID, alert.id.contains(focusID.uuidString) {
+            return focusID
+        }
+        return itinerary.first(where: { alert.id.contains($0.id.uuidString) })?.id
+    }
+
+    private func stageRecommendation(for journey: AssistantJourneyStage) -> AssistantRecommendation {
+        let urgency: AssistantRecommendationUrgency
+        let title: String
+        let detail: String
+        let symbol: String
+
+        switch journey.phase {
+        case .planning:
+            urgency = .now
+            title = String(localized: "Complete the itinerary")
+            detail = String(localized: "Add dates and exact places so Voya can calculate the current stage, route buffers, and local conditions.")
+            symbol = "calendar.badge.plus"
+        case .preparing:
+            urgency = .soon
+            title = String(localized: "Prepare the first stage")
+            detail = String(localized: "Confirm documents, departure route, and a realistic leave time before the trip begins.")
+            symbol = "checklist"
+        case .active:
+            urgency = .now
+            title = String(localized: "Stay with the current stage")
+            detail = String(localized: "Keep its live status and the next connection visible; Voya will surface changes as sources refresh.")
+            symbol = "location.fill.viewfinder"
+        case .between:
+            urgency = .now
+            title = String(localized: "Prepare the next move")
+            detail = String(localized: "Check the route, leave time, and anything that could delay the next stage.")
+            symbol = "arrow.trianglehead.swap"
+        case .completed:
+            urgency = .later
+            title = String(localized: "Keep records until the trip is settled")
+            detail = String(localized: "Retain booking documents until deposits, points, refunds, and claims are complete.")
+            symbol = "archivebox.fill"
+        }
+
+        return AssistantRecommendation(
+            id: "stage-recommendation-\(journey.phase.rawValue)",
+            urgency: urgency,
+            title: title,
+            detail: detail,
+            symbol: symbol,
+            itemID: journey.focusItemID
+        )
+    }
+
+    private func mapURL(for place: String) -> URL? {
+        var components = URLComponents(string: "https://maps.apple.com/")
+        components?.queryItems = [URLQueryItem(name: "q", value: place)]
+        return components?.url
+    }
+
     private func tripAssessment(
         trip: Trip,
         itinerary: [ItineraryItem],
@@ -989,11 +1553,11 @@ struct AssistantIntelligenceBuilder {
 
         if actionSignals > 0 {
             title = String(localized: "\(trip.title) needs action")
-            detail = String(localized: "Resolve \(actionSignals) blocking items before relying on live guidance.")
+            detail = String(localized: "Resolve blocking items before relying on live guidance.")
             riskLabel = String(localized: "Action")
         } else if watchSignals > 0 {
             title = String(localized: "\(trip.title) is mostly ready")
-            detail = String(localized: "\(watchSignals) live signals need watching; core itinerary data is usable.")
+            detail = String(localized: "Some live signals need watching; core itinerary data is usable.")
             riskLabel = String(localized: "Watch")
         } else if itinerary.isEmpty {
             title = String(localized: "\(trip.title) needs itinerary data")
@@ -1033,7 +1597,8 @@ struct AssistantIntelligenceBuilder {
         _ question: String,
         trip: Trip?,
         itinerary: [ItineraryItem],
-        intelligence: AssistantIntelligence
+        intelligence: AssistantIntelligence,
+        conversation: [AssistantConversationTurn] = []
     ) async -> AssistantAIAdvice? {
         guard let trip else {
             return nil
@@ -1043,10 +1608,13 @@ struct AssistantIntelligenceBuilder {
             trip: trip,
             itinerary: itinerary,
             assessment: intelligence.assessment,
+            journey: intelligence.journey,
             alerts: intelligence.alerts,
             weather: intelligence.weather,
+            environment: intelligence.environment,
             sources: intelligence.sources,
-            question: question
+            question: question,
+            conversation: conversation
         )
     }
 
@@ -1054,10 +1622,13 @@ struct AssistantIntelligenceBuilder {
         trip: Trip,
         itinerary: [ItineraryItem],
         assessment: AssistantTripAssessment,
+        journey: AssistantJourneyStage,
         alerts: [TravelAlert],
         weather: AssistantWeatherPreparation,
+        environment: [AssistantEnvironmentSignal],
         sources: [AssistantSourceSummary],
-        question: String?
+        question: String?,
+        conversation: [AssistantConversationTurn]
     ) async -> AssistantAIAdvice? {
         do {
             return try await VercelAssistantAIService().advise(
@@ -1065,10 +1636,13 @@ struct AssistantIntelligenceBuilder {
                     trip: trip,
                     itinerary: itinerary,
                     assessment: assessment,
+                    journey: journey,
                     alerts: alerts,
                     weather: weather,
+                    environment: environment,
                     sources: sources,
-                    question: question
+                    question: question,
+                    conversation: conversation
                 )
             )
         } catch {
@@ -1080,29 +1654,30 @@ struct AssistantIntelligenceBuilder {
         trip: Trip,
         itinerary: [ItineraryItem],
         assessment: AssistantTripAssessment,
+        journey: AssistantJourneyStage,
         alerts: [TravelAlert],
         weather: AssistantWeatherPreparation,
+        environment: [AssistantEnvironmentSignal],
         sources: [AssistantSourceSummary],
-        question: String?
+        question: String?,
+        conversation: [AssistantConversationTurn]
     ) -> AssistantAIRequest {
         AssistantAIRequest(
             locale: VoyaAppLocale.currentIdentifier,
             languageCode: VoyaAppLocale.currentLanguageCode,
             languageName: VoyaAppLocale.currentLanguageName,
-            question: question?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            question: privacySafeText(question, itinerary: itinerary, maximumLength: 2_000),
             trip: AssistantAIRequest.TripContext(
-                title: trip.title,
+                title: privacySafeText(trip.title, itinerary: itinerary, maximumLength: 300) ?? trip.title,
                 dates: trip.displayDates,
-                summary: trip.summary,
-                destination: trip.destination,
+                summary: privacySafeText(trip.summary, itinerary: itinerary, maximumLength: 1_500) ?? "",
+                destination: privacySafeText(trip.destination, itinerary: itinerary, maximumLength: 500),
                 startsAt: trip.startsAt,
                 endsAt: trip.endsAt,
-                notes: trip.notes,
+                notes: privacySafeText(trip.notes, itinerary: itinerary, maximumLength: 1_500),
                 sourceName: trip.sourceName,
-                startLocationName: trip.startLocationName,
-                startLocationAddress: trip.startLocationAddress,
-                endLocationName: trip.endLocationName,
-                endLocationAddress: trip.endLocationAddress
+                startLocationName: privacySafeText(trip.startLocationName, itinerary: itinerary, maximumLength: 500),
+                endLocationName: privacySafeText(trip.endLocationName, itinerary: itinerary, maximumLength: 500)
             ),
             assessment: AssistantAIRequest.AssessmentContext(
                 score: assessment.score,
@@ -1111,57 +1686,103 @@ struct AssistantIntelligenceBuilder {
                 watchCount: assessment.watchCount,
                 actionCount: assessment.actionCount
             ),
-            nextItem: nextItem(in: itinerary).map { itemContext($0) },
-            itinerary: itinerary.map { itemContext($0) },
+            journey: AssistantAIRequest.JourneyContext(
+                phase: journey.phase.rawValue,
+                phaseLabel: journey.phaseLabel,
+                title: privacySafeText(journey.title, itinerary: itinerary, maximumLength: 300) ?? journey.title,
+                detail: privacySafeText(journey.detail, itinerary: itinerary, maximumLength: 1_500) ?? journey.detail,
+                progress: journey.progress,
+                completedItems: journey.completedItems,
+                totalItems: journey.totalItems,
+                location: privacySafeText(journey.location, itinerary: itinerary, maximumLength: 500),
+                status: privacySafeText(journey.status, itinerary: itinerary, maximumLength: 500),
+                timeSummary: journey.timeSummary,
+                timingContext: journey.timingContext
+            ),
+            nextItem: nextItem(in: itinerary).map { itemContext($0, itinerary: itinerary) },
+            itinerary: itinerary.map { itemContext($0, itinerary: itinerary) },
             alerts: alerts.map {
                 AssistantAIRequest.AlertContext(
-                    title: $0.title,
-                    message: $0.message,
+                    title: privacySafeText($0.title, itinerary: itinerary, maximumLength: 300) ?? $0.title,
+                    message: privacySafeText($0.message, itinerary: itinerary, maximumLength: 1_500) ?? $0.message,
                     severity: $0.severity.apiValue,
-                    sourceTitle: $0.sourceTitle,
-                    sourceDetail: $0.sourceDetail
+                    sourceTitle: privacySafeText($0.sourceTitle, itinerary: itinerary, maximumLength: 160),
+                    sourceDetail: privacySafeText($0.sourceDetail, itinerary: itinerary, maximumLength: 1_000)
                 )
             },
             weather: AssistantAIRequest.WeatherContext(
-                title: weather.title,
-                summary: weather.summary,
-                recommendation: weather.recommendation,
-                items: weather.items,
+                title: privacySafeText(weather.title, itinerary: itinerary, maximumLength: 200) ?? weather.title,
+                summary: privacySafeText(weather.summary, itinerary: itinerary, maximumLength: 1_500) ?? weather.summary,
+                recommendation: privacySafeText(weather.recommendation, itinerary: itinerary, maximumLength: 1_500) ?? weather.recommendation,
+                items: weather.items.compactMap {
+                    privacySafeText($0, itinerary: itinerary, maximumLength: 500)
+                },
                 severity: weather.severity.apiValue
             ),
+            environment: environment.map {
+                AssistantAIRequest.EnvironmentContext(
+                    kind: $0.kind.apiValue,
+                    title: privacySafeText($0.title, itinerary: itinerary, maximumLength: 200) ?? $0.title,
+                    value: privacySafeText($0.value, itinerary: itinerary, maximumLength: 500) ?? $0.value,
+                    detail: privacySafeText($0.detail, itinerary: itinerary, maximumLength: 1_000),
+                    severity: $0.severity.apiValue
+                )
+            },
             sources: sources.map {
                 AssistantAIRequest.SourceContext(
-                    title: $0.title,
-                    detail: $0.detail,
+                    title: privacySafeText($0.title, itinerary: itinerary, maximumLength: 160) ?? $0.title,
+                    detail: privacySafeText($0.detail, itinerary: itinerary, maximumLength: 1_000) ?? $0.detail,
                     count: $0.count,
                     severity: $0.severity.apiValue
                 )
+            },
+            conversation: conversation.suffix(12).compactMap { turn in
+                guard let content = privacySafeText(turn.content, itinerary: itinerary, maximumLength: 2_000) else {
+                    return nil
+                }
+                return AssistantConversationTurn(role: turn.role, content: content)
             }
         )
     }
 
-    private func itemContext(_ item: ItineraryItem) -> AssistantAIRequest.ItineraryItemContext {
+    private func itemContext(
+        _ item: ItineraryItem,
+        itinerary: [ItineraryItem]
+    ) -> AssistantAIRequest.ItineraryItemContext {
         AssistantAIRequest.ItineraryItemContext(
             kind: item.kind.rawValue,
-            title: item.title,
-            location: item.location,
-            status: item.status,
+            title: privacySafeText(item.title, itinerary: itinerary, maximumLength: 300) ?? item.title,
+            location: privacySafeText(item.location, itinerary: itinerary, maximumLength: 500) ?? "",
+            status: privacySafeText(item.status, itinerary: itinerary, maximumLength: 500) ?? "",
             startsAt: item.startsAt,
             endsAt: item.endsAt,
-            confirmationCode: item.confirmationCode,
-            providerName: item.providerName,
-            sourceName: item.sourceName,
-            extractedBookingData: compactAIContext(item.normalizedData ?? item.rawData),
+            providerName: privacySafeText(item.providerName, itinerary: itinerary, maximumLength: 160),
+            sourceName: privacySafeText(item.sourceName, itinerary: itinerary, maximumLength: 160),
+            hasConfirmationCode: item.confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty != nil,
             hasBoardingPass: store.boardingPassDocument(for: item) != nil,
             hasSourceDocument: store.sourceDocument(for: item) != nil
         )
     }
 
-    private func compactAIContext(_ value: String?) -> String? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty else {
+    private func privacySafeText(
+        _ value: String?,
+        itinerary: [ItineraryItem],
+        maximumLength: Int
+    ) -> String? {
+        guard var value = value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty else {
             return nil
         }
-        return String(value.prefix(4_000))
+
+        for confirmationCode in itinerary.compactMap(\.confirmationCode) {
+            let code = confirmationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !code.isEmpty else { continue }
+            value = value.replacingOccurrences(
+                of: code,
+                with: String(localized: "[booking reference saved locally]"),
+                options: [.caseInsensitive]
+            )
+        }
+        return String(value.prefix(maximumLength))
     }
 
     private func nextItem(in itinerary: [ItineraryItem]) -> ItineraryItem? {
@@ -1216,6 +1837,19 @@ struct AssistantIntelligenceBuilder {
     private func maxSeverity(_ lhs: AlertSeverity?, _ rhs: AlertSeverity) -> AlertSeverity {
         guard let lhs else { return rhs }
         return lhs.priority >= rhs.priority ? lhs : rhs
+    }
+}
+
+private extension AssistantEnvironmentKind {
+    var apiValue: String {
+        switch self {
+        case .place: "place"
+        case .weather: "weather"
+        case .route: "route"
+        case .event: "event"
+        case .flight: "flight"
+        case .warning: "warning"
+        }
     }
 }
 
