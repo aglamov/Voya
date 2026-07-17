@@ -10,6 +10,7 @@ final class VoyaAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        _ = VoyaNotificationScheduler.shared
         application.registerForRemoteNotifications()
         return true
     }

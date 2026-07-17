@@ -5,7 +5,9 @@ import SwiftUI
 @MainActor
 extension VoyaStore {
     func loadHeroImageIfNeeded(for trip: Trip) async {
-        guard trip.destinationImageURL == nil,
+        let needsImage = trip.destinationImageURL == nil
+        let needsProviderUpgrade = trip.destinationImageURL != nil && trip.destinationImageProvider == nil
+        guard needsImage || needsProviderUpgrade,
               trips.contains(where: { $0.id == trip.id }) else {
             return
         }
@@ -22,6 +24,8 @@ extension VoyaStore {
                 let trip = trips[currentIndex]
                 trip.destinationImageURL = heroImage.url
                 trip.destinationImageCredit = heroImage.credit
+                trip.destinationImageCreditURL = heroImage.creditURL
+                trip.destinationImageProvider = heroImage.source.rawValue
                 trip.updatedAt = Date()
                 saveTrips()
                 return
@@ -36,6 +40,8 @@ extension VoyaStore {
 
         let trip = trips[currentIndex]
         trip.destinationImageCredit = nil
+        trip.destinationImageCreditURL = nil
+        trip.destinationImageProvider = nil
         trip.updatedAt = Date()
         saveTrips()
     }

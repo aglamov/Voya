@@ -392,14 +392,26 @@ struct TripsView: View {
     private func openNotificationItemIfNeeded() {
         guard let itemID = store.notificationItemID,
               let trip = store.trips.first(where: { trip in trip.items.contains(where: { $0.id == itemID }) }),
-              let item = trip.items.first(where: { $0.id == itemID }) else {
+              trip.items.contains(where: { $0.id == itemID }) else {
             return
         }
 
+        // Consume the route before changing view state so the onChange handler
+        // cannot re-enter and attempt to present the same sheet twice.
+        store.notificationItemID = nil
         tripListMode = store.isArchived(trip, at: Date()) ? .archive : .upcoming
         store.selectedTripID = trip.id
-        itemBeingViewed = item
-        store.notificationItemID = nil
+
+        Task { @MainActor in
+            await Task.yield()
+            guard itemBeingViewed == nil,
+                  let item = store.trips
+                    .flatMap(\.items)
+                    .first(where: { $0.id == itemID }) else {
+                return
+            }
+            itemBeingViewed = item
+        }
     }
 
     @MainActor

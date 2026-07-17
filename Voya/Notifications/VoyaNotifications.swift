@@ -5,6 +5,12 @@ extension Notification.Name {
     static let voyaNotificationOpened = Notification.Name("voya.notification-opened")
 }
 
+struct VoyaNotificationDestination: Sendable {
+    let tripID: UUID?
+    let itemID: UUID?
+    let eventType: String?
+}
+
 struct VoyaNotificationTrip: Sendable {
     let id: UUID
     let title: String
@@ -31,10 +37,16 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
     private let center = UNUserNotificationCenter.current()
     private let identifierPrefix = "voya.trip."
     private var hasRequestedAuthorization = false
+    private var pendingDestination: VoyaNotificationDestination?
 
     private override init() {
         super.init()
         center.delegate = self
+    }
+
+    func takePendingDestination() -> VoyaNotificationDestination? {
+        defer { pendingDestination = nil }
+        return pendingDestination
     }
 
     func requestAuthorizationIfNeeded() async -> Bool {
@@ -172,14 +184,16 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
         let eventType = (remoteData?["eventType"] as? String)
             ?? (userInfo["eventType"] as? String)
         await MainActor.run {
+            let destination = VoyaNotificationDestination(
+                tripID: tripID.flatMap(UUID.init(uuidString:)),
+                itemID: itemID.flatMap(UUID.init(uuidString:)),
+                eventType: eventType
+            )
+            pendingDestination = destination
             NotificationCenter.default.post(
                 name: .voyaNotificationOpened,
                 object: nil,
-                userInfo: [
-                    "tripID": tripID,
-                    "itemID": itemID,
-                    "eventType": eventType
-                ].compactMapValues { $0 }
+                userInfo: ["destination": destination]
             )
         }
     }

@@ -197,6 +197,8 @@ final class Trip: Identifiable {
     var sourceName: String
     var destinationImageURL: URL?
     var destinationImageCredit: String?
+    var destinationImageCreditURL: URL?
+    var destinationImageProvider: String?
     var notes: String?
     var rawData: String?
     var startLocationName: String?
@@ -219,6 +221,8 @@ final class Trip: Identifiable {
         sourceName: String,
         destinationImageURL: URL? = nil,
         destinationImageCredit: String? = nil,
+        destinationImageCreditURL: URL? = nil,
+        destinationImageProvider: String? = nil,
         notes: String? = nil,
         rawData: String? = nil,
         startLocationName: String? = nil,
@@ -240,6 +244,8 @@ final class Trip: Identifiable {
         self.sourceName = sourceName
         self.destinationImageURL = destinationImageURL
         self.destinationImageCredit = destinationImageCredit
+        self.destinationImageCreditURL = destinationImageCreditURL
+        self.destinationImageProvider = destinationImageProvider
         self.notes = notes
         self.rawData = rawData
         self.startLocationName = startLocationName

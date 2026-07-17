@@ -118,6 +118,7 @@ Optional enrichment environment variables:
 - `WEATHER_MONITOR_SECRET`: optional separate secret for manual weather-monitor diagnostics.
 - `WEATHER_MAX_GROUPS_PER_RUN`: optional OpenWeather cost ceiling; defaults to 12 coordinate groups per run.
 - `TICKETMASTER_API_KEY` or `TICKETMASTER_CONSUMER_KEY`: enables nearby public event cards and Ticketmaster event links through the Discovery API. Use the Consumer Key from Ticketmaster Developer; the Consumer Secret is not needed for Discovery event search.
+- `PEXELS_API_KEY`: enables curated landscape hero photos for trip destinations. The app falls back to Wikipedia when Pexels is unavailable or has no matching photo.
 - `FLIGHTAWARE_AEROAPI_KEY`: enables `GET/POST /api/flight-status` and `POST /api/booking-validation` through FlightAware AeroAPI for flight existence checks, airline schedules, gate assignments, gate times, baggage claim, delay fields, aircraft details, tracking data, and alert capability.
 - `GOOGLE_ROUTES_API_KEY` or `GOOGLE_MAPS_API_KEY`: enables `POST /api/mobility` through Google Routes API for live transfer duration, traffic-aware driving, public transit, walking, cycling, route comparison, and time-to-leave planning.
 - `UBER_CLIENT_ID` and `UBER_CLIENT_SECRET`: optional Uber developer credentials. `GET /api/uber-diagnostics` checks whether OAuth and estimates/products endpoints are accessible without exposing secrets.
@@ -141,6 +142,10 @@ Flight support endpoints:
 Mobility support endpoints:
 
 - `POST /api/mobility` with origin, destination, target arrival/departure time, candidate modes, and Voya buffer settings. It returns provider-neutral route options, total duration, travel duration, buffer minutes, leave-by time, trade-offs, map handoff URLs, and a recommended mode. Without a Google key, it returns explicit provider warnings and usable map handoff URLs instead of fake ETAs.
+
+Destination image endpoint:
+
+- `POST /api/destination-image` with `{ "destination": "Bad Ragaz, Switzerland" }` searches Pexels for a high-resolution landscape image suited to the trip hero, returns photographer attribution, and keeps the provider key off-device. The iOS client falls back to Wikipedia.
 
 Weather alert endpoints:
 

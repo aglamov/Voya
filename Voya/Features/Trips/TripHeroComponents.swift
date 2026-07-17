@@ -74,10 +74,24 @@ struct TripHeroCard: View {
                 MetricPill(title: "Items", value: summary.itemCountText)
                 MetricPill(title: "Status", value: summary.phaseText)
             }
+
+            if let credit = trip.destinationImageCredit?.nilIfEmpty {
+                HStack {
+                    Spacer(minLength: 0)
+                    if let creditURL = trip.destinationImageCreditURL {
+                        Link(credit, destination: creditURL)
+                    } else {
+                        Text(credit)
+                    }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.84))
+                .lineLimit(1)
+            }
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 238, alignment: .topLeading)
+        .frame(height: 258, alignment: .topLeading)
         .background {
             TripHeroBackground(imageURL: trip.destinationImageURL)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -96,7 +110,7 @@ struct TripHeroCard: View {
         }
         .shadow(color: .black.opacity(0.10), radius: 22, y: 14)
         .shadow(color: Color.voyaGold.opacity(colorScheme == .dark ? 0.30 : 0.18), radius: 22, y: 10)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private var heroBorderGradient: LinearGradient {

@@ -36,7 +36,9 @@ struct ContentView: View {
         .preferredColorScheme(.light)
         .onAppear {
             store.configure(modelContext: modelContext)
-            if store.selectCurrentTripIfAvailable() {
+            if let destination = VoyaNotificationScheduler.shared.takePendingDestination() {
+                openNotification(destination)
+            } else if store.selectCurrentTripIfAvailable() {
                 selectedTab = .trips
             }
         }
@@ -46,21 +48,27 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .voyaNotificationOpened)) { notification in
-            selectedTab = .trips
-            if let rawTripID = notification.userInfo?["tripID"] as? String,
-               let tripID = UUID(uuidString: rawTripID),
-               store.trips.contains(where: { $0.id == tripID }) {
-                store.selectedTripID = tripID
-            } else if let rawItemID = notification.userInfo?["itemID"] as? String,
-                      let itemID = UUID(uuidString: rawItemID),
-                      let trip = store.trips.first(where: { trip in trip.items.contains(where: { $0.id == itemID }) }) {
-                store.selectedTripID = trip.id
-            } else {
-                _ = store.selectCurrentTripIfAvailable()
+            if let destination = VoyaNotificationScheduler.shared.takePendingDestination()
+                ?? notification.userInfo?["destination"] as? VoyaNotificationDestination {
+                openNotification(destination)
             }
-            if let rawItemID = notification.userInfo?["itemID"] as? String {
-                store.notificationItemID = UUID(uuidString: rawItemID)
-            }
+        }
+    }
+
+    private func openNotification(_ destination: VoyaNotificationDestination) {
+        selectedTab = .trips
+
+        if let itemID = destination.itemID,
+           let trip = store.trips.first(where: { trip in trip.items.contains(where: { $0.id == itemID }) }) {
+            store.selectedTripID = trip.id
+            store.notificationItemID = itemID
+        } else if let tripID = destination.tripID,
+                  store.trips.contains(where: { $0.id == tripID }) {
+            store.selectedTripID = tripID
+            store.notificationItemID = nil
+        } else {
+            store.notificationItemID = nil
+            _ = store.selectCurrentTripIfAvailable()
         }
     }
 }

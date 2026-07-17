@@ -61,6 +61,8 @@ extension VoyaStore {
         trip.updatedAt = Date()
         trip.destinationImageURL = nil
         trip.destinationImageCredit = nil
+        trip.destinationImageCreditURL = nil
+        trip.destinationImageProvider = nil
         saveTrips()
     }
 
