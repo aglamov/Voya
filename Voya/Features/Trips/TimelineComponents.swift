@@ -625,13 +625,27 @@ enum TransferPhase: Equatable {
     case undated
 
     init(context: MobilityTransferContext, plan: MobilityPlan?, fallbackStart: Date? = nil, now: Date = Date()) {
-        let option = plan?.recommendedOption
-        let start = option?.leaveBy.flatMap(MobilityDateFormatter.date(from:))
+        let option = plan?.defaultOption
+        let plannedStart = option?.leaveBy.flatMap(MobilityDateFormatter.date(from:))
+            ?? option?.departureTime.flatMap(MobilityDateFormatter.date(from:))
+        let plannedEnd = option?.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
+        let earliestPossibleStart = context.targetDepartureAt ?? fallbackStart
+        let latestRequiredArrival = context.targetArrivalAt
+        let planStartsTooEarly = earliestPossibleStart.map { earliest in
+            plannedStart.map { $0 < earliest } ?? false
+        } ?? false
+        let planEndsTooLate = latestRequiredArrival.map { latest in
+            plannedEnd.map { $0 > latest } ?? false
+        } ?? false
+        let usePlannedTiming = !planStartsTooEarly && !planEndsTooLate
+
+        let start = (usePlannedTiming ? plannedStart : nil)
             ?? context.targetDepartureAt
             ?? fallbackStart
-        let end = option?.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
+        let end = (usePlannedTiming ? plannedEnd : nil)
             ?? context.targetArrivalAt
             ?? context.targetDepartureAt
+            ?? fallbackStart
 
         guard start != nil || end != nil else {
             self = .undated

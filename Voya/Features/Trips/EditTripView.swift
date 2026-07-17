@@ -11,6 +11,7 @@ import Vision
 struct EditTripView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: TripDraft
+    @State private var isShowingDeleteConfirmation = false
     let trip: Trip
     let onSave: (TripDraft) -> Void
     let onDelete: () -> Void
@@ -164,8 +165,7 @@ struct EditTripView: View {
                 .disabled(isSaveDisabled)
 
                 Button(role: .destructive) {
-                    onDelete()
-                    dismiss()
+                    isShowingDeleteConfirmation = true
                 } label: {
                     Label("Delete trip", systemImage: "trash")
                         .font(.subheadline.weight(.semibold))
@@ -182,6 +182,15 @@ struct EditTripView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .alert("Delete trip?", isPresented: $isShowingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                onDelete()
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
+        }
     }
 
     private var isSaveDisabled: Bool {

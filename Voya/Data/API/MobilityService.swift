@@ -199,12 +199,23 @@ struct VercelMobilityService {
             return nil
         }
 
+        let originReadyAt = originItem.endsAt ?? originItem.startsAt
+        let destinationTargetAt = destinationItem.startsAt
+        let destinationIsAfterOrigin = switch (originReadyAt, destinationTargetAt) {
+        case let (originReadyAt?, destinationTargetAt?):
+            destinationTargetAt > originReadyAt
+        case (nil, _?):
+            true
+        default:
+            false
+        }
+
         return MobilityTransferContext(
             id: "\(originItem.id.uuidString)-\(destinationItem.id.uuidString)",
             origin: origin,
             destination: destination,
-            targetArrivalAt: destinationItem.startsAt,
-            targetDepartureAt: nil,
+            targetArrivalAt: destinationIsAfterOrigin ? destinationTargetAt : nil,
+            targetDepartureAt: destinationIsAfterOrigin ? nil : originReadyAt,
             airportBufferMinutes: airportBufferMinutes(for: destinationItem),
             taxiPickupBufferMinutes: 10
         )
