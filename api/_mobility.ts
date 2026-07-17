@@ -18,6 +18,8 @@ export const mobilityPlanSchema = z.object({
   destination: placeSchema,
   departureTime: z.string().datetime().optional(),
   arrivalTime: z.string().datetime().optional(),
+  departureTimeZoneOffsetSeconds: z.number().int().min(-50_400).max(50_400).optional(),
+  arrivalTimeZoneOffsetSeconds: z.number().int().min(-50_400).max(50_400).optional(),
   locale: z.string().min(2).max(16).optional(),
   modes: z.array(routeModeSchema).min(1).max(5).optional(),
   ownedVehicleAvailable: z.boolean().optional(),
@@ -42,6 +44,8 @@ export type MobilityRouteOption = {
   distanceMeters?: number;
   departureTime?: string;
   arrivalTime?: string;
+  departureTimeZone?: string;
+  arrivalTimeZone?: string;
   leaveBy?: string;
   reliability: "high" | "medium" | "low" | "unknown";
   costLevel: "low" | "medium" | "high" | "unknown";
@@ -483,6 +487,115 @@ function subtractMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() - minutes * 60_000);
 }
 
+function routeTimeZone(route: GoogleRoute, target: "arrival" | "departure") {
+  const transitDetails = route.legs
+    ?.flatMap((leg) => leg.steps ?? [])
+    .map((step) => step.transitDetails)
+    .filter((details): details is NonNullable<typeof details> => Boolean(details));
+
+  if (!transitDetails?.length) {
+    return undefined;
+  }
+
+  if (target === "arrival") {
+    return [...transitDetails].reverse().find((details) =>
+      details.localizedValues?.arrivalTime?.timeZone ?? details.localizedValues?.departureTime?.timeZone
+    )?.localizedValues?.arrivalTime?.timeZone
+      ?? [...transitDetails].reverse().find((details) => details.localizedValues?.departureTime?.timeZone)
+        ?.localizedValues?.departureTime?.timeZone;
+  }
+
+  return transitDetails.find((details) =>
+    details.localizedValues?.departureTime?.timeZone ?? details.localizedValues?.arrivalTime?.timeZone
+  )?.localizedValues?.departureTime?.timeZone
+    ?? transitDetails.find((details) => details.localizedValues?.arrivalTime?.timeZone)
+      ?.localizedValues?.arrivalTime?.timeZone;
+}
+
+function offsetSecondsInTimeZone(date: Date, timeZone: string) {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    });
+    const parts = Object.fromEntries(
+      formatter.formatToParts(date)
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, Number(part.value)])
+    );
+    const representedAsUTC = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second
+    );
+    return Math.round((representedAsUTC - date.getTime()) / 1_000);
+  } catch {
+    return undefined;
+  }
+}
+
+function datePreservingWallClock(value: string, sourceOffsetSeconds: number, timeZone: string) {
+  const sourceDate = new Date(value);
+  if (Number.isNaN(sourceDate.getTime())) {
+    return undefined;
+  }
+
+  let adjustedDate = sourceDate;
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    const destinationOffsetSeconds = offsetSecondsInTimeZone(adjustedDate, timeZone);
+    if (destinationOffsetSeconds == null) {
+      return undefined;
+    }
+    const nextDate = new Date(
+      sourceDate.getTime() + (sourceOffsetSeconds - destinationOffsetSeconds) * 1_000
+    );
+    if (nextDate.getTime() === adjustedDate.getTime()) {
+      break;
+    }
+    adjustedDate = nextDate;
+  }
+
+  return adjustedDate;
+}
+
+function requestAdjustedToRouteTimeZone(request: MobilityPlanRequest, route: GoogleRoute) {
+  const target = request.arrivalTime ? "arrival" : request.departureTime ? "departure" : undefined;
+  if (!target) {
+    return { request };
+  }
+
+  const timeZone = routeTimeZone(route, target);
+  const value = target === "arrival" ? request.arrivalTime : request.departureTime;
+  const sourceOffsetSeconds = target === "arrival"
+    ? request.arrivalTimeZoneOffsetSeconds
+    : request.departureTimeZoneOffsetSeconds;
+  if (!timeZone || !value || sourceOffsetSeconds == null) {
+    return { request, timeZone };
+  }
+
+  const adjustedDate = datePreservingWallClock(value, sourceOffsetSeconds, timeZone);
+  if (!adjustedDate || adjustedDate.toISOString() === new Date(value).toISOString()) {
+    return { request, timeZone };
+  }
+
+  return {
+    request: {
+      ...request,
+      [target === "arrival" ? "arrivalTime" : "departureTime"]: adjustedDate.toISOString()
+    },
+    timeZone
+  };
+}
+
 function providerArrivalTimeForRoute(request: MobilityPlanRequest, mode: RouteMode) {
   if (!request.arrivalTime || mode !== "transit") {
     return request.arrivalTime;
@@ -703,37 +816,46 @@ function emissionsLevelFor(mode: RouteMode): MobilityRouteOption["emissionsLevel
 
 function bufferFor(request: MobilityPlanRequest, mode: RouteMode) {
   const airportBuffer = request.airportBufferMinutes ?? 0;
-  const pickupBuffer = mode === "taxi" ? request.taxiPickupBufferMinutes ?? 10 : 0;
+  const pickupBuffer = mode === "taxi" ? request.taxiPickupBufferMinutes ?? 0 : 0;
   return airportBuffer + pickupBuffer;
 }
 
-function timingFor(request: MobilityPlanRequest, totalMinutes: number) {
+function timingFor(request: MobilityPlanRequest, totalMinutes: number, timeZone?: string) {
   const arrivalTime = request.arrivalTime ? new Date(request.arrivalTime) : undefined;
   const departureTime = request.departureTime ? new Date(request.departureTime) : undefined;
 
   if (arrivalTime && !Number.isNaN(arrivalTime.getTime())) {
     return {
       leaveBy: subtractMinutes(arrivalTime, totalMinutes).toISOString(),
-      arrivalTime: arrivalTime.toISOString()
+      arrivalTime: arrivalTime.toISOString(),
+      departureTimeZone: timeZone,
+      arrivalTimeZone: timeZone
     };
   }
 
   if (departureTime && !Number.isNaN(departureTime.getTime())) {
     return {
       departureTime: departureTime.toISOString(),
-      arrivalTime: addMinutes(departureTime, totalMinutes).toISOString()
+      arrivalTime: addMinutes(departureTime, totalMinutes).toISOString(),
+      departureTimeZone: timeZone,
+      arrivalTimeZone: timeZone
     };
   }
 
   return {};
 }
 
-function optionFromRoute(request: MobilityPlanRequest, mode: RouteMode, route: GoogleRoute): MobilityRouteOption {
+function optionFromRoute(
+  request: MobilityPlanRequest,
+  mode: RouteMode,
+  route: GoogleRoute,
+  timeZone?: string
+): MobilityRouteOption {
   const travelSeconds = travelSecondsFromRoute(route, mode);
   const travelMinutes = travelSeconds ? Math.max(1, Math.round(travelSeconds / 60)) : undefined;
   const bufferMinutes = bufferFor(request, mode);
   const durationMinutes = travelMinutes == null ? undefined : travelMinutes + bufferMinutes;
-  const timing = durationMinutes == null ? {} : timingFor(request, durationMinutes);
+  const timing = durationMinutes == null ? {} : timingFor(request, durationMinutes, timeZone);
   const tradeoffs = tradeoffsFor(mode, durationMinutes, bufferMinutes);
   const steps = routeStepsFromRoute(route, mode);
   if (mode === "transit" && (request.arrivalTime || request.departureTime)) {
@@ -858,6 +980,31 @@ export async function buildMobilityPlan(request: MobilityPlanRequest): Promise<M
   request = await normalizedMobilityRequest(request, warnings);
   const providerConnected = Boolean(mapsApiKey());
   const options: MobilityRouteOption[] = [];
+  let transferTimeZone: string | undefined;
+  let preloadedTransitRoute: GoogleRoute | undefined;
+
+  const needsRouteTimeZone = Boolean(
+    modes.includes("transit")
+      && ((request.arrivalTime && request.arrivalTimeZoneOffsetSeconds != null)
+        || (request.departureTime && request.departureTimeZoneOffsetSeconds != null))
+  );
+  if (providerConnected && needsRouteTimeZone) {
+    try {
+      const initialTransitRoute = await fetchGoogleRoute(request, "transit");
+      if (initialTransitRoute) {
+        const adjusted = requestAdjustedToRouteTimeZone(request, initialTransitRoute);
+        transferTimeZone = adjusted.timeZone;
+        const targetChanged = adjusted.request.arrivalTime !== request.arrivalTime
+          || adjusted.request.departureTime !== request.departureTime;
+        request = adjusted.request;
+        if (!targetChanged) {
+          preloadedTransitRoute = initialTransitRoute;
+        }
+      }
+    } catch {
+      // The regular route request below reports the provider error consistently.
+    }
+  }
 
   for (const mode of modes) {
     if (!providerConnected) {
@@ -866,9 +1013,15 @@ export async function buildMobilityPlan(request: MobilityPlanRequest): Promise<M
     }
 
     try {
-      const route = await fetchGoogleRoute(request, mode);
+      const route = mode === "transit" && preloadedTransitRoute
+        ? preloadedTransitRoute
+        : await fetchGoogleRoute(request, mode);
       if (route) {
-        options.push(optionFromRoute(request, mode, route));
+        transferTimeZone ??= routeTimeZone(
+          route,
+          request.arrivalTime ? "arrival" : "departure"
+        );
+        options.push(optionFromRoute(request, mode, route, transferTimeZone));
       } else {
         options.push(disconnectedOption(request, mode));
       }

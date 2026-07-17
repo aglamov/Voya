@@ -756,6 +756,13 @@ struct TransferDetailView: View {
     }
 
     private func departureTimeText(for option: MobilityRouteOption) -> String? {
+        if let value = option.departureTime ?? option.leaveBy,
+           let date = MobilityDateFormatter.date(from: value) {
+            return MobilityDateFormatter.timeString(
+                from: date,
+                timeZoneIdentifier: option.departureTimeZone
+            )
+        }
         if let localized = option.steps?.compactMap(\.departureTimeText).first?.nilIfEmpty {
             return localized
         }
@@ -764,6 +771,13 @@ struct TransferDetailView: View {
     }
 
     private func arrivalTimeText(for option: MobilityRouteOption) -> String? {
+        if let value = option.arrivalTime,
+           let date = MobilityDateFormatter.date(from: value) {
+            return MobilityDateFormatter.timeString(
+                from: date,
+                timeZoneIdentifier: option.arrivalTimeZone
+            )
+        }
         if let localized = option.steps?.compactMap(\.arrivalTimeText).last?.nilIfEmpty {
             return localized
         }
@@ -783,12 +797,16 @@ struct TransferDetailView: View {
     }
 
     private func routeDepartureDate(for option: MobilityRouteOption) -> Date? {
-        earliestStepDate(option.steps?.compactMap { $0.departureTime.flatMap(MobilityDateFormatter.date(from:)) } ?? [])
-            ?? option.departureTime.flatMap(MobilityDateFormatter.date(from:))
+        option.departureTime.flatMap(MobilityDateFormatter.date(from:))
             ?? option.leaveBy.flatMap(MobilityDateFormatter.date(from:))
+            ?? earliestStepDate(option.steps?.compactMap { $0.departureTime.flatMap(MobilityDateFormatter.date(from:)) } ?? [])
     }
 
     private func routeArrivalDate(for option: MobilityRouteOption) -> Date? {
+        if let arrival = option.arrivalTime.flatMap(MobilityDateFormatter.date(from:)) {
+            return arrival
+        }
+
         if let stepArrival = latestStepDate(option.steps?.compactMap { $0.arrivalTime.flatMap(MobilityDateFormatter.date(from:)) } ?? []) {
             return stepArrival
         }
@@ -798,7 +816,7 @@ struct TransferDetailView: View {
             return departure.addingTimeInterval(TimeInterval(travelMinutes * 60))
         }
 
-        return option.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
+        return nil
     }
 
     private func earliestStepDate(_ dates: [Date]) -> Date? {
@@ -949,5 +967,18 @@ enum MobilityDateFormatter {
 
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
+    }
+
+    static func timeString(from date: Date, timeZoneIdentifier: String?) -> String {
+        guard let timeZoneIdentifier,
+              let timeZone = TimeZone(identifier: timeZoneIdentifier) else {
+            return time.string(from: date)
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
     }
 }

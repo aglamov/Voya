@@ -68,6 +68,8 @@ struct MobilityRouteOption: Codable, Identifiable {
     var distanceMeters: Int?
     var departureTime: String?
     var arrivalTime: String?
+    var departureTimeZone: String?
+    var arrivalTimeZone: String?
     var leaveBy: String?
     var reliability: String
     var costLevel: String
@@ -118,6 +120,8 @@ struct MobilityTransferContext: Identifiable {
     var destination: String
     var targetArrivalAt: Date?
     var targetDepartureAt: Date?
+    var targetArrivalTimeZoneOffsetSeconds: Int?
+    var targetDepartureTimeZoneOffsetSeconds: Int?
     var airportBufferMinutes: Int
     var taxiPickupBufferMinutes: Int
 }
@@ -184,6 +188,8 @@ struct VercelMobilityService {
                 destination: MobilityPlace(address: context.destination),
                 arrivalTime: context.targetArrivalAt,
                 departureTime: context.targetDepartureAt,
+                arrivalTimeZoneOffsetSeconds: context.targetArrivalTimeZoneOffsetSeconds,
+                departureTimeZoneOffsetSeconds: context.targetDepartureTimeZoneOffsetSeconds,
                 locale: VoyaAppLocale.currentIdentifier,
                 modes: [.transit, .taxi, .drive],
                 ownedVehicleAvailable: false,
@@ -242,8 +248,22 @@ struct VercelMobilityService {
             destination: destination,
             targetArrivalAt: destinationIsAfterOrigin ? destinationTargetAt : nil,
             targetDepartureAt: destinationIsAfterOrigin ? nil : originReadyAt,
+            targetArrivalTimeZoneOffsetSeconds: destinationIsAfterOrigin
+                ? timeZoneOffsetSeconds(
+                    for: destinationTargetAt,
+                    storedOffsetSeconds: destinationItem.startsAtTimeZoneOffsetSeconds
+                )
+                : nil,
+            targetDepartureTimeZoneOffsetSeconds: destinationIsAfterOrigin
+                ? nil
+                : timeZoneOffsetSeconds(
+                    for: originReadyAt,
+                    storedOffsetSeconds: originItem.endsAt != nil
+                        ? originItem.endsAtTimeZoneOffsetSeconds ?? originItem.startsAtTimeZoneOffsetSeconds
+                        : originItem.startsAtTimeZoneOffsetSeconds
+                ),
             airportBufferMinutes: airportBufferMinutes(for: destinationItem),
-            taxiPickupBufferMinutes: 10
+            taxiPickupBufferMinutes: 0
         )
     }
 
@@ -267,8 +287,13 @@ struct VercelMobilityService {
             destination: destination,
             targetArrivalAt: firstItem.startsAt,
             targetDepartureAt: nil,
+            targetArrivalTimeZoneOffsetSeconds: timeZoneOffsetSeconds(
+                for: firstItem.startsAt,
+                storedOffsetSeconds: firstItem.startsAtTimeZoneOffsetSeconds
+            ),
+            targetDepartureTimeZoneOffsetSeconds: nil,
             airportBufferMinutes: airportBufferMinutes(for: firstItem),
-            taxiPickupBufferMinutes: 10
+            taxiPickupBufferMinutes: 0
         )
     }
 
@@ -291,8 +316,15 @@ struct VercelMobilityService {
             destination: destinationAddress,
             targetArrivalAt: nil,
             targetDepartureAt: lastItem.endsAt ?? lastItem.startsAt,
+            targetArrivalTimeZoneOffsetSeconds: nil,
+            targetDepartureTimeZoneOffsetSeconds: timeZoneOffsetSeconds(
+                for: lastItem.endsAt ?? lastItem.startsAt,
+                storedOffsetSeconds: lastItem.endsAt != nil
+                    ? lastItem.endsAtTimeZoneOffsetSeconds ?? lastItem.startsAtTimeZoneOffsetSeconds
+                    : lastItem.startsAtTimeZoneOffsetSeconds
+            ),
             airportBufferMinutes: 0,
-            taxiPickupBufferMinutes: 10
+            taxiPickupBufferMinutes: 0
         )
     }
 
@@ -412,6 +444,11 @@ struct VercelMobilityService {
     private static func airportBufferMinutes(for item: ItineraryItem) -> Int {
         item.kind == .flight ? 120 : 0
     }
+
+    private static func timeZoneOffsetSeconds(for date: Date?, storedOffsetSeconds: Int?) -> Int? {
+        guard let date else { return nil }
+        return storedOffsetSeconds ?? TimeZone.autoupdatingCurrent.secondsFromGMT(for: date)
+    }
 }
 
 struct MobilityPlanRequest: Encodable {
@@ -419,6 +456,8 @@ struct MobilityPlanRequest: Encodable {
     var destination: MobilityPlace
     var arrivalTime: Date?
     var departureTime: Date?
+    var arrivalTimeZoneOffsetSeconds: Int?
+    var departureTimeZoneOffsetSeconds: Int?
     var locale: String
     var modes: [MobilityRouteMode]
     var ownedVehicleAvailable: Bool
@@ -490,6 +529,8 @@ enum MobilityPlanCache {
             context.destination,
             context.targetArrivalAt?.ISO8601Format() ?? "",
             context.targetDepartureAt?.ISO8601Format() ?? "",
+            context.targetArrivalTimeZoneOffsetSeconds.map(String.init) ?? "",
+            context.targetDepartureTimeZoneOffsetSeconds.map(String.init) ?? "",
             String(context.airportBufferMinutes),
             String(context.taxiPickupBufferMinutes)
         ].joined(separator: "|")

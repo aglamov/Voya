@@ -141,7 +141,7 @@ Flight support endpoints:
 
 Mobility support endpoints:
 
-- `POST /api/mobility` with origin, destination, target arrival/departure time, candidate modes, and Voya buffer settings. It returns provider-neutral route options, total duration, travel duration, buffer minutes, leave-by time, trade-offs, map handoff URLs, and a recommended mode. Without a Google key, it returns explicit provider warnings and usable map handoff URLs instead of fake ETAs.
+- `POST /api/mobility` with origin, destination, target arrival/departure time, candidate modes, and Voya buffer settings. Send `arrivalTimeZoneOffsetSeconds` or `departureTimeZoneOffsetSeconds` with a target so Voya can preserve its wall-clock time when the route is in another time zone. It returns provider-neutral route options, total duration, travel duration, buffer minutes, leave-by time, route time-zone identifiers, trade-offs, map handoff URLs, and a recommended mode. Without a Google key, it returns explicit provider warnings and usable map handoff URLs instead of fake ETAs.
 
 Destination image endpoint:
 

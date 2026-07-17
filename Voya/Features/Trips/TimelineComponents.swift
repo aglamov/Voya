@@ -432,6 +432,13 @@ struct TransferRecommendationCard: View {
     }
 
     private func departureTimeText(for option: MobilityRouteOption) -> String? {
+        if let value = option.departureTime ?? option.leaveBy,
+           let date = MobilityDateFormatter.date(from: value) {
+            return MobilityDateFormatter.timeString(
+                from: date,
+                timeZoneIdentifier: option.departureTimeZone
+            )
+        }
         if let localized = option.steps?.compactMap(\.departureTimeText).first?.nilIfEmpty {
             return localized
         }
@@ -440,36 +447,42 @@ struct TransferRecommendationCard: View {
     }
 
     private func routeTimeRangeText(for option: MobilityRouteOption) -> String? {
-        let localizedDeparture = option.steps?.compactMap(\.departureTimeText).first?.nilIfEmpty
-        let localizedArrival = option.steps?.compactMap(\.arrivalTimeText).last?.nilIfEmpty
-        if let localizedDeparture, let localizedArrival {
-            return "\(localizedDeparture)-\(localizedArrival)"
-        }
-        if let localizedDeparture {
-            return String(localized: "Leave \(localizedDeparture)")
-        }
-        if let localizedArrival {
-            return String(localized: "Arrive \(localizedArrival)")
+        guard let departure = departureTimeText(for: option) else {
+            return arrivalTimeText(for: option).map { String(localized: "Arrive \($0)") }
         }
 
-        guard let departure = routeDepartureDate(for: option) else {
-            return routeArrivalDate(for: option)
-                .map { String(localized: "Arrive \(MobilityDateFormatter.time.string(from: $0))") }
+        if let arrival = arrivalTimeText(for: option) {
+            return "\(departure)-\(arrival)"
         }
+        return String(localized: "Leave \(departure)")
+    }
 
-        if let arrival = routeArrivalDate(for: option) {
-            return "\(MobilityDateFormatter.time.string(from: departure))-\(MobilityDateFormatter.time.string(from: arrival))"
+    private func arrivalTimeText(for option: MobilityRouteOption) -> String? {
+        if let value = option.arrivalTime,
+           let date = MobilityDateFormatter.date(from: value) {
+            return MobilityDateFormatter.timeString(
+                from: date,
+                timeZoneIdentifier: option.arrivalTimeZone
+            )
         }
-        return String(localized: "Leave \(MobilityDateFormatter.time.string(from: departure))")
+        if let localized = option.steps?.compactMap(\.arrivalTimeText).last?.nilIfEmpty {
+            return localized
+        }
+        return routeArrivalDate(for: option)
+            .map { MobilityDateFormatter.time.string(from: $0) }
     }
 
     private func routeDepartureDate(for option: MobilityRouteOption) -> Date? {
-        (option.steps?.compactMap { $0.departureTime.flatMap(MobilityDateFormatter.date(from:)) } ?? []).min()
-            ?? option.departureTime.flatMap(MobilityDateFormatter.date(from:))
+        option.departureTime.flatMap(MobilityDateFormatter.date(from:))
             ?? option.leaveBy.flatMap(MobilityDateFormatter.date(from:))
+            ?? (option.steps?.compactMap { $0.departureTime.flatMap(MobilityDateFormatter.date(from:)) } ?? []).min()
     }
 
     private func routeArrivalDate(for option: MobilityRouteOption) -> Date? {
+        if let arrival = option.arrivalTime.flatMap(MobilityDateFormatter.date(from:)) {
+            return arrival
+        }
+
         if let stepArrival = (option.steps?.compactMap { $0.arrivalTime.flatMap(MobilityDateFormatter.date(from:)) } ?? []).max() {
             return stepArrival
         }
@@ -479,7 +492,7 @@ struct TransferRecommendationCard: View {
             return departure.addingTimeInterval(TimeInterval(travelMinutes * 60))
         }
 
-        return option.arrivalTime.flatMap(MobilityDateFormatter.date(from:))
+        return nil
     }
 
     private func transitSteps(for option: MobilityRouteOption) -> [MobilityRouteStep]? {
