@@ -61,8 +61,14 @@ struct EditTripView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 14) {
-                        ClearableTextField("Title", text: $draft.title, prompt: "Trip to Rome")
-                        ClearableTextField("Destination", text: $draft.destination, prompt: "Rome")
+                        ClearableTextField("Trip name", text: $draft.title, prompt: "Trip to Rome")
+                        ClearableTextField("Destination city or country", text: $draft.destination, prompt: "City or country")
+                        ClearableTextField(
+                            "Destination place / map link",
+                            text: $draft.destinationLocation,
+                            prompt: "Address, venue, or Google Maps link",
+                            lineLimit: 2...4
+                        )
                         ClearableTextField("Summary", text: $draft.summary, prompt: "Confirmed flights and stay")
                         ClearableTextField("Notes", text: $draft.notes, prompt: "Anything useful for this trip", lineLimit: 3...6)
                     }

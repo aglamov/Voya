@@ -36,6 +36,7 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
 
     private let center = UNUserNotificationCenter.current()
     private let identifierPrefix = "voya.trip."
+    private let transferReminderLeadTime: TimeInterval = 10 * 60
     private var hasRequestedAuthorization = false
     private var pendingDestination: VoyaNotificationDestination?
 
@@ -111,8 +112,14 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
         let pending = await center.pendingNotificationRequests()
         let identifiers = pending
             .map(\.identifier)
-            .filter { $0.hasPrefix(identifierPrefix) }
+            .filter { $0.hasPrefix(identifierPrefix) && !$0.contains(".transfer.") }
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
+    }
+
+    func cancelTransferNotification(context: MobilityTransferContext) {
+        center.removePendingNotificationRequests(
+            withIdentifiers: transferNotificationIdentifiers(for: context)
+        )
     }
 
     func scheduleTransferNotification(
@@ -120,18 +127,28 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
         option: MobilityRouteOption,
         now: Date = Date()
     ) async {
-        guard let leaveBy = option.leaveBy,
-              let triggerDate = Self.date(from: leaveBy),
-              triggerDate > now.addingTimeInterval(60),
+        guard let leaveBy = option.leaveBy ?? option.departureTime,
+              let leaveByDate = Self.date(from: leaveBy) else {
+            return
+        }
+
+        let triggerDate = leaveByDate.addingTimeInterval(-transferReminderLeadTime)
+        let triggerInterval = triggerDate.timeIntervalSince(now)
+        guard triggerInterval > 60,
               await requestAuthorizationIfNeeded() else {
             return
         }
 
-        let identifier = "\(identifierPrefix)transfer.\(context.id)"
-        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+        let identifiers = transferNotificationIdentifiers(for: context)
+        let identifier = identifiers[0]
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
 
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "Time to leave")
+        let leaveByText = Self.timeText(
+            for: leaveByDate,
+            timeZoneIdentifier: option.departureTimeZone
+        )
+        content.title = String(localized: "Leave by \(leaveByText)")
         content.subtitle = option.title
         content.body = String(localized: "Open the route and start moving to \(context.destination).")
         content.sound = .default
@@ -139,11 +156,13 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
         content.userInfo = [
             "transferID": context.id,
             "kind": "transfer",
-            "mode": option.mode.rawValue
+            "mode": option.mode.rawValue,
+            "leaveBy": leaveBy,
+            "reminderMinutes": Int(transferReminderLeadTime / 60)
         ]
 
-        let trigger = UNCalendarNotificationTrigger(
-            dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: triggerDate),
+        let trigger = UNTimeIntervalNotificationTrigger(
+            timeInterval: triggerInterval,
             repeats: false
         )
 
@@ -158,6 +177,14 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
         } catch {
             return
         }
+    }
+
+    private func transferNotificationIdentifiers(for context: MobilityTransferContext) -> [String] {
+        let scope = context.tripID?.uuidString ?? "unscoped"
+        return [
+            "\(identifierPrefix)\(scope).transfer.\(context.id)",
+            "\(identifierPrefix)transfer.\(context.id)"
+        ]
     }
 
     nonisolated func userNotificationCenter(
@@ -248,6 +275,14 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
 
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
+    }
+
+    private static func timeText(for date: Date, timeZoneIdentifier: String?) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .autoupdatingCurrent
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
     }
 
     private func notificationRequests(for item: VoyaNotificationItem, in trip: VoyaNotificationTrip, now: Date) -> [UNNotificationRequest] {

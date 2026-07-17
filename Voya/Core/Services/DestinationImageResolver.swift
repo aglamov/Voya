@@ -7,6 +7,7 @@ enum VoyaPreferenceKey {
     static let homeLocationAddress = "voya.homeLocationAddress"
     static let hiddenTransferIDs = "voya.hiddenTransferIDs"
     static let transferBufferOverrides = "voya.transferBufferOverrides"
+    static let arrivalFormalitiesOverrides = "voya.arrivalFormalitiesOverrides"
 }
 
 struct DestinationHeroImage {

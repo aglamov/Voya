@@ -359,6 +359,7 @@ struct EditItineraryItemView: View {
 struct TripDraft {
     var title: String
     var destination: String
+    var destinationLocation: String
     var summary: String
     var notes: String
     var startLocationName: String
@@ -369,6 +370,7 @@ struct TripDraft {
     init(trip: Trip) {
         title = trip.title
         destination = trip.destination ?? ""
+        destinationLocation = trip.destinationLocation ?? ""
         summary = trip.summary
         notes = trip.notes ?? ""
         startLocationName = trip.startLocationName ?? ""

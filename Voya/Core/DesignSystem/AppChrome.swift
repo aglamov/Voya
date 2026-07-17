@@ -209,7 +209,7 @@ struct TripChip: View {
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(trip.title)
+                Text(trip.destination?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? trip.title)
                     .font(.subheadline.weight(.bold))
                     .lineLimit(1)
                 Text(trip.displayDates)

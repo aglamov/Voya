@@ -104,10 +104,10 @@ type TicketmasterEvent = {
 
 const locationNormalizationSchema = z.object({
   displayName: z.string().min(1).describe("Short human-readable place or venue name."),
-  city: z.string().min(1).describe("City or locality to use for weather/events provider lookup."),
+  city: z.string().min(1).describe("City or locality containing the itinerary location."),
   country: z.string().optional().nullable(),
-  weatherQuery: z.string().min(1).describe("Best location query for weather provider lookup."),
-  eventsQuery: z.string().min(1).describe("Best location query for nearby event discovery."),
+  weatherQuery: z.string().min(1).describe("Nearest major city and country for provider lookups, not the venue or street address."),
+  eventsQuery: z.string().min(1).describe("The same nearest major city and country used for nearby event discovery."),
   coordinates: z.object({
     lat: z.number().min(-90).max(90),
     lon: z.number().min(-180).max(180)
@@ -381,10 +381,13 @@ async function aiLocationLookup(kind: string, title: string, location: string): 
         "You normalize a travel itinerary item's location for weather and nearby event provider lookups.",
         "Return concise structured JSON only.",
         "For flight or transit routes, use the destination as the weather/events location, not the origin.",
-        "For hotels and events, prefer the venue city/locality and country.",
+        "Use one shared provider location for both weather and nearby-event lookups.",
+        "Use the nearest major city with reliable city-level provider coverage, never a venue, neighborhood, suburb, or street address.",
+        "For example, use 'Bilbao, Spain' for Getxo and 'Zurich, Switzerland' for a Zurich venue.",
+        "Return the same major-city value in weatherQuery and eventsQuery.",
         "If the input is a Google Maps URL or long address, extract the venue, city, and country if visible.",
         "Do not invent precise coordinates. Include coordinates only if they are explicitly present in the input.",
-        "If coordinates are not explicit, return a weatherQuery and eventsQuery such as 'Bad Ragaz, Switzerland'."
+        "If coordinates are not explicit, still return both provider queries."
       ].join(" "),
       prompt: [
         `Kind: ${kind || "unknown"}`,
@@ -395,12 +398,10 @@ async function aiLocationLookup(kind: string, title: string, location: string): 
       ].join("\n")
     });
 
-    const coordinates = object.coordinates
-      ? { lat: object.coordinates.lat, lon: object.coordinates.lon, name: object.displayName, country: object.country ?? undefined }
-      : undefined;
-    const query = object.weatherQuery || object.eventsQuery || [object.city, object.country].filter(Boolean).join(", ");
+    const fallbackQuery = [object.city, object.country].filter(Boolean).join(", ");
+    const query = object.weatherQuery || object.eventsQuery || fallbackQuery;
 
-    return query ? { query, coordinates, source: "ai" } : undefined;
+    return query ? { query, source: "ai" } : undefined;
   } catch (error) {
     console.error("Location normalization failed", error);
     return undefined;
@@ -409,24 +410,20 @@ async function aiLocationLookup(kind: string, title: string, location: string): 
 
 async function normalizeLocationForProviders(kind: string, title: string, location: string): Promise<LocationLookup | undefined> {
   const deterministic = await deterministicLocationLookup(kind, location);
-  if (deterministic?.coordinates) {
-    return deterministic;
-  }
-
   const ai = await aiLocationLookup(kind, title, location);
-  if (ai?.coordinates) {
-    return ai;
-  }
-
   if (ai?.query) {
     const localPlace = localCoordinates(ai.query);
     if (localPlace) {
       return { ...ai, coordinates: localPlace };
     }
-    return ai;
   }
 
-  return deterministic;
+  const prefersMajorCity = kind === "hotel" || kind === "event";
+  if (prefersMajorCity) {
+    return majorProviderCityLookup(deterministic?.query ?? location) ?? ai ?? deterministic;
+  }
+
+  return deterministic?.coordinates ? deterministic : ai ?? deterministic;
 }
 
 const knownCoordinates: Record<string, Coordinates> = {
@@ -437,6 +434,21 @@ const knownCoordinates: Record<string, Coordinates> = {
   "bad ragaz": { lat: 47.006, lon: 9.5027, name: "Bad Ragaz", country: "CH" },
   london: { lat: 51.5072, lon: -0.1276, name: "London", country: "GB" }
 };
+
+const majorProviderCityAliases: Record<string, Coordinates> = {
+  getxo: knownCoordinates.bilbao,
+  algorta: knownCoordinates.bilbao
+};
+
+function majorProviderCityLookup(location: string): LocationLookup | undefined {
+  const key = asciiKey(location);
+  for (const [alias, coordinates] of Object.entries(majorProviderCityAliases)) {
+    if (key.includes(alias)) {
+      return { query: `${coordinates.name}, ${coordinates.country}`, coordinates, source: "deterministic" };
+    }
+  }
+  return undefined;
+}
 
 function localCoordinates(location: string) {
   const directCoordinates = coordinatesFromText(location);
@@ -701,7 +713,23 @@ async function weatherCard(location: string | LocationLookup | undefined, isRuss
       return undefined;
     }
   }));
-  const alertNames = alerts.flatMap((alert) => alert ? [alert.event] : []);
+  const alertSummaries = alerts.flatMap((alert) => {
+    if (!alert) return [];
+
+    const description = alert.description
+      .replace(/\s+/g, " ")
+      .trim();
+    const distinctDescription = description.toLowerCase() === alert.event.toLowerCase()
+      ? ""
+      : description;
+    const compactDescription = distinctDescription.length > 180
+      ? `${distinctDescription.slice(0, 177)}...`
+      : distinctDescription;
+    const basis = isRussian
+      ? `Источник: ${alert.source}. Предупреждение относится к району или периоду, а не обязательно к погоде прямо сейчас.`
+      : `Source: ${alert.source}. The advisory applies to an area or time window, not necessarily to conditions at this exact moment.`;
+    return [[alert.event, compactDescription, basis].filter(Boolean).join(" · ")];
+  });
   const alertCount = alertIDs.length;
 
   return {
@@ -709,7 +737,11 @@ async function weatherCard(location: string | LocationLookup | undefined, isRuss
     value: temp == null ? (isRussian ? "Прогноз готов" : "Forecast ready") : `${Math.round(temp)} C`,
     detail: [
       description,
-      alertCount > 0 ? (alertNames.join(", ") || (isRussian ? `${alertCount} погодных предупреждений` : `${alertCount} weather alert${alertCount === 1 ? "" : "s"}`)) : undefined
+      alertCount > 0
+        ? (alertSummaries.join("; ") || (isRussian
+          ? `${alertCount} погодных предупреждений от OpenWeather. Они могут относиться к более широкой территории или другому времени.`
+          : `${alertCount} OpenWeather alert${alertCount === 1 ? "" : "s"}. They may apply to a wider area or a different time window.`))
+        : undefined
     ].filter(Boolean).join(" · "),
     kind: alertCount > 0 ? "warning" : "weather"
   };

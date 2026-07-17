@@ -122,8 +122,28 @@ struct MobilityTransferContext: Identifiable {
     var targetDepartureAt: Date?
     var targetArrivalTimeZoneOffsetSeconds: Int?
     var targetDepartureTimeZoneOffsetSeconds: Int?
+    var earliestDepartureAt: Date?
+    var earliestDepartureTimeZoneOffsetSeconds: Int?
+    var suggestedArrivalFormalitiesMinutes: Int
+    var arrivalFormalitiesMinutes: Int
     var airportBufferMinutes: Int
     var taxiPickupBufferMinutes: Int
+}
+
+extension MobilityTransferContext {
+    func adjustingArrivalFormalities(to minutes: Int) -> MobilityTransferContext {
+        let boundedMinutes = min(max(minutes, 0), 180)
+        let delta = TimeInterval((boundedMinutes - arrivalFormalitiesMinutes) * 60)
+        var adjustedContext = self
+
+        adjustedContext.arrivalFormalitiesMinutes = boundedMinutes
+        adjustedContext.earliestDepartureAt = earliestDepartureAt?.addingTimeInterval(delta)
+        if targetArrivalAt == nil, let targetDepartureAt {
+            adjustedContext.targetDepartureAt = targetDepartureAt.addingTimeInterval(delta)
+        }
+
+        return adjustedContext
+    }
 }
 
 struct MobilityTransferRouteOverride: Codable {
@@ -168,6 +188,24 @@ struct VercelMobilityService {
     }
 
     func planTransfer(context: MobilityTransferContext) async throws -> MobilityPlan {
+        let plan = try await requestPlan(context: context)
+        guard let earliestDepartureAt = context.earliestDepartureAt,
+              context.targetArrivalAt != nil,
+              let plannedDepartureValue = plan.defaultOption?.leaveBy ?? plan.defaultOption?.departureTime,
+              let plannedDeparture = Self.routeDate(from: plannedDepartureValue),
+              plannedDeparture < earliestDepartureAt else {
+            return plan
+        }
+
+        var departureContext = context
+        departureContext.targetArrivalAt = nil
+        departureContext.targetArrivalTimeZoneOffsetSeconds = nil
+        departureContext.targetDepartureAt = earliestDepartureAt
+        departureContext.targetDepartureTimeZoneOffsetSeconds = context.earliestDepartureTimeZoneOffsetSeconds
+        return try await requestPlan(context: departureContext)
+    }
+
+    private func requestPlan(context: MobilityTransferContext) async throws -> MobilityPlan {
         guard let baseURL else {
             throw VercelExtractionError.notConfigured
         }
@@ -230,7 +268,14 @@ struct VercelMobilityService {
             return nil
         }
 
-        let originReadyAt = originItem.endsAt ?? originItem.startsAt
+        let formalitiesMinutes = arrivalFormalitiesMinutes(for: originItem)
+        let rawOriginReadyAt = originItem.endsAt ?? originItem.startsAt
+        let originReadyAt = rawOriginReadyAt.map {
+            $0.addingTimeInterval(TimeInterval(formalitiesMinutes * 60))
+        }
+        let originReadyOffset = originItem.endsAt != nil
+            ? originItem.endsAtTimeZoneOffsetSeconds ?? originItem.startsAtTimeZoneOffsetSeconds
+            : originItem.startsAtTimeZoneOffsetSeconds
         let destinationTargetAt = destinationItem.startsAt
         let destinationIsAfterOrigin = switch (originReadyAt, destinationTargetAt) {
         case let (originReadyAt?, destinationTargetAt?):
@@ -258,10 +303,14 @@ struct VercelMobilityService {
                 ? nil
                 : timeZoneOffsetSeconds(
                     for: originReadyAt,
-                    storedOffsetSeconds: originItem.endsAt != nil
-                        ? originItem.endsAtTimeZoneOffsetSeconds ?? originItem.startsAtTimeZoneOffsetSeconds
-                        : originItem.startsAtTimeZoneOffsetSeconds
+                    storedOffsetSeconds: originReadyOffset
                 ),
+            earliestDepartureAt: formalitiesMinutes > 0 ? originReadyAt : nil,
+            earliestDepartureTimeZoneOffsetSeconds: formalitiesMinutes > 0
+                ? timeZoneOffsetSeconds(for: originReadyAt, storedOffsetSeconds: originReadyOffset)
+                : nil,
+            suggestedArrivalFormalitiesMinutes: formalitiesMinutes,
+            arrivalFormalitiesMinutes: formalitiesMinutes,
             airportBufferMinutes: airportBufferMinutes(for: destinationItem),
             taxiPickupBufferMinutes: 0
         )
@@ -292,6 +341,10 @@ struct VercelMobilityService {
                 storedOffsetSeconds: firstItem.startsAtTimeZoneOffsetSeconds
             ),
             targetDepartureTimeZoneOffsetSeconds: nil,
+            earliestDepartureAt: nil,
+            earliestDepartureTimeZoneOffsetSeconds: nil,
+            suggestedArrivalFormalitiesMinutes: 0,
+            arrivalFormalitiesMinutes: 0,
             airportBufferMinutes: airportBufferMinutes(for: firstItem),
             taxiPickupBufferMinutes: 0
         )
@@ -309,20 +362,31 @@ struct VercelMobilityService {
             return nil
         }
 
+        let formalitiesMinutes = arrivalFormalitiesMinutes(for: lastItem)
+        let rawDepartureAt = lastItem.endsAt ?? lastItem.startsAt
+        let departureAt = rawDepartureAt.map {
+            $0.addingTimeInterval(TimeInterval(formalitiesMinutes * 60))
+        }
+        let departureOffset = lastItem.endsAt != nil
+            ? lastItem.endsAtTimeZoneOffsetSeconds ?? lastItem.startsAtTimeZoneOffsetSeconds
+            : lastItem.startsAtTimeZoneOffsetSeconds
+
         return MobilityTransferContext(
             id: "\(trip.id.uuidString)-end-\(lastItem.id.uuidString)",
             tripID: trip.id,
             origin: origin,
             destination: destinationAddress,
             targetArrivalAt: nil,
-            targetDepartureAt: lastItem.endsAt ?? lastItem.startsAt,
+            targetDepartureAt: departureAt,
             targetArrivalTimeZoneOffsetSeconds: nil,
             targetDepartureTimeZoneOffsetSeconds: timeZoneOffsetSeconds(
-                for: lastItem.endsAt ?? lastItem.startsAt,
-                storedOffsetSeconds: lastItem.endsAt != nil
-                    ? lastItem.endsAtTimeZoneOffsetSeconds ?? lastItem.startsAtTimeZoneOffsetSeconds
-                    : lastItem.startsAtTimeZoneOffsetSeconds
+                for: departureAt,
+                storedOffsetSeconds: departureOffset
             ),
+            earliestDepartureAt: nil,
+            earliestDepartureTimeZoneOffsetSeconds: nil,
+            suggestedArrivalFormalitiesMinutes: formalitiesMinutes,
+            arrivalFormalitiesMinutes: formalitiesMinutes,
             airportBufferMinutes: 0,
             taxiPickupBufferMinutes: 0
         )
@@ -445,6 +509,37 @@ struct VercelMobilityService {
         item.kind == .flight ? 120 : 0
     }
 
+    private static func arrivalFormalitiesMinutes(for item: ItineraryItem) -> Int {
+        guard item.kind == .flight, item.endsAt != nil else { return 0 }
+        return isLikelyInternationalFlight(item) ? 75 : 45
+    }
+
+    private static func isLikelyInternationalFlight(_ item: ItineraryItem) -> Bool {
+        let searchableText = "\(item.title) \(item.location) \(item.status)"
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+        if searchableText.contains("international") || searchableText.contains("международ") {
+            return true
+        }
+
+        if let departureOffset = item.startsAtTimeZoneOffsetSeconds,
+           let arrivalOffset = item.endsAtTimeZoneOffsetSeconds,
+           departureOffset != arrivalOffset {
+            return true
+        }
+
+        guard let startsAt = item.startsAt, let endsAt = item.endsAt else { return false }
+        return endsAt.timeIntervalSince(startsAt) >= 4 * 60 * 60
+    }
+
+    private static func routeDate(from value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
+    }
+
     private static func timeZoneOffsetSeconds(for date: Date?, storedOffsetSeconds: Int?) -> Int? {
         guard let date else { return nil }
         return storedOffsetSeconds ?? TimeZone.autoupdatingCurrent.secondsFromGMT(for: date)
@@ -524,16 +619,18 @@ enum MobilityPlanCache {
     }
 
     private static func signature(for context: MobilityTransferContext) -> String {
-        [
-            context.origin,
-            context.destination,
-            context.targetArrivalAt?.ISO8601Format() ?? "",
-            context.targetDepartureAt?.ISO8601Format() ?? "",
-            context.targetArrivalTimeZoneOffsetSeconds.map(String.init) ?? "",
-            context.targetDepartureTimeZoneOffsetSeconds.map(String.init) ?? "",
-            String(context.airportBufferMinutes),
-            String(context.taxiPickupBufferMinutes)
-        ].joined(separator: "|")
+        var components = [context.origin, context.destination]
+        components.append(context.targetArrivalAt?.ISO8601Format() ?? "")
+        components.append(context.targetDepartureAt?.ISO8601Format() ?? "")
+        components.append(context.targetArrivalTimeZoneOffsetSeconds.map(String.init) ?? "")
+        components.append(context.targetDepartureTimeZoneOffsetSeconds.map(String.init) ?? "")
+        components.append(context.earliestDepartureAt?.ISO8601Format() ?? "")
+        components.append(context.earliestDepartureTimeZoneOffsetSeconds.map(String.init) ?? "")
+        components.append(String(context.suggestedArrivalFormalitiesMinutes))
+        components.append(String(context.arrivalFormalitiesMinutes))
+        components.append(String(context.airportBufferMinutes))
+        components.append(String(context.taxiPickupBufferMinutes))
+        return components.joined(separator: "|")
     }
 
     private static func expirationDate(for context: MobilityTransferContext, now: Date) -> Date {

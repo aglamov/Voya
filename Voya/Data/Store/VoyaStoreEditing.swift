@@ -43,6 +43,7 @@ extension VoyaStore {
         _ trip: Trip,
         title: String,
         destination: String,
+        destinationLocation: String,
         summary: String,
         notes: String,
         startLocationName: String,
@@ -52,6 +53,7 @@ extension VoyaStore {
     ) {
         trip.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         trip.destination = destination.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        trip.destinationLocation = destinationLocation.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         trip.summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
         trip.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         trip.startLocationName = startLocationName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty

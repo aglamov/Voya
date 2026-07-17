@@ -70,6 +70,34 @@ struct TimelineRow: View {
                             .foregroundStyle(Color.voyaMuted.opacity(phase.contentOpacity))
                     }
 
+                    if let prominentDepartureTime {
+                        HStack(alignment: .center, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Departure time")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(phase.secondaryColor)
+
+                                Text(prominentDepartureTime)
+                                    .font(.system(size: 30, weight: .heavy, design: .rounded))
+                                    .foregroundStyle(phase.titleColor)
+                                    .monospacedDigit()
+                            }
+
+                            Spacer(minLength: 8)
+
+                            Image(systemName: prominentDepartureSymbol)
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(kindAccent)
+                                .frame(width: 40, height: 40)
+                                .background(kindAccent.opacity(0.12))
+                                .clipShape(Circle())
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(kindAccent.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    }
+
                     Text(displayLocation.isEmpty ? String(localized: "Location needed") : displayLocation)
                         .font(.subheadline)
                         .foregroundStyle(phase.secondaryColor)
@@ -100,6 +128,22 @@ struct TimelineRow: View {
 
     private var kindAccent: Color {
         item.kind.timelineAccent
+    }
+
+    private var prominentDepartureTime: String? {
+        guard item.kind == .flight || item.kind == .transit,
+              let startsAt = item.startsAt else {
+            return nil
+        }
+
+        return ItineraryDateFormatter.displayClock(
+            date: startsAt,
+            timeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds
+        )
+    }
+
+    private var prominentDepartureSymbol: String {
+        item.kind == .flight ? "airplane.departure" : item.kind.symbol
     }
 }
 
@@ -259,6 +303,33 @@ struct TransferRecommendationCard: View {
                     .foregroundStyle(Color.voyaCoral)
             }
 
+            if let leaveByText {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Leave by")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(phase.secondaryColor)
+
+                        Text(leaveByText)
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(phase.titleColor)
+                            .monospacedDigit()
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Label("Reminder 10 min before", systemImage: "bell.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(phase.accent)
+                        .multilineTextAlignment(.trailing)
+                        .labelStyle(.titleAndIcon)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(phase.accent.opacity(0.09))
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
+
             if !visibleOptions.isEmpty {
                 VStack(spacing: 8) {
                     if let transitOption {
@@ -305,6 +376,10 @@ struct TransferRecommendationCard: View {
 
     private var transitOption: MobilityRouteOption? {
         visibleOptions.first { $0.mode == .transit }
+    }
+
+    private var leaveByText: String? {
+        primaryOption.flatMap { departureTimeText(for: $0) }
     }
 
     private var visibleOptions: [MobilityRouteOption] {

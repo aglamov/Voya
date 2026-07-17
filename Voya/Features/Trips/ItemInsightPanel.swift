@@ -635,7 +635,7 @@ struct DetailedInsightBrief: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
 
-            if item.kind != .hotel, !displayCards.isEmpty {
+            if item.kind != .hotel, item.kind != .event, !displayCards.isEmpty {
                 VStack(alignment: .leading, spacing: 9) {
                     Label(isRussian ? "Актуальные данные" : "Live context", systemImage: "waveform.path.ecg")
                         .font(.subheadline.weight(.bold))
@@ -689,7 +689,7 @@ struct DetailedInsightBrief: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
 
-            if item.kind != .hotel, !displayActions.isEmpty {
+            if item.kind != .hotel, item.kind != .event, !displayActions.isEmpty {
                 VStack(alignment: .leading, spacing: 9) {
                     Label(isRussian ? "Что сделать дальше" : "Next actions", systemImage: "checklist")
                         .font(.subheadline.weight(.bold))
@@ -747,7 +747,13 @@ struct DetailedInsightBrief: View {
         var seen = Set<String>()
         return enrichment.warnings
             .map { cleanInlineText($0) }
-            .filter { !$0.isEmpty && seen.insert(normalizedKey($0)).inserted }
+            .filter { warning in
+                guard !warning.isEmpty else { return false }
+                if item.kind == .event, isWeatherWarning(warning) {
+                    return false
+                }
+                return seen.insert(normalizedKey(warning)).inserted
+            }
     }
 
     private var displayCards: [ItemEnrichmentCard] {
@@ -757,7 +763,7 @@ struct DetailedInsightBrief: View {
                 "flight", "рейс", "gate", "выход", "delay", "задержка",
                 "weather", "погода", "aircraft location", "где самолет"
             ]
-        } else if item.kind == .hotel {
+        } else if item.kind == .hotel || item.kind == .event {
             hiddenTitles = ["status", "статус", "maps", "карты", "weather", "погода"]
         } else {
             hiddenTitles = ["status", "статус", "maps", "карты"]
@@ -842,9 +848,76 @@ struct DetailedInsightBrief: View {
             return polishedFlightSections()
         case .hotel:
             return polishedHotelSections()
-        case .event, .transit:
+        case .event:
+            return polishedEventSections()
+        case .transit:
             return nil
         }
+    }
+
+    private func polishedEventSections() -> [DetailedBriefSection] {
+        var sections: [DetailedBriefSection] = []
+
+        let scheduleLines = [
+            item.startsAt.map {
+                "\(isRussian ? "Начало" : "Starts"): \(itemDateTime($0, timeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds))"
+            },
+            item.endsAt.map {
+                "\(isRussian ? "Окончание" : "Ends"): \(itemDateTime($0, timeZoneOffsetSeconds: item.endsAtTimeZoneOffsetSeconds ?? item.startsAtTimeZoneOffsetSeconds))"
+            }
+        ].compactMap { $0 }
+
+        if !scheduleLines.isEmpty {
+            sections.append(DetailedBriefSection(
+                title: isRussian ? "Событие" : "Event",
+                body: scheduleLines.joined(separator: "\n"),
+                kind: "event"
+            ))
+        }
+
+        let location = item.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !location.isEmpty {
+            sections.append(DetailedBriefSection(
+                title: isRussian ? "Место" : "Venue",
+                body: location,
+                kind: "location"
+            ))
+        }
+
+        if let weather = firstCard(kind: "weather", titles: ["Погода", "Weather"]) {
+            let value = humanizedWeatherText(cleanInlineText(weather.value))
+            let detail = humanizedWeatherText(cleanInlineText(weather.detail ?? ""))
+            var weatherLines = [value, detail].filter { !$0.isEmpty }
+            if weather.kind == "warning" {
+                weatherLines.append(isRussian
+                    ? "OpenWeather сообщает об активном предупреждении для района или периода. Оно не описывает погоду прямо сейчас, поэтому спокойные текущие условия ему не противоречат."
+                    : "OpenWeather reports an active advisory for the area or time window. It does not describe conditions at this exact moment, so calm current weather does not contradict it.")
+            }
+            let body = weatherLines.joined(separator: "\n")
+            if !body.isEmpty {
+                sections.append(DetailedBriefSection(
+                    title: isRussian ? "Погода" : "Weather",
+                    body: body,
+                    kind: weather.kind == "warning" ? "risk" : "weather"
+                ))
+            }
+        }
+
+        let ticketLines = [
+            cleanOptional(item.providerName).map { "\(isRussian ? "Организатор" : "Provider"): \($0)" },
+            cleanOptional(item.confirmationCode).map { "\(isRussian ? "Подтверждение" : "Confirmation"): \($0)" },
+            meaningfulTicketStatus.map { "\(isRussian ? "Статус" : "Status"): \(localizedStatus($0))" }
+        ].compactMap { $0 }
+
+        if !ticketLines.isEmpty {
+            sections.append(DetailedBriefSection(
+                title: isRussian ? "Билет" : "Ticket",
+                body: ticketLines.joined(separator: "\n"),
+                kind: "booking"
+            ))
+        }
+
+        return sections
     }
 
     private func polishedHotelSections() -> [DetailedBriefSection] {
@@ -852,10 +925,10 @@ struct DetailedInsightBrief: View {
 
         let stayLines = [
             item.startsAt.map {
-                "\(isRussian ? "Заезд" : "Check-in"): \(hotelDateTime($0, timeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds))"
+                "\(isRussian ? "Заезд" : "Check-in"): \(itemDateTime($0, timeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds))"
             },
             item.endsAt.map {
-                "\(isRussian ? "Выезд" : "Check-out"): \(hotelDateTime($0, timeZoneOffsetSeconds: item.endsAtTimeZoneOffsetSeconds ?? item.startsAtTimeZoneOffsetSeconds))"
+                "\(isRussian ? "Выезд" : "Check-out"): \(itemDateTime($0, timeZoneOffsetSeconds: item.endsAtTimeZoneOffsetSeconds ?? item.startsAtTimeZoneOffsetSeconds))"
             }
         ].compactMap { $0 }
 
@@ -906,7 +979,7 @@ struct DetailedInsightBrief: View {
         return sections
     }
 
-    private func hotelDateTime(_ date: Date, timeZoneOffsetSeconds: Int?) -> String {
+    private func itemDateTime(_ date: Date, timeZoneOffsetSeconds: Int?) -> String {
         ItineraryDateFormatter.displayTime(
             start: date,
             end: nil,
@@ -916,6 +989,24 @@ struct DetailedInsightBrief: View {
 
     private func cleanOptional(_ value: String?) -> String? {
         value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    private var meaningfulTicketStatus: String? {
+        guard let status = cleanOptional(item.status) else {
+            return nil
+        }
+
+        let normalized = status.lowercased()
+        let placeholders = [
+            "unknown", "status unknown", "needs review", "need to review",
+            "неизвест", "неизвестно", "статус неизвестен", "нужно проверить", "требует проверки"
+        ]
+        return placeholders.contains(where: normalized.contains) ? nil : status
+    }
+
+    private func isWeatherWarning(_ warning: String) -> Bool {
+        let normalized = warning.lowercased()
+        return normalized.contains("weather") || normalized.contains("погод")
     }
 
     private func localizedStatus(_ value: String) -> String {

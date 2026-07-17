@@ -211,6 +211,7 @@ final class Trip: Identifiable {
     var dates: String
     var summary: String
     var destination: String?
+    var destinationLocation: String?
     var startsAt: Date?
     var endsAt: Date?
     var createdAt: Date
@@ -237,6 +238,7 @@ final class Trip: Identifiable {
         dates: String,
         summary: String,
         destination: String? = nil,
+        destinationLocation: String? = nil,
         startsAt: Date? = nil,
         endsAt: Date? = nil,
         createdAt: Date = Date(),
@@ -262,6 +264,7 @@ final class Trip: Identifiable {
         self.dates = dates
         self.summary = summary
         self.destination = destination
+        self.destinationLocation = destinationLocation
         self.startsAt = startsAt
         self.endsAt = endsAt
         self.createdAt = createdAt

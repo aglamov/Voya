@@ -15,6 +15,7 @@ struct TripsView: View {
     @AppStorage(VoyaPreferenceKey.homeLocationAddress) private var homeLocationAddress = ""
     @AppStorage(VoyaPreferenceKey.hiddenTransferIDs) private var hiddenTransferIDsRaw = ""
     @AppStorage(VoyaPreferenceKey.transferBufferOverrides) private var transferBufferOverridesRaw = "{}"
+    @AppStorage(VoyaPreferenceKey.arrivalFormalitiesOverrides) private var arrivalFormalitiesOverridesRaw = "{}"
     @State private var itemBeingViewed: ItineraryItem?
     @State private var transferBeingViewed: MobilityTransferContext?
     @State private var tripBeingEdited: Trip?
@@ -149,7 +150,7 @@ struct TripsView: View {
                                                 }
                                             }
                                         )
-                                        .task(id: "\(context.id)-\(context.airportBufferMinutes)") {
+                                        .task(id: "\(context.id)-\(context.airportBufferMinutes)-\(context.arrivalFormalitiesMinutes)") {
                                             await loadMobilityPlan(context: context)
                                         }
                                     }
@@ -200,7 +201,7 @@ struct TripsView: View {
                                             }
                                         }
                                     )
-                                    .task(id: "\(context.id)-\(context.airportBufferMinutes)") {
+                                    .task(id: "\(context.id)-\(context.airportBufferMinutes)-\(context.arrivalFormalitiesMinutes)") {
                                         await loadMobilityPlan(context: context)
                                     }
                                 }
@@ -230,7 +231,7 @@ struct TripsView: View {
                                                 }
                                             }
                                         )
-                                        .task(id: "\(context.id)-\(context.airportBufferMinutes)") {
+                                        .task(id: "\(context.id)-\(context.airportBufferMinutes)-\(context.arrivalFormalitiesMinutes)") {
                                             await loadMobilityPlan(context: context)
                                         }
                                     }
@@ -294,6 +295,7 @@ struct TripsView: View {
                     trip,
                     title: draft.title,
                     destination: draft.destination,
+                    destinationLocation: draft.destinationLocation,
                     summary: draft.summary,
                     notes: draft.notes,
                     startLocationName: draft.startLocationName,
@@ -359,12 +361,12 @@ struct TripsView: View {
                         await loadMobilityPlan(context: refreshedContext, forceRefresh: true)
                     }
                 },
-                onUpdateBuffer: { minutes, routeContext in
-                    setTransferBufferOverride(minutes, for: context)
-                    var updatedContext = routeContext
-                    updatedContext.airportBufferMinutes = minutes
+                onUpdateBuffers: { beforeMinutes, afterMinutes, routeContext in
+                    setTransferBufferOverride(beforeMinutes, for: context)
+                    setArrivalFormalitiesOverride(afterMinutes, for: context)
+                    VoyaNotificationScheduler.shared.cancelTransferNotification(context: context)
                     Task {
-                        await loadMobilityPlan(context: updatedContext, forceRefresh: true)
+                        await loadMobilityPlan(context: routeContext, forceRefresh: true)
                     }
                 },
                 onUpdateRoute: { origin, destination in
@@ -394,7 +396,7 @@ struct TripsView: View {
                     transferBeingViewed = nil
                 }
             )
-            .task(id: "\(context.id)-\(context.airportBufferMinutes)") {
+            .task(id: "\(context.id)-\(context.airportBufferMinutes)-\(context.arrivalFormalitiesMinutes)") {
                 await loadMobilityPlan(context: context)
             }
         }
@@ -470,6 +472,7 @@ struct TripsView: View {
             let plan = try await VercelMobilityService().planTransfer(context: adjustedContext)
             let currentContext = adjustedTransferContext(context)
             guard currentContext.airportBufferMinutes == adjustedContext.airportBufferMinutes,
+                  currentContext.arrivalFormalitiesMinutes == adjustedContext.arrivalFormalitiesMinutes,
                   currentContext.origin == adjustedContext.origin,
                   currentContext.destination == adjustedContext.destination else {
                 return
@@ -506,6 +509,7 @@ struct TripsView: View {
     }
 
     private func hideTransfer(_ context: MobilityTransferContext) {
+        VoyaNotificationScheduler.shared.cancelTransferNotification(context: context)
         var ids = hiddenTransferIDs
         ids.insert(context.id)
         hiddenTransferIDsRaw = ids.sorted().joined(separator: "\n")
@@ -523,11 +527,23 @@ struct TripsView: View {
         return overrides
     }
 
+    private var arrivalFormalitiesOverrides: [String: Int] {
+        guard let data = arrivalFormalitiesOverridesRaw.data(using: .utf8),
+              let overrides = try? JSONDecoder().decode([String: Int].self, from: data) else {
+            return [:]
+        }
+        return overrides
+    }
+
     private func adjustedTransferContext(_ context: MobilityTransferContext) -> MobilityTransferContext {
         var adjustedContext = context
 
         if let bufferMinutes = transferBufferOverrides[context.id] {
             adjustedContext.airportBufferMinutes = bufferMinutes
+        }
+
+        if let formalitiesMinutes = arrivalFormalitiesOverrides[context.id] {
+            adjustedContext = adjustedContext.adjustingArrivalFormalities(to: formalitiesMinutes)
         }
 
         if let tripID = context.tripID,
@@ -547,6 +563,19 @@ struct TripsView: View {
            let rawValue = String(data: data, encoding: .utf8) {
             transferBufferOverridesRaw = rawValue
         }
+        mobilityPlans[context.id] = nil
+        mobilityPlanErrors[context.id] = nil
+    }
+
+    private func setArrivalFormalitiesOverride(_ minutes: Int, for context: MobilityTransferContext) {
+        let boundedMinutes = min(max(minutes, 0), 180)
+        var overrides = arrivalFormalitiesOverrides
+        overrides[context.id] = boundedMinutes
+        if let data = try? JSONEncoder().encode(overrides),
+           let rawValue = String(data: data, encoding: .utf8) {
+            arrivalFormalitiesOverridesRaw = rawValue
+        }
+
         mobilityPlans[context.id] = nil
         mobilityPlanErrors[context.id] = nil
     }

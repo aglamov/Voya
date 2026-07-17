@@ -16,7 +16,7 @@ struct TransferDetailView: View {
     let errorMessage: String?
     let isLoading: Bool
     let onRefresh: (MobilityTransferContext) -> Void
-    let onUpdateBuffer: (Int, MobilityTransferContext) -> Void
+    let onUpdateBuffers: (Int, Int, MobilityTransferContext) -> Void
     let onUpdateRoute: (String, String) -> Void
     let onDelete: () -> Void
     @State private var displayOrigin = ""
@@ -28,6 +28,8 @@ struct TransferDetailView: View {
     @State private var isEditingRoute = false
     @State private var draftBufferMinutes: Int?
     @State private var appliedBufferMinutes: Int?
+    @State private var draftArrivalFormalitiesMinutes: Int?
+    @State private var appliedArrivalFormalitiesMinutes: Int?
     @State private var isShowingDeleteConfirmation = false
 
     var body: some View {
@@ -167,18 +169,10 @@ struct TransferDetailView: View {
     }
 
     private var bufferControlCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Label("Buffer", systemImage: "timer")
-                    .font(.headline)
-                    .foregroundStyle(Color.voyaInk)
-
-                Spacer()
-
-                Text("\(effectiveBufferMinutes) min")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(Color.voyaTeal)
-            }
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Buffer", systemImage: "timer")
+                .font(.headline)
+                .foregroundStyle(Color.voyaInk)
 
             Stepper(
                 value: Binding(
@@ -191,16 +185,47 @@ struct TransferDetailView: View {
                 in: 0...240,
                 step: 5
             ) {
-                Text("Extra time before arrival or departure")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color.voyaMuted)
+                bufferValueLabel(
+                    title: "Before arrival or departure",
+                    minutes: effectiveBufferMinutes,
+                    color: Color.voyaTeal
+                )
             }
 
-            if hasPendingBufferChanges {
+            if context.suggestedArrivalFormalitiesMinutes > 0 {
+                Divider()
+
+                Stepper(
+                    value: Binding(
+                        get: { effectiveArrivalFormalitiesMinutes },
+                        set: { newValue in
+                            let boundedValue = min(max(newValue, 0), 180)
+                            draftArrivalFormalitiesMinutes = boundedValue
+                        }
+                    ),
+                    in: 0...180,
+                    step: 5
+                ) {
+                    bufferValueLabel(
+                        title: "After landing before transfer",
+                        minutes: effectiveArrivalFormalitiesMinutes,
+                        color: Color.voyaGold
+                    )
+                }
+
+                Text("Includes leaving the aircraft, baggage, passport control, and customs when applicable.")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if hasPendingTimingChanges {
                 Button {
-                    let bufferMinutes = effectiveBufferMinutes
-                    onUpdateBuffer(bufferMinutes, effectiveContext)
-                    appliedBufferMinutes = bufferMinutes
+                    let beforeMinutes = effectiveBufferMinutes
+                    let afterMinutes = effectiveArrivalFormalitiesMinutes
+                    onUpdateBuffers(beforeMinutes, afterMinutes, effectiveContext)
+                    appliedBufferMinutes = beforeMinutes
+                    appliedArrivalFormalitiesMinutes = afterMinutes
                 } label: {
                     Label("Save changes", systemImage: "arrow.clockwise")
                         .font(.subheadline.weight(.semibold))
@@ -218,6 +243,22 @@ struct TransferDetailView: View {
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 12, y: 7)
+    }
+
+    private func bufferValueLabel(
+        title: LocalizedStringKey,
+        minutes: Int,
+        color: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.voyaInk)
+            Text("\(minutes) min")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(color)
+                .monospacedDigit()
+        }
     }
 
     private var routeMapCard: some View {
@@ -695,6 +736,7 @@ struct TransferDetailView: View {
         updatedContext.origin = draftOrigin.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? context.origin
         updatedContext.destination = draftDestination.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? context.destination
         updatedContext.airportBufferMinutes = effectiveBufferMinutes
+        updatedContext = updatedContext.adjustingArrivalFormalities(to: effectiveArrivalFormalitiesMinutes)
         return updatedContext
     }
 
@@ -742,6 +784,19 @@ struct TransferDetailView: View {
 
     private var hasPendingBufferChanges: Bool {
         effectiveBufferMinutes != (appliedBufferMinutes ?? context.airportBufferMinutes)
+    }
+
+    private var effectiveArrivalFormalitiesMinutes: Int {
+        draftArrivalFormalitiesMinutes ?? context.arrivalFormalitiesMinutes
+    }
+
+    private var hasPendingArrivalFormalitiesChanges: Bool {
+        effectiveArrivalFormalitiesMinutes
+            != (appliedArrivalFormalitiesMinutes ?? context.arrivalFormalitiesMinutes)
+    }
+
+    private var hasPendingTimingChanges: Bool {
+        hasPendingBufferChanges || hasPendingArrivalFormalitiesChanges
     }
 
     private var primaryDetail: String {

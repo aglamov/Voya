@@ -17,18 +17,17 @@ struct TripHeroCard: View {
         TripHeroSummary(trip: trip)
     }
 
-    private var displayTitle: String {
-        trip.destination?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? trip.title
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(displayTitle)
+                    Text(trip.title)
                         .font(.title2.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
+                        .layoutPriority(1)
                         .shadow(color: .black.opacity(0.45), radius: 8, y: 2)
 
                     Text(trip.displayDates)
@@ -51,8 +50,6 @@ struct TripHeroCard: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Edit \(trip.title)")
             }
-
-            Spacer(minLength: 0)
 
             Text(summary.statusText)
                 .font(.title3.bold())
