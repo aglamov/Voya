@@ -35,6 +35,8 @@ extension VoyaStore {
     }
 
     func extract(document: ImportedDocument) async {
+        resetImportTripDestinationSelection()
+
         if importPreparationStatus?.sourceName != document.name {
             beginImportPreparation(sourceName: document.name, sourceDetail: String(localized: "Reading source text"))
             updateImportPreparationStep(
@@ -70,19 +72,13 @@ extension VoyaStore {
             )
         }
 
-        if let preview = extractedPreview,
-           let suggestedTripID = suggestedImportTripID(for: preview.items) {
-            importTripDestination = .existing(suggestedTripID)
-        } else {
-            importTripDestination = .newTrip
+        if let preview = extractedPreview {
+            updateSuggestedImportTripDestination(for: preview.items)
         }
 
         await enrichExtractedPreviewFlights()
-        if let preview = extractedPreview,
-           let suggestedTripID = suggestedImportTripID(for: preview.items) {
-            importTripDestination = .existing(suggestedTripID)
-        } else {
-            importTripDestination = .newTrip
+        if let preview = extractedPreview {
+            updateSuggestedImportTripDestination(for: preview.items)
         }
         updateImportPreparationStep(
             .preview,

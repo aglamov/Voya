@@ -20,6 +20,7 @@ final class VoyaStore: ObservableObject {
     @Published var importMessage: String?
     @Published var importSuccess: ImportSuccess?
     @Published var importTripDestination: ImportTripDestination = .newTrip
+    var hasExplicitImportTripDestination = false
     @Published var importPreparationStatus: ImportPreparationStatus?
     @Published var isExtractingConfirmation = false
     @Published var isConfirmingExtraction = false

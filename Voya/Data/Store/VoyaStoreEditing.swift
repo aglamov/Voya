@@ -289,7 +289,7 @@ extension VoyaStore {
     func prepareForNextImport() {
         importSuccess = nil
         importMessage = nil
-        importTripDestination = .newTrip
+        resetImportTripDestinationSelection()
         importPreparationStatus = nil
     }
 
@@ -304,7 +304,23 @@ extension VoyaStore {
         updatedPreview.fields = ConfirmationParser.fields(for: preview.items, sourceName: preview.sourceName)
         extractedPreview = updatedPreview
 
-        if let suggestedTripID = suggestedImportTripID(for: updatedPreview.items) {
+        updateSuggestedImportTripDestination(for: updatedPreview.items)
+    }
+
+    func selectImportTripDestination(_ destination: ImportTripDestination) {
+        importTripDestination = destination
+        hasExplicitImportTripDestination = true
+    }
+
+    func resetImportTripDestinationSelection() {
+        hasExplicitImportTripDestination = false
+        importTripDestination = .newTrip
+    }
+
+    func updateSuggestedImportTripDestination(for items: [ItineraryItem]) {
+        guard !hasExplicitImportTripDestination else { return }
+
+        if let suggestedTripID = suggestedImportTripID(for: items) {
             importTripDestination = .existing(suggestedTripID)
         } else {
             importTripDestination = .newTrip

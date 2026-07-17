@@ -99,7 +99,10 @@ struct ImportView: View {
                                 statusMessage: store.importMessage,
                                 trips: store.trips,
                                 suggestedTripID: store.suggestedImportTripID(for: preview.items),
-                                destination: $store.importTripDestination,
+                                destination: Binding(
+                                    get: { store.importTripDestination },
+                                    set: { store.selectImportTripDestination($0) }
+                                ),
                                 onOpenSource: openSourceDocument
                             ) { item, draft in
                                 store.updatePreviewItem(item, with: draft)
