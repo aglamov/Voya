@@ -8,10 +8,91 @@ import UniformTypeIdentifiers
 import UIKit
 import Vision
 
+struct FlightOperationalStatus {
+    enum Tone: Equatable {
+        case neutral
+        case active
+        case warning
+        case critical
+        case complete
+    }
+
+    let label: String
+    let symbol: String
+    let tone: Tone
+
+    init(response: FlightLookupResponse?, fallbackStatus: String) {
+        let snapshotStatus = response?.snapshot?.status.lowercased() ?? ""
+        let providerStatus = response?.snapshot?.providerStatus
+            ?? response?.candidate?.providerStatus
+            ?? fallbackStatus
+        let combined = "\(snapshotStatus) \(providerStatus)".lowercased()
+        let delayMinutes = response?.delayStats?.delayMinutes ?? response?.snapshot?.delayMinutes
+        let progress = response?.snapshot?.progressPercent ?? response?.plane?.progressPercent
+
+        if response != nil, response?.validation.state != "validated", response?.snapshot == nil {
+            label = String(localized: "Data not confirmed")
+            symbol = "exclamationmark.triangle.fill"
+            tone = .warning
+        } else if combined.contains("cancel") || combined.contains("отмен") {
+            label = String(localized: "Cancelled")
+            symbol = "xmark.circle.fill"
+            tone = .critical
+        } else if combined.contains("divert") || combined.contains("redirect") || combined.contains("смен") {
+            label = String(localized: "Route changed")
+            symbol = "arrow.triangle.branch"
+            tone = .critical
+        } else if let delayMinutes, delayMinutes >= 15 {
+            label = String(localized: "Delayed \(delayMinutes) min")
+            symbol = "clock.badge.exclamationmark.fill"
+            tone = .warning
+        } else if combined.contains("delay") || combined.contains("задерж") {
+            label = String(localized: "Delayed")
+            symbol = "clock.badge.exclamationmark.fill"
+            tone = .warning
+        } else if snapshotStatus == "departed" || response?.plane?.state == "current_airborne" {
+            label = progress.map { String(localized: "In flight · \(Int($0.rounded()))%") }
+                ?? String(localized: "In flight")
+            symbol = "airplane"
+            tone = .active
+        } else if snapshotStatus == "arrived" || combined.contains("landed") || combined.contains("прибыл") {
+            label = String(localized: "Arrived")
+            symbol = "checkmark.circle.fill"
+            tone = .complete
+        } else if combined.contains("board") || combined.contains("посадк") {
+            label = String(localized: "Boarding")
+            symbol = "person.line.dotted.person.fill"
+            tone = .active
+        } else if response?.gate?.changed == true {
+            label = String(localized: "Gate changed")
+            symbol = "arrow.triangle.2.circlepath"
+            tone = .warning
+        } else {
+            label = String(localized: "On schedule")
+            symbol = "calendar.badge.checkmark"
+            tone = .neutral
+        }
+    }
+
+    var tint: Color {
+        switch tone {
+        case .neutral, .active:
+            Color.voyaTeal
+        case .warning:
+            Color.voyaGold
+        case .critical:
+            Color.voyaCoral
+        case .complete:
+            Color.voyaMuted
+        }
+    }
+}
+
 struct ItemCompanionCard: View {
     let item: ItineraryItem
     let phase: ItineraryPhase
     let enrichment: ItemEnrichment?
+    let flightStatusResponse: FlightLookupResponse?
     let didCopyLocation: Bool
     let onOpenLocation: () -> Void
     let onCopyLocation: () -> Void
@@ -63,16 +144,18 @@ struct ItemCompanionCard: View {
             }
             .padding(18)
 
-            MomentLocationRow(
-                item: item,
-                displayLocation: displayLocation,
-                route: flightRoute,
-                isCopied: didCopyLocation,
-                onOpenLocation: onOpenLocation,
-                onCopyLocation: onCopyLocation
-            )
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
+            if item.kind != .flight {
+                MomentLocationRow(
+                    item: item,
+                    displayLocation: displayLocation,
+                    route: flightRoute,
+                    isCopied: didCopyLocation,
+                    onOpenLocation: onOpenLocation,
+                    onCopyLocation: onCopyLocation
+                )
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            }
         }
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -160,6 +243,10 @@ struct ItemCompanionCard: View {
     }
 
     private var statusLabel: String {
+        if item.kind == .flight {
+            return flightOperationalStatus.label
+        }
+
         if let warning = enrichment?.warnings.first, !warning.isEmpty {
             return String(localized: "Needs attention")
         }
@@ -173,6 +260,10 @@ struct ItemCompanionCard: View {
     }
 
     private var statusSymbol: String {
+        if item.kind == .flight {
+            return flightOperationalStatus.symbol
+        }
+
         if enrichment?.warnings.first?.isEmpty == false {
             return "exclamationmark.triangle.fill"
         }
@@ -190,6 +281,10 @@ struct ItemCompanionCard: View {
     }
 
     private var statusTint: Color {
+        if item.kind == .flight {
+            return flightOperationalStatus.tint
+        }
+
         if enrichment?.warnings.first?.isEmpty == false {
             return Color.voyaCoral
         }
@@ -261,7 +356,15 @@ struct ItemCompanionCard: View {
             return trimmedBody(summary)
         }
 
+        if item.kind == .flight {
+            return nil
+        }
+
         return defaultOperationalNote
+    }
+
+    private var flightOperationalStatus: FlightOperationalStatus {
+        FlightOperationalStatus(response: flightStatusResponse, fallbackStatus: item.status)
     }
 
     private var aircraftLocationCard: ItemEnrichmentCard? {

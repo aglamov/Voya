@@ -89,6 +89,7 @@ final class ItineraryItem: Identifiable {
     @Attribute(.unique) var id: UUID
     var kind: ItineraryKind
     var title: String
+    var flightNumber: String?
     var location: String
     var status: String
     var startsAt: Date?
@@ -117,6 +118,7 @@ final class ItineraryItem: Identifiable {
         id: UUID = UUID(),
         kind: ItineraryKind,
         title: String,
+        flightNumber: String? = nil,
         location: String,
         status: String,
         startsAt: Date? = nil,
@@ -144,6 +146,7 @@ final class ItineraryItem: Identifiable {
         self.id = id
         self.kind = kind
         self.title = title
+        self.flightNumber = flightNumber
         self.location = location
         self.status = status
         self.startsAt = startsAt
@@ -178,6 +181,26 @@ final class ItineraryItem: Identifiable {
                 endTimeZoneOffsetSeconds: endsAtTimeZoneOffsetSeconds
             )
         } ?? String(localized: "Time needed")
+    }
+
+    var resolvedFlightNumber: String? {
+        if let flightNumber {
+            let normalizedFlightNumber = flightNumber
+                .filter { !$0.isWhitespace }
+                .uppercased()
+            if !normalizedFlightNumber.isEmpty {
+                return normalizedFlightNumber
+            }
+        }
+
+        let searchableText = "\(title) \(location)".uppercased()
+        guard let match = searchableText.firstMatch(of: /[A-Z0-9]{2,3}\s?\d{1,4}[A-Z]?/) else {
+            return nil
+        }
+
+        return String(match.output)
+            .replacingOccurrences(of: " ", with: "")
+            .uppercased()
     }
 }
 

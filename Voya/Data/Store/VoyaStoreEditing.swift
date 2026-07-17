@@ -71,6 +71,7 @@ extension VoyaStore {
         to trip: Trip,
         kind: ItineraryKind,
         title: String,
+        flightNumber: String? = nil,
         startsAt: Date?,
         endsAt: Date?,
         startsAtTimeZoneOffsetSeconds: Int? = nil,
@@ -83,6 +84,7 @@ extension VoyaStore {
         let item = ItineraryItem(
             kind: kind,
             title: normalizedTitle(title),
+            flightNumber: normalizedFlightNumber(flightNumber),
             location: normalizedLocation(location),
             status: normalizedStatus(status),
             startsAt: startsAt,
@@ -106,6 +108,7 @@ extension VoyaStore {
         _ item: ItineraryItem,
         kind: ItineraryKind,
         title: String,
+        flightNumber: String? = nil,
         startsAt: Date?,
         endsAt: Date?,
         startsAtTimeZoneOffsetSeconds: Int? = nil,
@@ -123,6 +126,7 @@ extension VoyaStore {
 
         item.kind = kind
         item.title = normalizedTitle(title)
+        item.flightNumber = kind == .flight ? normalizedFlightNumber(flightNumber) : nil
         item.startsAt = startsAt
         item.endsAt = endsAt
         item.startsAtTimeZoneOffsetSeconds = startsAt == nil ? nil : startsAtTimeZoneOffsetSeconds
@@ -191,6 +195,7 @@ extension VoyaStore {
     func apply(_ draft: ItineraryItemDraft, to item: ItineraryItem) {
         item.kind = draft.kind
         item.title = draft.title
+        item.flightNumber = draft.kind == .flight ? normalizedFlightNumber(draft.flightNumber) : nil
         item.startsAt = draft.effectiveStartsAt
         item.endsAt = draft.effectiveEndsAt
         item.startsAtTimeZoneOffsetSeconds = draft.effectiveStartsAt == nil ? nil : draft.startsAtTimeZoneOffsetSeconds
@@ -207,6 +212,7 @@ extension VoyaStore {
     func normalizePreviewItemsForStorage(_ items: [ItineraryItem]) {
         for item in items {
             item.title = normalizedTitle(item.title)
+            item.flightNumber = item.kind == .flight ? normalizedFlightNumber(item.resolvedFlightNumber) : nil
             item.location = normalizedLocation(item.location)
             item.status = normalizedStatus(item.status)
             item.endsAt = item.startsAt == nil ? nil : item.endsAt
@@ -229,6 +235,13 @@ extension VoyaStore {
 
     func normalizedStatus(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? String(localized: "Needs review")
+    }
+
+    func normalizedFlightNumber(_ value: String?) -> String? {
+        value?
+            .filter { !$0.isWhitespace }
+            .uppercased()
+            .nilIfEmpty
     }
 
     func preparePreviewItemsForStorage(_ items: [ItineraryItem], sourceName: String, sourceDocumentID: UUID? = nil) {

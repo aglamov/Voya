@@ -345,6 +345,7 @@ struct AssistantView: View {
                     item,
                     kind: draft.kind,
                     title: draft.title,
+                    flightNumber: draft.flightNumber,
                     startsAt: draft.effectiveStartsAt,
                     endsAt: draft.effectiveEndsAt,
                     startsAtTimeZoneOffsetSeconds: draft.startsAtTimeZoneOffsetSeconds,

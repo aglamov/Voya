@@ -459,6 +459,7 @@ function identCandidates(value: string) {
     U2: "EZY",
     FR: "RYR",
     W6: "WZZ",
+    W9: "WUK",
     AA: "AAL",
     DL: "DAL",
     UA: "UAL",
@@ -472,7 +473,11 @@ function identCandidates(value: string) {
 
 function flightNumberParts(value: string) {
   const clean = cleanFlightNumber(value);
-  const match = clean.match(/^([A-Z0-9]{2,3})(\d{1,4})[A-Z]?$/);
+  // IATA airline designators are two characters and may contain a digit
+  // (for example W9). ICAO designators are three letters (for example WUK).
+  // Trying the IATA shape first prevents W95364 from becoming W95 + 364.
+  const match = clean.match(/^([A-Z0-9]{2})(\d{1,4})[A-Z]?$/)
+    ?? clean.match(/^([A-Z]{3})(\d{1,4})[A-Z]?$/);
   if (!match) {
     return undefined;
   }
@@ -674,7 +679,7 @@ function dateMatches(snapshot: FlightSnapshot, lookup: FlightLookup) {
 }
 
 function verifiedSnapshot(snapshots: FlightSnapshot[], lookup: FlightLookup) {
-  return snapshots.find((candidate) => routeMatches(candidate, lookup) && dateMatches(candidate, lookup));
+  return snapshots.find((candidate) => flightNumberMatches(candidate, lookup) && routeMatches(candidate, lookup) && dateMatches(candidate, lookup));
 }
 
 function flightNumberMatches(snapshot: FlightSnapshot, lookup: FlightLookup) {
@@ -1783,7 +1788,42 @@ export async function getFlightStatus(lookup: FlightLookup): Promise<FlightStatu
 
   const data = result.data as FlightAwareFlightsResponse;
   const snapshots = (data.flights ?? []).map((flight) => normalizeFlightAwareFlight(flight, normalizedLookup.flightNumber));
-  const snapshot = verifiedSnapshot(snapshots, normalizedLookup);
+  let snapshot = verifiedSnapshot(snapshots, normalizedLookup);
+
+  // AeroAPI can accept an IATA ident but still return no trusted service-date
+  // match. In that case also try the airline's ICAO ident (W9 5364 -> WUK5364)
+  // instead of treating the first successful HTTP response as conclusive.
+  if (!snapshot) {
+    for (const ident of identCandidates(normalizedLookup.flightNumber)) {
+      if (ident === normalizedLookup.flightNumber) {
+        continue;
+      }
+
+      const alternateResult = await flightAwareFlights(ident, window);
+      if (!alternateResult.ok) {
+        continue;
+      }
+
+      const alternateData = alternateResult.data as FlightAwareFlightsResponse;
+      const alternateSnapshots = (alternateData.flights ?? []).map((flight) => normalizeFlightAwareFlight(flight, ident));
+      snapshot = verifiedSnapshot(alternateSnapshots, normalizedLookup);
+      if (snapshot) {
+        break;
+      }
+    }
+  }
+
+  if (!snapshot) {
+    const canonicalIdent = await flightAwareCanonicalIdent(normalizedLookup.flightNumber);
+    if (canonicalIdent && canonicalIdent !== normalizedLookup.flightNumber) {
+      const canonicalResult = await flightAwareFlights(canonicalIdent, window);
+      if (canonicalResult.ok) {
+        const canonicalData = canonicalResult.data as FlightAwareFlightsResponse;
+        const canonicalSnapshots = (canonicalData.flights ?? []).map((flight) => normalizeFlightAwareFlight(flight, canonicalIdent));
+        snapshot = verifiedSnapshot(canonicalSnapshots, normalizedLookup);
+      }
+    }
+  }
 
   if (!snapshot) {
     return flightStatusError(normalizedLookup, "not_found", ["FlightAware returned data, but none matched the imported flight date and route closely enough to trust."]);

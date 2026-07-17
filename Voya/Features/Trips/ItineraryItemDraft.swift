@@ -116,6 +116,7 @@ enum ItineraryPhase: Equatable {
 struct ItineraryItemDraft {
     var kind: ItineraryKind
     var title: String
+    var flightNumber: String
     var hasStartDate: Bool
     var startsAt: Date
     var startsAtTimeZoneOffsetSeconds: Int?
@@ -130,6 +131,7 @@ struct ItineraryItemDraft {
     init(item: ItineraryItem) {
         kind = item.kind
         title = item.title
+        flightNumber = item.resolvedFlightNumber ?? ""
         hasStartDate = item.startsAt != nil
         startsAt = item.startsAt ?? Date()
         startsAtTimeZoneOffsetSeconds = item.startsAtTimeZoneOffsetSeconds
@@ -145,6 +147,7 @@ struct ItineraryItemDraft {
     init() {
         kind = .event
         title = ""
+        flightNumber = ""
         hasStartDate = true
         startsAt = Date()
         startsAtTimeZoneOffsetSeconds = nil
@@ -187,6 +190,7 @@ struct ItineraryItemDraft {
     func matches(_ other: ItineraryItemDraft) -> Bool {
         kind == other.kind
             && title == other.title
+            && flightNumber == other.flightNumber
             && hasStartDate == other.hasStartDate
             && startsAt == other.startsAt
             && startsAtTimeZoneOffsetSeconds == other.startsAtTimeZoneOffsetSeconds

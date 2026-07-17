@@ -24,7 +24,7 @@ struct FlightCheckInAction: Identifiable {
             return nil
         }
 
-        let flightNumber = Self.flightNumber(in: "\(item.title) \(item.location)") ?? item.title
+        let flightNumber = item.resolvedFlightNumber ?? item.title
         let airlineName = item.providerName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? Self.airlineName(forFlightNumber: flightNumber)
         let confirmationCode = item.confirmationCode?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
@@ -93,7 +93,7 @@ struct FlightCheckInAction: Identifiable {
     }
 
     private static func airlineName(forFlightNumber flightNumber: String) -> String? {
-        guard let carrier = flightNumber.firstMatch(of: /^[A-Z0-9]{2,3}/).map({ String($0.output).uppercased() }) else {
+        guard let carrier = carrierCode(for: flightNumber) else {
             return nil
         }
 
@@ -101,7 +101,7 @@ struct FlightCheckInAction: Identifiable {
     }
 
     private static func checkInURL(flightNumber: String, airlineName: String?) -> URL {
-        if let carrier = flightNumber.firstMatch(of: /^[A-Z0-9]{2,3}/).map({ String($0.output).uppercased() }),
+        if let carrier = carrierCode(for: flightNumber),
            let directURL = airlineCheckInURLs[carrier] {
             return directURL
         }
@@ -118,6 +118,16 @@ struct FlightCheckInAction: Identifiable {
         return URL(string: "https://www.google.com/search?q=\(encoded)") ?? URL(string: "https://www.google.com/search?q=online%20check-in")!
     }
 
+    private static func carrierCode(for flightNumber: String) -> String? {
+        let normalized = flightNumber.filter { !$0.isWhitespace }.uppercased()
+        let carrier = String(normalized.prefix(2))
+        let suffix = normalized.dropFirst(2)
+        guard carrier.count == 2, suffix.first?.isNumber == true else {
+            return nil
+        }
+        return carrier
+    }
+
     private static let airlineCheckInURLs: [String: URL] = [
         "AA": URL(string: "https://www.aa.com/reservation/flightCheckInViewReservationsAccess.do")!,
         "AC": URL(string: "https://www.aircanada.com/check-in")!,
@@ -132,7 +142,8 @@ struct FlightCheckInAction: Identifiable {
         "TK": URL(string: "https://www.turkishairlines.com/en-int/flights/manage-booking/")!,
         "UA": URL(string: "https://www.united.com/checkin")!,
         "U2": URL(string: "https://www.easyjet.com/en/manage-booking/check-in")!,
-        "W6": URL(string: "https://wizzair.com/en-gb/information-and-services/booking-information/check-in-and-boarding")!
+        "W6": URL(string: "https://wizzair.com/en-gb/information-and-services/booking-information/check-in-and-boarding")!,
+        "W9": URL(string: "https://wizzair.com/en-gb/information-and-services/booking-information/check-in-and-boarding")!
     ]
 
     private static let airlineNames: [String: String] = [
@@ -149,6 +160,7 @@ struct FlightCheckInAction: Identifiable {
         "TK": "Turkish Airlines",
         "UA": "United Airlines",
         "U2": "easyJet",
-        "W6": "Wizz Air"
+        "W6": "Wizz Air",
+        "W9": "Wizz Air UK"
     ]
 }

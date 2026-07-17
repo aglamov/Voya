@@ -130,7 +130,7 @@ enum ConfirmationParser {
     }
 
     private static func parseFlights(from text: String) -> [ItineraryItem] {
-        let flightNumbers = allMatches(in: text, pattern: #"\b[A-Z]{2}\s?\d{2,4}\b"#)
+        let flightNumbers = allMatches(in: text, pattern: #"\b[A-Z0-9]{2}\s?\d{2,4}\b"#)
             .map { $0.value.replacingOccurrences(of: " ", with: "") }
         guard !flightNumbers.isEmpty else { return [] }
 
@@ -153,6 +153,7 @@ enum ConfirmationParser {
             return ItineraryItem(
                 kind: .flight,
                 title: title,
+                flightNumber: flightNumber,
                 location: location,
                 status: String(localized: "Filled from source. Not enough details yet, checking tracking services."),
                 startsAt: startsAt,

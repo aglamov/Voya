@@ -81,7 +81,7 @@ final class VoyaPushRegistrationService {
                     if let startsAt = item.startsAt, startsAt > now.addingTimeInterval(60 * 24 * 60 * 60) {
                         return nil
                     }
-                    guard Self.firstFlightNumber(in: "\(item.title) \(item.location)") != nil else {
+                    guard item.resolvedFlightNumber != nil else {
                         return nil
                     }
                     return (trip.id, item)
@@ -186,7 +186,7 @@ final class VoyaPushRegistrationService {
         subscribeToAlerts: Bool = false
     ) async -> FlightWatchRegistrationResponse? {
         guard item.kind == .flight,
-              let flightNumber = candidate?.flightNumber ?? Self.firstFlightNumber(in: "\(item.title) \(item.location)") else {
+              let flightNumber = candidate?.flightNumber ?? item.resolvedFlightNumber else {
             return nil
         }
 

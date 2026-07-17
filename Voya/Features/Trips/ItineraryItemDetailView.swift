@@ -60,7 +60,8 @@ struct ItineraryItemDetailView: View {
                     ItemCompanionCard(
                         item: item,
                         phase: ItineraryPhase(item: item),
-                        enrichment: enrichment,
+                        enrichment: item.kind == .flight ? nil : enrichment,
+                        flightStatusResponse: flightLookupResponse,
                         didCopyLocation: didCopyLocation,
                         onOpenLocation: openMaps,
                         onCopyLocation: copyLocation
@@ -69,17 +70,19 @@ struct ItineraryItemDetailView: View {
                         boardingPassCard
                         flightStatusCard
                     }
-                    ItemInsightPanel(
-                        item: item,
-                        phase: ItineraryPhase(item: item),
-                        enrichment: enrichment,
-                        isLoading: isLoadingEnrichment,
-                        onRefresh: {
-                            Task {
-                                await loadEnrichment(forceRefresh: true)
+                    if item.kind != .flight {
+                        ItemInsightPanel(
+                            item: item,
+                            phase: ItineraryPhase(item: item),
+                            enrichment: enrichment,
+                            isLoading: isLoadingEnrichment,
+                            onRefresh: {
+                                Task {
+                                    await loadEnrichment(forceRefresh: true)
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
 
                     if sourceDocument != nil || item.sourceName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
                         sourceCard
@@ -129,13 +132,14 @@ struct ItineraryItemDetailView: View {
             handleBoardingPassImport(result)
         }
         .task(id: item.id) {
-            await loadEnrichment()
             if item.kind == .flight {
                 flightLookupResponse = FlightLookupCache.cachedResponse(for: item)
                 if !FlightLookupCache.isFresh(for: item) {
                     await refreshFlightStatus(showCompletionMessage: false)
                 }
                 await updateFlightAlertWatchState()
+            } else {
+                await loadEnrichment()
             }
         }
         .presentationDetents([.large])
@@ -198,6 +202,12 @@ struct ItineraryItemDetailView: View {
                 .disabled(!isEditing)
             ClearableTextField("Title", text: $draft.title, prompt: "Flight BA2490, hotel stay, dinner reservation")
                 .disabled(!isEditing)
+            if draft.kind == .flight {
+                ClearableTextField("Flight number", text: $draft.flightNumber, prompt: "W9 5364")
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .disabled(!isEditing)
+            }
 
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Date", isOn: $draft.hasStartDate)
@@ -410,7 +420,7 @@ struct ItineraryItemDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Flight status")
+                    Text("Flight information")
                         .font(.headline)
                         .foregroundStyle(Color.voyaInk)
                     Text(flightStatusSubtitle)
@@ -446,7 +456,7 @@ struct ItineraryItemDetailView: View {
             }
 
             if let response = flightLookupResponse {
-                FlightStatusSummaryView(response: response)
+                FlightStatusSummaryView(response: response, item: item)
             } else {
                 Text(flightStatusMessage ?? String(localized: "Refresh to pull the latest gate, delay estimate, and reliability signal from the flight provider."))
                     .font(.caption.weight(.medium))
@@ -556,11 +566,11 @@ struct ItineraryItemDetailView: View {
             return nil
         }
 
-        return store.firstFlightNumber(in: "\(item.title) \(item.location)")
+        return item.resolvedFlightNumber
     }
 
     private var flightStatusSubtitle: String {
-        flightLookupNumber.map { String(localized: "Live lookup and push watch for \($0).") }
+        flightLookupNumber.map { String(localized: "Operational data for \($0).") }
             ?? String(localized: "Add a flight number to enable live lookup.")
     }
 
@@ -691,13 +701,32 @@ struct ItineraryItemDetailView: View {
 
         let route = store.airportRouteCodes(in: item.location)
         do {
-            let response = try await VercelFlightLookupService().lookup(
+            var response = try await VercelFlightLookupService().lookup(
                 flightNumber: flightNumber,
                 date: item.startsAt,
                 dateTimeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds,
                 originAirport: route?.origin,
                 destinationAirport: route?.destination
             )
+
+            // Imported airport codes can occasionally be less precise than the provider's
+            // route. Retry without them only when the first lookup found no trusted match;
+            // the flight number and local departure date still have to validate.
+            if route != nil,
+               response.validation.state == "not_found",
+               response.snapshot == nil {
+                let dateMatchedResponse = try await VercelFlightLookupService().lookup(
+                    flightNumber: flightNumber,
+                    date: item.startsAt,
+                    dateTimeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds,
+                    originAirport: nil,
+                    destinationAirport: nil
+                )
+                if dateMatchedResponse.validation.state == "validated",
+                   dateMatchedResponse.snapshot != nil {
+                    response = dateMatchedResponse
+                }
+            }
             flightLookupResponse = response
             FlightLookupCache.store(response, for: item)
             try? modelContext.save()
@@ -754,15 +783,15 @@ struct ItineraryItemDetailView: View {
 
 private struct FlightStatusSummaryView: View {
     @Environment(\.openURL) private var openURL
-    @State private var isShowingMore = false
     let response: FlightLookupResponse
+    let item: ItineraryItem
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 8) {
-                Circle()
-                    .fill(statusTint)
-                    .frame(width: 8, height: 8)
+                Image(systemName: operationalStatus.symbol)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(statusTint)
                 Text(statusText)
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(Color.voyaInk)
@@ -773,6 +802,49 @@ private struct FlightStatusSummaryView: View {
                         .foregroundStyle(Color.voyaMuted)
                         .lineLimit(1)
                 }
+            }
+
+            if let aircraftPosition {
+                Button {
+                    if let url = URL(string: "https://maps.apple.com/?ll=\(aircraftPosition.lat),\(aircraftPosition.lon)") {
+                        openURL(url)
+                    }
+                } label: {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: "airplane.circle.fill")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.voyaSky)
+                            .clipShape(Circle())
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Where is the aircraft")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.voyaMuted)
+                            Text(aircraftPositionTitle)
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                            if let aircraftPositionDetail {
+                                Text(aircraftPositionDetail)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Color.voyaMuted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        Spacer(minLength: 0)
+
+                        Image(systemName: "map")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.voyaSky)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.voyaSky.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
             }
 
             HStack(spacing: 10) {
@@ -800,84 +872,111 @@ private struct FlightStatusSummaryView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
-            if let headline = response.delayStats?.headline.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("From booking", systemImage: "doc.text")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaTeal)
+
+                flightDetailRow(
+                    symbol: "calendar",
+                    title: String(localized: "Date and time"),
+                    value: item.displayTime
+                )
+
+                if let importedRoute = item.location.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+                    flightDetailRow(
+                        symbol: "point.topleft.down.curvedto.point.bottomright.up",
+                        title: String(localized: "Route from booking"),
+                        value: importedRoute
+                    )
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.voyaSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            if let headline = response.delayStats?.headline.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+               (response.delayStats?.delayMinutes ?? 0) >= 15 {
                 Label(headline, systemImage: "clock.badge.exclamationmark")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle((response.delayStats?.delayMinutes ?? 0) >= 15 ? Color.voyaCoral : Color.voyaInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let reliabilityText {
-                Label(reliabilityText, systemImage: "chart.bar.xaxis")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(Color.voyaMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             if hasMoreDetails {
-                DisclosureGroup(isExpanded: $isShowingMore) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        if let arrivalDetail {
-                            flightDetailRow(symbol: "airplane.arrival", title: String(localized: "Arrival"), value: arrivalDetail)
-                        }
-                        if let baggage = response.gate?.baggageClaim ?? response.snapshot?.baggageClaim ?? response.candidate?.baggageClaim {
-                            flightDetailRow(symbol: "suitcase.fill", title: String(localized: "Baggage"), value: baggage)
-                        }
-                        if let aircraftDetail {
-                            Button {
-                                if let position = response.snapshot?.position ?? response.plane?.position,
-                                   let url = URL(string: "https://maps.apple.com/?ll=\(position.lat),\(position.lon)") {
-                                    openURL(url)
-                                }
-                            } label: {
-                                flightDetailRow(
-                                    symbol: "airplane.circle.fill",
-                                    title: String(localized: "Aircraft"),
-                                    value: aircraftDetail,
-                                    showsLink: (response.snapshot?.position ?? response.plane?.position) != nil
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled((response.snapshot?.position ?? response.plane?.position) == nil)
-                        }
-                        if let routeDetail {
-                            flightDetailRow(symbol: "point.topleft.down.curvedto.point.bottomright.up", title: String(localized: "Route"), value: routeDetail)
-                        }
-                        ForEach(response.intelligence?.disruptions.prefix(3) ?? []) { disruption in
-                            flightDetailRow(
-                                symbol: "exclamationmark.arrow.triangle.2.circlepath",
-                                title: disruption.entityName ?? disruption.entityId ?? disruption.entityType.capitalized,
-                                value: disruptionText(disruption)
-                            )
-                        }
-                        if let weatherDetail {
-                            flightDetailRow(symbol: "cloud.sun.fill", title: String(localized: "Airport weather"), value: weatherDetail)
-                        }
-                    }
-                    .padding(.top, 10)
-                } label: {
-                    Label("More live details", systemImage: "slider.horizontal.3")
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Additional flight data", systemImage: "slider.horizontal.3")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(Color.voyaTeal)
+
+                    if let arrivalDetail {
+                        flightDetailRow(symbol: "airplane.arrival", title: String(localized: "Arrival"), value: arrivalDetail)
+                    }
+                    if let baggage = response.gate?.baggageClaim ?? response.snapshot?.baggageClaim ?? response.candidate?.baggageClaim {
+                        flightDetailRow(symbol: "suitcase.fill", title: String(localized: "Baggage"), value: baggage)
+                    }
+                    if aircraftPosition == nil, let aircraftDetail {
+                        Button {
+                            if let position = response.snapshot?.position ?? response.plane?.position,
+                               let url = URL(string: "https://maps.apple.com/?ll=\(position.lat),\(position.lon)") {
+                                openURL(url)
+                            }
+                        } label: {
+                            flightDetailRow(
+                                symbol: "airplane.circle.fill",
+                                title: String(localized: "Aircraft"),
+                                value: aircraftDetail,
+                                showsLink: (response.snapshot?.position ?? response.plane?.position) != nil
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled((response.snapshot?.position ?? response.plane?.position) == nil)
+                    }
+                    if let routeDetail {
+                        flightDetailRow(symbol: "point.topleft.down.curvedto.point.bottomright.up", title: String(localized: "Route"), value: routeDetail)
+                    }
+                    if let reliabilityText {
+                        flightDetailRow(symbol: "chart.bar.xaxis", title: String(localized: "Reliability"), value: reliabilityText)
+                    }
+                    ForEach(response.intelligence?.disruptions.prefix(3) ?? []) { disruption in
+                        flightDetailRow(
+                            symbol: "exclamationmark.arrow.triangle.2.circlepath",
+                            title: disruption.entityName ?? disruption.entityId ?? disruption.entityType.capitalized,
+                            value: disruptionText(disruption)
+                        )
+                    }
+                    if let weatherDetail {
+                        flightDetailRow(symbol: "cloud.sun.fill", title: String(localized: "Airport weather"), value: weatherDetail)
+                    }
                 }
             }
 
-            ForEach(response.warnings.filter { !$0.isEmpty }.prefix(3), id: \.self) { warning in
-                Label(warning, systemImage: "exclamationmark.triangle.fill")
+            if let validationIssueText {
+                Label(validationIssueText, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.voyaCoral)
+                    .foregroundStyle(Color.voyaGold)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let nextAction = response.nextActions?.first?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
-                Label(nextAction, systemImage: "checkmark.circle")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.voyaTeal)
-                    .fixedSize(horizontal: false, vertical: true)
+            if let operationalAction {
+                VStack(alignment: .leading, spacing: 7) {
+                    Label("What to do now", systemImage: "checklist")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaTeal)
+                    Text(operationalAction)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.voyaInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.voyaTeal.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
-            if let attribution = response.provider?.attribution.nilIfEmpty {
-                Text(attribution)
+            if let providerName = response.provider?.name.nilIfEmpty {
+                Text(String(localized: "Flight data provided by \(providerName)."))
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(Color.voyaMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -886,21 +985,15 @@ private struct FlightStatusSummaryView: View {
     }
 
     private var statusText: String {
-        if response.provider?.connected == false {
-            return String(localized: "Live provider unavailable")
-        }
-        return response.snapshot?.providerStatus?.nilIfEmpty
-            ?? response.candidate?.providerStatus?.nilIfEmpty
-            ?? response.snapshot?.status.capitalized
-            ?? String(localized: "Provider verified")
+        operationalStatus.label
     }
 
     private var statusTint: Color {
-        if response.provider?.connected == false { return Color.voyaGold }
-        let status = "\(response.snapshot?.status ?? "") \(statusText)".lowercased()
-        if status.contains("cancel") || status.contains("divert") { return Color.voyaCoral }
-        if status.contains("delay") { return Color.voyaGold }
-        return Color.voyaTeal
+        response.provider?.connected == false ? Color.voyaGold : operationalStatus.tint
+    }
+
+    private var operationalStatus: FlightOperationalStatus {
+        FlightOperationalStatus(response: response, fallbackStatus: "")
     }
 
     private var gateValue: String {
@@ -931,7 +1024,13 @@ private struct FlightStatusSummaryView: View {
             actual: response.schedule?.actualDepartureAt ?? response.snapshot?.actualDepartureAt,
             estimated: response.schedule?.estimatedDepartureAt ?? response.snapshot?.estimatedDepartureAt,
             scheduled: response.schedule?.scheduledDepartureAt ?? response.snapshot?.scheduledDepartureAt ?? response.candidate?.departureAt
-        )
+        ) ?? item.startsAt.map {
+            FlightDisplayTiming(
+                value: ItineraryDateFormatter.displayClock(date: $0, timeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds),
+                label: String(localized: "From booking"),
+                tone: .scheduled
+            )
+        }
     }
 
     private var arrivalTiming: FlightDisplayTiming? {
@@ -939,7 +1038,16 @@ private struct FlightStatusSummaryView: View {
             actual: response.schedule?.actualArrivalAt ?? response.snapshot?.actualArrivalAt,
             estimated: response.schedule?.estimatedArrivalAt ?? response.snapshot?.estimatedArrivalAt,
             scheduled: response.schedule?.scheduledArrivalAt ?? response.snapshot?.scheduledArrivalAt ?? response.candidate?.arrivalAt
-        )
+        ) ?? item.endsAt.map {
+            FlightDisplayTiming(
+                value: ItineraryDateFormatter.displayClock(
+                    date: $0,
+                    timeZoneOffsetSeconds: item.endsAtTimeZoneOffsetSeconds ?? item.startsAtTimeZoneOffsetSeconds
+                ),
+                label: String(localized: "From booking"),
+                tone: .scheduled
+            )
+        }
     }
 
     private func timing(actual: String?, estimated: String?, scheduled: String?) -> FlightDisplayTiming? {
@@ -960,9 +1068,9 @@ private struct FlightStatusSummaryView: View {
             return response.delayStats?.onTimeProbability.map { String(localized: "\(Int(($0 * 100).rounded()))% Voya on-time estimate") }
         }
 
-        let delayed = reliability.delayed15Rate.map { "\(Int(($0 * 100).rounded()))% delayed" }
-        let average = reliability.averageArrivalDelayMinutes.map { "avg arrival delay \(Int($0.rounded())) min" }
-        let sample = reliability.sampleSize > 0 ? "\(reliability.sampleSize) recent flights" : nil
+        let delayed = reliability.delayed15Rate.map { String(localized: "Delayed by 15+ min: \(Int(($0 * 100).rounded()))%") }
+        let average = reliability.averageArrivalDelayMinutes.map { String(localized: "Average arrival delay: \(Int($0.rounded())) min") }
+        let sample = reliability.sampleSize > 0 ? String(localized: "Flights in statistics: \(reliability.sampleSize)") : nil
 
         return [sample, delayed, average]
             .compactMap { $0 }
@@ -993,6 +1101,78 @@ private struct FlightStatusSummaryView: View {
         return parts.joined(separator: " · ").nilIfEmpty
     }
 
+    private var aircraftPosition: FlightPosition? {
+        response.snapshot?.position ?? response.plane?.position
+    }
+
+    private var aircraftPositionTitle: String {
+        switch response.plane?.state {
+        case "inbound_airborne", "inbound_scheduled":
+            return String(localized: "Assigned aircraft is on its way")
+        case "inbound_arrived":
+            return String(localized: "Assigned aircraft has arrived")
+        default:
+            return operationalStatus.tone == .active
+                ? String(localized: "Aircraft is in flight")
+                : String(localized: "Live aircraft position")
+        }
+    }
+
+    private var aircraftPositionDetail: String? {
+        let segment = response.plane?.state.hasPrefix("inbound") == true
+            ? response.plane?.inboundFlight
+            : response.plane?.currentFlight
+        let route = [segment?.originAirport, segment?.destinationAirport]
+            .compactMap { $0?.nilIfEmpty }
+            .joined(separator: " → ")
+            .nilIfEmpty
+        let progress = (response.snapshot?.progressPercent ?? response.plane?.progressPercent).map {
+            String(localized: "\(Int($0.rounded()))% complete")
+        }
+        let arrival = segment?.estimatedArrivalAt
+            ?? segment?.scheduledArrivalAt
+            ?? response.schedule?.estimatedArrivalAt
+            ?? response.schedule?.scheduledArrivalAt
+        let arrivalText = arrival?.nilIfEmpty.map {
+            String(localized: "Arrival \(FlightProviderClock.display($0))")
+        }
+        return [route, progress, arrivalText]
+            .compactMap { $0?.nilIfEmpty }
+            .joined(separator: " · ")
+            .nilIfEmpty
+    }
+
+    private var operationalAction: String? {
+        let snapshotStatus = response.snapshot?.status.lowercased() ?? ""
+        if snapshotStatus.contains("cancel") {
+            return String(localized: "Contact the airline or booking source for rebooking options.")
+        }
+        if snapshotStatus.contains("divert") {
+            return String(localized: "Check the new arrival airport and onward travel options.")
+        }
+        if snapshotStatus == "arrived" {
+            if let baggage = response.gate?.baggageClaim ?? response.snapshot?.baggageClaim {
+                return String(localized: "Collect baggage at belt \(baggage).")
+            }
+            return nil
+        }
+        if snapshotStatus == "departed" {
+            return String(localized: "Keep the expected arrival time visible for onward plans.")
+        }
+        if (response.delayStats?.delayMinutes ?? 0) >= 15 {
+            return String(localized: "Monitor the revised departure time and re-check any connection buffer.")
+        }
+
+        let terminal = response.gate?.departureTerminal ?? response.snapshot?.departureTerminal
+        let gate = response.gate?.departureGate ?? response.snapshot?.departureGate
+        if let gate {
+            let destination = terminal.map { String(localized: "terminal \($0), gate \(gate)") }
+                ?? String(localized: "gate \(gate)")
+            return String(localized: "Proceed to \(destination) and keep alerts enabled for changes.")
+        }
+        return String(localized: "Check the gate again closer to departure and follow the airport displays.")
+    }
+
     private var routeDetail: String? {
         let route = response.intelligence?.route
         return [route?.routeDistance, route?.route?.prefix(90).description]
@@ -1020,11 +1200,27 @@ private struct FlightStatusSummaryView: View {
 
     private var hasMoreDetails: Bool {
         arrivalDetail != nil
-            || aircraftDetail != nil
+            || (aircraftPosition == nil && aircraftDetail != nil)
             || routeDetail != nil
+            || reliabilityText != nil
             || weatherDetail != nil
             || !(response.intelligence?.disruptions.isEmpty ?? true)
             || (response.gate?.baggageClaim ?? response.snapshot?.baggageClaim ?? response.candidate?.baggageClaim) != nil
+    }
+
+    private var validationIssueText: String? {
+        guard response.validation.state != "validated", response.snapshot == nil else {
+            return nil
+        }
+
+        switch response.validation.state {
+        case "not_found":
+            return String(localized: "Live data could not be confirmed for the booking date and route. Check the flight number, airports, and departure date.")
+        case "provider_not_connected", "provider_error":
+            return String(localized: "Live flight data is temporarily unavailable. Booking details remain visible.")
+        default:
+            return String(localized: "Live flight data has not been confirmed yet. Booking details remain visible.")
+        }
     }
 
     private func disruptionText(_ disruption: FlightDisruptionStats) -> String {

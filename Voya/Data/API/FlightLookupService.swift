@@ -352,6 +352,7 @@ enum FlightLookupCache {
         let formatter = ISO8601DateFormatter()
         return [
             schemaVersion,
+            item.resolvedFlightNumber?.lowercased() ?? "",
             item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
             item.location.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
             item.startsAt.map(formatter.string(from:)) ?? ""

@@ -816,7 +816,7 @@ struct AssistantIntelligenceBuilder {
             .prefix(4)
 
         for item in upcomingFlights {
-            guard let flightNumber = store.firstFlightNumber(in: "\(item.title) \(item.location)") else {
+            guard let flightNumber = item.resolvedFlightNumber else {
                 alerts.append(
                     TravelAlert(
                         id: "flight-number-needed-\(item.id.uuidString)",

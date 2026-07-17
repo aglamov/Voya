@@ -369,7 +369,7 @@ extension VoyaStore {
             let referenceDate = item.startsAt ?? nearbyFlightDate(for: index, in: preview.items)
 
             do {
-                let recognizedFlightNumber = firstFlightNumber(in: "\(item.title) \(item.location)")
+                let recognizedFlightNumber = item.resolvedFlightNumber
                 let discoveredCandidate: FlightLookupCandidate?
                 let flightNumber: String
 
@@ -430,8 +430,14 @@ extension VoyaStore {
 
     func apply(_ candidate: FlightLookupCandidate, toImportedFlight item: ItineraryItem) -> Bool {
         var didChange = false
+        let hadFlightNumber = item.resolvedFlightNumber != nil
 
-        if firstFlightNumber(in: "\(item.title) \(item.location)") == nil
+        if item.flightNumber != candidate.flightNumber {
+            item.flightNumber = candidate.flightNumber
+            didChange = true
+        }
+
+        if !hadFlightNumber
             || item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || item.title.localizedCaseInsensitiveContains("destination")
             || item.title.localizedCaseInsensitiveContains(candidate.flightNumber) {

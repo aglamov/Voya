@@ -11,7 +11,6 @@ import Vision
 struct EditItineraryItemView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: ItineraryItemDraft
-    @State private var flightLookupNumber: String
     @State private var flightLookupResult: FlightLookupResponse?
     @State private var isFlightLookupLoading = false
     @State private var flightLookupMessage: String?
@@ -26,7 +25,6 @@ struct EditItineraryItemView: View {
         onDelete: (() -> Void)? = nil
     ) {
         _draft = State(initialValue: ItineraryItemDraft(item: item))
-        _flightLookupNumber = State(initialValue: Self.firstFlightNumber(in: item.title))
         mode = .edit
         tripTitle = nil
         self.onSave = onSave
@@ -35,7 +33,6 @@ struct EditItineraryItemView: View {
 
     init(mode: ItineraryItemEditorMode, tripTitle: String, onSave: @escaping (ItineraryItemDraft) -> Void) {
         _draft = State(initialValue: ItineraryItemDraft())
-        _flightLookupNumber = State(initialValue: "")
         self.mode = mode
         self.tripTitle = tripTitle
         self.onSave = onSave
@@ -184,7 +181,7 @@ struct EditItineraryItemView: View {
     private var flightLookupPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                ClearableTextField("Flight number", text: $flightLookupNumber, prompt: "LH1830")
+                ClearableTextField("Flight number", text: $draft.flightNumber, prompt: "W9 5364")
 
                 Button {
                     Task {
@@ -246,15 +243,15 @@ struct EditItineraryItemView: View {
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onChange(of: draft.title) { _, title in
-            guard flightLookupNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            guard draft.flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return
             }
-            flightLookupNumber = Self.firstFlightNumber(in: title)
+            draft.flightNumber = Self.firstFlightNumber(in: title)
         }
     }
 
     private var isFlightLookupDisabled: Bool {
-        isFlightLookupLoading || flightLookupNumber.trimmingCharacters(in: .whitespacesAndNewlines).count < 2
+        isFlightLookupLoading || draft.flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).count < 2
     }
 
     private var isSaveDisabled: Bool {
@@ -264,7 +261,7 @@ struct EditItineraryItemView: View {
 
     @MainActor
     private func lookupFlight() async {
-        let flightNumber = flightLookupNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let flightNumber = draft.flightNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !flightNumber.isEmpty else {
             return
         }
@@ -291,6 +288,7 @@ struct EditItineraryItemView: View {
 
     private func apply(_ candidate: FlightLookupCandidate) {
         draft.kind = .flight
+        draft.flightNumber = candidate.flightNumber
         draft.title = candidate.titleText
         if !candidate.routeText.isEmpty {
             draft.location = candidate.routeText

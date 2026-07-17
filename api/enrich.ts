@@ -167,12 +167,12 @@ function clean(value: unknown) {
 }
 
 function firstFlightNumber(value: string) {
-  return value.match(/\b[A-Z]{2}\s?\d{2,4}\b/i)?.[0]?.replace(/\s+/g, "").toUpperCase();
+  return value.match(/\b[A-Z0-9]{2}\s?\d{2,4}\b/i)?.[0]?.replace(/\s+/g, "").toUpperCase();
 }
 
 function allFlightNumbers(value: string) {
   return [...new Set(
-    [...value.matchAll(/\b[A-Z]{2}\s?\d{2,4}\b/gi)]
+    [...value.matchAll(/\b[A-Z0-9]{2}\s?\d{2,4}\b/gi)]
       .map((match) => match[0].replace(/\s+/g, "").toUpperCase())
   )];
 }

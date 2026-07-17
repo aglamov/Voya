@@ -113,8 +113,8 @@ extension VoyaStore {
     }
 
     func duplicateFlight(_ first: ItineraryItem, _ second: ItineraryItem) -> Bool {
-        let firstFlightNumbers = flightNumbers(in: first.title)
-        let secondFlightNumbers = flightNumbers(in: second.title)
+        let firstFlightNumbers = Set([first.resolvedFlightNumber].compactMap { $0 })
+        let secondFlightNumbers = Set([second.resolvedFlightNumber].compactMap { $0 })
         let sharesFlightNumber = !firstFlightNumbers.isEmpty && !firstFlightNumbers.isDisjoint(with: secondFlightNumbers)
         let sameRoute = routeKey(for: first.location) == routeKey(for: second.location)
 
@@ -138,7 +138,7 @@ extension VoyaStore {
     }
 
     func flightNumbers(in value: String) -> Set<String> {
-        let pattern = #"\b[A-Z]{2}\s?\d{2,4}\b"#
+        let pattern = #"\b[A-Z0-9]{2}\s?\d{2,4}\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return []
         }
