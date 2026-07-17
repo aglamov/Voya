@@ -27,6 +27,9 @@ struct ItineraryItemDetailView: View {
     @State private var flightAlertWatchStatus: FlightAlertWatchStatus?
     @State private var isUpdatingFlightAlertWatch = false
     @State private var flightAlertWatchMessage: String?
+    @State private var isBookingDetailsExpanded = false
+    @State private var isShowingDeleteConfirmation = false
+    private let bookingDetailsAnchor = "booking-details"
     let tripID: UUID?
     let item: ItineraryItem
     let sourceDocument: SourceDocument?
@@ -53,9 +56,14 @@ struct ItineraryItemDetailView: View {
             AppBackground()
                 .ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
                     detailHeader
+
+                    if isRefreshingFlightStatus {
+                        flightUpdateBanner
+                    }
 
                     ItemCompanionCard(
                         item: item,
@@ -88,7 +96,7 @@ struct ItineraryItemDetailView: View {
                         sourceCard
                     }
 
-                    DisclosureGroup {
+                    DisclosureGroup(isExpanded: $isBookingDetailsExpanded) {
                         itemFormCard
                             .padding(.top, 10)
                     } label: {
@@ -112,10 +120,22 @@ struct ItineraryItemDetailView: View {
                         .shadow(color: .black.opacity(0.04), radius: 12, y: 7)
                     }
                     .tint(Color.voyaTeal)
+                    .id(bookingDetailsAnchor)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
+                    .padding(.bottom, isEditing ? 128 : 30)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 18)
-                .padding(.bottom, isEditing ? 128 : 30)
+                .onChange(of: isEditing) { _, editing in
+                    guard editing else { return }
+                    isBookingDetailsExpanded = true
+                    Task { @MainActor in
+                        await Task.yield()
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            proxy.scrollTo(bookingDetailsAnchor, anchor: .top)
+                        }
+                    }
+                }
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -144,6 +164,16 @@ struct ItineraryItemDetailView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(isEditing || isRefreshingFlightStatus)
+        .alert("Delete item?", isPresented: $isShowingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                onDelete()
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
+        }
     }
 
     private var detailHeader: some View {
@@ -165,8 +195,12 @@ struct ItineraryItemDetailView: View {
 
             HStack(spacing: 8) {
                 Button {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
-                        isEditing.toggle()
+                    if isEditing {
+                        cancelEditing()
+                    } else {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                            isEditing = true
+                        }
                     }
                 } label: {
                     Image(systemName: isEditing ? "lock.open.fill" : "lock.fill")
@@ -178,10 +212,16 @@ struct ItineraryItemDetailView: View {
                         .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(isEditing ? "Lock editing" : "Unlock editing")
+                .disabled(isRefreshingFlightStatus)
+                .opacity(isRefreshingFlightStatus ? 0.45 : 1)
+                .accessibilityLabel(isEditing ? "Cancel" : "Unlock editing")
 
                 Button {
-                    dismiss()
+                    if isEditing {
+                        cancelEditing()
+                    } else {
+                        dismiss()
+                    }
                 } label: {
                     Image(systemName: "xmark")
                         .font(.headline.weight(.bold))
@@ -192,6 +232,7 @@ struct ItineraryItemDetailView: View {
                         .shadow(color: .black.opacity(0.06), radius: 12, y: 8)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(isEditing ? "Cancel" : "Close")
             }
         }
     }
@@ -451,7 +492,7 @@ struct ItineraryItemDetailView: View {
                 .background(Color.voyaSurface)
                 .clipShape(Circle())
                 .buttonStyle(.plain)
-                .disabled(isRefreshingFlightStatus || flightLookupNumber == nil)
+                .disabled(isRefreshingFlightStatus || isEditing || flightLookupNumber == nil)
                 .accessibilityLabel("Refresh flight status")
             }
 
@@ -470,6 +511,25 @@ struct ItineraryItemDetailView: View {
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 12, y: 7)
+    }
+
+    private var flightUpdateBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ProgressView()
+                .tint(Color.voyaTeal)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Updating flight data")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.voyaInk)
+                Text("Editing will be available when the update finishes.")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.voyaTeal.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var locationActions: some View {
@@ -507,24 +567,38 @@ struct ItineraryItemDetailView: View {
 
     private var editorActions: some View {
         VStack(spacing: 10) {
-            Button {
-                onSave(draft)
-                dismiss()
-            } label: {
-                Label("Save changes", systemImage: "checkmark")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .foregroundStyle(.white)
-                    .background(isSaveDisabled ? Color.voyaMuted : Color.voyaInk)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            HStack(spacing: 10) {
+                Button {
+                    cancelEditing()
+                } label: {
+                    Text("Cancel")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .foregroundStyle(Color.voyaInk)
+                        .background(Color.voyaSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    onSave(draft)
+                    dismiss()
+                } label: {
+                    Label("Save changes", systemImage: "checkmark")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .foregroundStyle(.white)
+                        .background(isSaveDisabled ? Color.voyaMuted : Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaveDisabled)
             }
-            .buttonStyle(.plain)
-            .disabled(isSaveDisabled)
 
             Button(role: .destructive) {
-                onDelete()
-                dismiss()
+                isShowingDeleteConfirmation = true
             } label: {
                 Label("Delete item", systemImage: "trash")
                     .font(.subheadline.weight(.semibold))
@@ -538,6 +612,13 @@ struct ItineraryItemDetailView: View {
         .padding(.top, 12)
         .padding(.bottom, 10)
         .background(.ultraThinMaterial)
+    }
+
+    private func cancelEditing() {
+        draft = ItineraryItemDraft(item: item)
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            isEditing = false
+        }
     }
 
     private var isSaveDisabled: Bool {
@@ -691,7 +772,7 @@ struct ItineraryItemDetailView: View {
 
     @MainActor
     private func refreshFlightStatus(showCompletionMessage: Bool = true) async {
-        guard let flightNumber = flightLookupNumber, !isRefreshingFlightStatus else {
+        guard let flightNumber = flightLookupNumber, !isRefreshingFlightStatus, !isEditing else {
             return
         }
 
@@ -726,6 +807,10 @@ struct ItineraryItemDetailView: View {
                    dateMatchedResponse.snapshot != nil {
                     response = dateMatchedResponse
                 }
+            }
+            guard !isEditing else {
+                flightStatusMessage = String(localized: "Flight update paused while you edit booking details.")
+                return
             }
             flightLookupResponse = response
             FlightLookupCache.store(response, for: item)
@@ -796,8 +881,8 @@ private struct FlightStatusSummaryView: View {
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(Color.voyaInk)
                 Spacer(minLength: 8)
-                if let providerName = response.provider?.name {
-                    Text(providerName)
+                if let providerDisplayName {
+                    Text(providerDisplayName)
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(Color.voyaMuted)
                         .lineLimit(1)
@@ -845,6 +930,32 @@ private struct FlightStatusSummaryView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 .buttonStyle(.plain)
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "airplane.circle")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(Color.voyaMuted)
+                        .frame(width: 44, height: 44)
+                        .background(Color.voyaSurface)
+                        .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Where is the aircraft")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.voyaMuted)
+                        Text("Aircraft position is not available yet")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                        Text("FlightAware will show the aircraft here when it receives a live track for this flight or its assigned inbound flight.")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.voyaSurface.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
             HStack(spacing: 10) {
@@ -937,12 +1048,12 @@ private struct FlightStatusSummaryView: View {
                         flightDetailRow(symbol: "point.topleft.down.curvedto.point.bottomright.up", title: String(localized: "Route"), value: routeDetail)
                     }
                     if let reliabilityText {
-                        flightDetailRow(symbol: "chart.bar.xaxis", title: String(localized: "Reliability"), value: reliabilityText)
+                        flightDetailRow(symbol: "chart.bar.xaxis", title: String(localized: "History of this flight number"), value: reliabilityText)
                     }
-                    ForEach(response.intelligence?.disruptions.prefix(3) ?? []) { disruption in
+                    ForEach(actionableDisruptions.prefix(3)) { disruption in
                         flightDetailRow(
                             symbol: "exclamationmark.arrow.triangle.2.circlepath",
-                            title: disruption.entityName ?? disruption.entityId ?? disruption.entityType.capitalized,
+                            title: disruptionTitle(disruption),
                             value: disruptionText(disruption)
                         )
                     }
@@ -975,8 +1086,8 @@ private struct FlightStatusSummaryView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
-            if let providerName = response.provider?.name.nilIfEmpty {
-                Text(String(localized: "Flight data provided by \(providerName)."))
+            if let providerDisplayName {
+                Text(String(localized: "Flight data provided by \(providerDisplayName)."))
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(Color.voyaMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -988,6 +1099,10 @@ private struct FlightStatusSummaryView: View {
         operationalStatus.label
     }
 
+    private var providerDisplayName: String? {
+        response.provider == nil ? nil : "FlightAware"
+    }
+
     private var statusTint: Color {
         response.provider?.connected == false ? Color.voyaGold : operationalStatus.tint
     }
@@ -997,14 +1112,8 @@ private struct FlightStatusSummaryView: View {
     }
 
     private var gateValue: String {
-        let terminal = response.gate?.departureTerminal ?? response.candidate?.departureTerminal
-        let gate = response.gate?.departureGate ?? response.candidate?.departureGate
-        let parts = [
-            terminal.map { String(localized: "T\($0)") },
-            gate.map { String(localized: "Gate \($0)") }
-        ].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
-
-        return parts.isEmpty ? String(localized: "Not posted") : parts.joined(separator: " · ")
+        trustedDepartureGate.map { String(localized: "Gate \($0)") }
+            ?? String(localized: "Not posted")
     }
 
     private var delayValue: String {
@@ -1023,7 +1132,8 @@ private struct FlightStatusSummaryView: View {
         timing(
             actual: response.schedule?.actualDepartureAt ?? response.snapshot?.actualDepartureAt,
             estimated: response.schedule?.estimatedDepartureAt ?? response.snapshot?.estimatedDepartureAt,
-            scheduled: response.schedule?.scheduledDepartureAt ?? response.snapshot?.scheduledDepartureAt ?? response.candidate?.departureAt
+            scheduled: response.schedule?.scheduledDepartureAt ?? response.snapshot?.scheduledDepartureAt ?? response.candidate?.departureAt,
+            timeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds
         ) ?? item.startsAt.map {
             FlightDisplayTiming(
                 value: ItineraryDateFormatter.displayClock(date: $0, timeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds),
@@ -1037,7 +1147,8 @@ private struct FlightStatusSummaryView: View {
         timing(
             actual: response.schedule?.actualArrivalAt ?? response.snapshot?.actualArrivalAt,
             estimated: response.schedule?.estimatedArrivalAt ?? response.snapshot?.estimatedArrivalAt,
-            scheduled: response.schedule?.scheduledArrivalAt ?? response.snapshot?.scheduledArrivalAt ?? response.candidate?.arrivalAt
+            scheduled: response.schedule?.scheduledArrivalAt ?? response.snapshot?.scheduledArrivalAt ?? response.candidate?.arrivalAt,
+            timeZoneOffsetSeconds: item.endsAtTimeZoneOffsetSeconds ?? item.startsAtTimeZoneOffsetSeconds
         ) ?? item.endsAt.map {
             FlightDisplayTiming(
                 value: ItineraryDateFormatter.displayClock(
@@ -1050,15 +1161,28 @@ private struct FlightStatusSummaryView: View {
         }
     }
 
-    private func timing(actual: String?, estimated: String?, scheduled: String?) -> FlightDisplayTiming? {
+    private func timing(actual: String?, estimated: String?, scheduled: String?, timeZoneOffsetSeconds: Int?) -> FlightDisplayTiming? {
         if let actual = actual?.nilIfEmpty {
-            return FlightDisplayTiming(value: FlightProviderClock.display(actual), label: String(localized: "Actual"), tone: .actual)
+            return FlightDisplayTiming(
+                value: FlightProviderClock.display(actual, timeZoneOffsetSeconds: timeZoneOffsetSeconds),
+                label: String(localized: "Actual"),
+                tone: .actual
+            )
         }
-        if let estimated = estimated?.nilIfEmpty {
-            return FlightDisplayTiming(value: FlightProviderClock.display(estimated), label: String(localized: "Estimated"), tone: .estimated)
+        if let estimated = estimated?.nilIfEmpty,
+           FlightProviderClock.differs(estimated, from: scheduled) {
+            return FlightDisplayTiming(
+                value: FlightProviderClock.display(estimated, timeZoneOffsetSeconds: timeZoneOffsetSeconds),
+                label: String(localized: "Estimated"),
+                tone: .estimated
+            )
         }
         if let scheduled = scheduled?.nilIfEmpty {
-            return FlightDisplayTiming(value: FlightProviderClock.display(scheduled), label: String(localized: "Scheduled"), tone: .scheduled)
+            return FlightDisplayTiming(
+                value: FlightProviderClock.display(scheduled, timeZoneOffsetSeconds: timeZoneOffsetSeconds),
+                label: String(localized: "Scheduled"),
+                tone: .scheduled
+            )
         }
         return nil
     }
@@ -1070,7 +1194,7 @@ private struct FlightStatusSummaryView: View {
 
         let delayed = reliability.delayed15Rate.map { String(localized: "Delayed by 15+ min: \(Int(($0 * 100).rounded()))%") }
         let average = reliability.averageArrivalDelayMinutes.map { String(localized: "Average arrival delay: \(Int($0.rounded())) min") }
-        let sample = reliability.sampleSize > 0 ? String(localized: "Flights in statistics: \(reliability.sampleSize)") : nil
+        let sample = reliability.sampleSize > 0 ? String(localized: "Recent flights with this number: \(reliability.sampleSize)") : nil
 
         return [sample, delayed, average]
             .compactMap { $0 }
@@ -1080,7 +1204,8 @@ private struct FlightStatusSummaryView: View {
 
     private var arrivalDetail: String? {
         let terminal = response.gate?.arrivalTerminal ?? response.snapshot?.arrivalTerminal ?? response.candidate?.arrivalTerminal
-        let gate = response.gate?.arrivalGate ?? response.snapshot?.arrivalGate ?? response.candidate?.arrivalGate
+        let gate = (response.snapshot?.arrivalGate ?? response.gate?.arrivalGate)
+            .flatMap { isPlausibleGate($0) ? $0 : nil }
         let parts = [
             terminal.map { String(localized: "Terminal \($0)") },
             gate.map { String(localized: "Gate \($0)") }
@@ -1090,8 +1215,9 @@ private struct FlightStatusSummaryView: View {
 
     private var aircraftDetail: String? {
         let progress = response.snapshot?.progressPercent ?? response.plane?.progressPercent
-        let progressText = progress.map { value in
-            String(localized: "\(Int(value.rounded()))% complete")
+        let progressText: String? = progress.flatMap { value in
+            guard value > 0 else { return nil }
+            return String(localized: "\(Int(value.rounded()))% complete")
         }
         let parts = [
             response.snapshot?.aircraftRegistration ?? response.plane?.aircraftRegistration ?? response.candidate?.aircraftRegistration,
@@ -1126,15 +1252,16 @@ private struct FlightStatusSummaryView: View {
             .compactMap { $0?.nilIfEmpty }
             .joined(separator: " → ")
             .nilIfEmpty
-        let progress = (response.snapshot?.progressPercent ?? response.plane?.progressPercent).map {
-            String(localized: "\(Int($0.rounded()))% complete")
+        let progress: String? = (response.snapshot?.progressPercent ?? response.plane?.progressPercent).flatMap {
+            guard $0 > 0 else { return nil }
+            return String(localized: "\(Int($0.rounded()))% complete")
         }
         let arrival = segment?.estimatedArrivalAt
             ?? segment?.scheduledArrivalAt
             ?? response.schedule?.estimatedArrivalAt
             ?? response.schedule?.scheduledArrivalAt
         let arrivalText = arrival?.nilIfEmpty.map {
-            String(localized: "Arrival \(FlightProviderClock.display($0))")
+            String(localized: "Arrival \(FlightProviderClock.display($0, timeZoneOffsetSeconds: item.endsAtTimeZoneOffsetSeconds ?? item.startsAtTimeZoneOffsetSeconds))")
         }
         return [route, progress, arrivalText]
             .compactMap { $0?.nilIfEmpty }
@@ -1163,12 +1290,14 @@ private struct FlightStatusSummaryView: View {
             return String(localized: "Monitor the revised departure time and re-check any connection buffer.")
         }
 
-        let terminal = response.gate?.departureTerminal ?? response.snapshot?.departureTerminal
-        let gate = response.gate?.departureGate ?? response.snapshot?.departureGate
-        if let gate {
+        let terminal = response.snapshot?.departureTerminal
+        if let gate = trustedDepartureGate {
             let destination = terminal.map { String(localized: "terminal \($0), gate \(gate)") }
                 ?? String(localized: "gate \(gate)")
             return String(localized: "Proceed to \(destination) and keep alerts enabled for changes.")
+        }
+        if let hoursUntilDeparture, hoursUntilDeparture > 6 {
+            return String(localized: "The departure gate has not been published yet. Check it closer to departure and follow the airport displays.")
         }
         return String(localized: "Check the gate again closer to departure and follow the airport displays.")
     }
@@ -1185,17 +1314,19 @@ private struct FlightStatusSummaryView: View {
         let weather = response.intelligence?.weather
         let origin = weather?.origin
         let destination = weather?.destination
+        let originAirport = response.snapshot?.originAirport ?? response.candidate?.originAirport ?? origin?.airport
+        let destinationAirport = response.snapshot?.destinationAirport ?? response.candidate?.destinationAirport ?? destination?.airport
         let originText = [
-            origin?.airport,
+            originAirport.map { "\(String(localized: "Departure")) \($0)" },
             origin?.temperatureC.map { "\(Int($0.rounded())) °C" },
-            origin?.summary ?? origin?.forecastSummary
+            localizedWeatherSummary(origin?.summary ?? origin?.forecastSummary)
         ].compactMap { $0?.nilIfEmpty }.joined(separator: " · ").nilIfEmpty
         let destinationText = [
-            destination?.airport,
+            destinationAirport.map { "\(String(localized: "Arrival")) \($0)" },
             destination?.temperatureC.map { "\(Int($0.rounded())) °C" },
-            destination?.summary ?? destination?.forecastSummary
+            localizedWeatherSummary(destination?.summary ?? destination?.forecastSummary)
         ].compactMap { $0?.nilIfEmpty }.joined(separator: " · ").nilIfEmpty
-        return [originText, destinationText].compactMap { $0 }.joined(separator: " → ").nilIfEmpty
+        return [originText, destinationText].compactMap { $0 }.joined(separator: "\n").nilIfEmpty
     }
 
     private var hasMoreDetails: Bool {
@@ -1204,7 +1335,7 @@ private struct FlightStatusSummaryView: View {
             || routeDetail != nil
             || reliabilityText != nil
             || weatherDetail != nil
-            || !(response.intelligence?.disruptions.isEmpty ?? true)
+            || !actionableDisruptions.isEmpty
             || (response.gate?.baggageClaim ?? response.snapshot?.baggageClaim ?? response.candidate?.baggageClaim) != nil
     }
 
@@ -1223,10 +1354,74 @@ private struct FlightStatusSummaryView: View {
         }
     }
 
+    private var hoursUntilDeparture: Double? {
+        item.startsAt.map { $0.timeIntervalSinceNow / 3_600 }
+    }
+
+    private var trustedDepartureGate: String? {
+        guard response.validation.state == "validated",
+              response.provider?.connected != false,
+              let gate = response.snapshot?.departureGate?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+              isPlausibleGate(gate),
+              let hoursUntilDeparture,
+              hoursUntilDeparture <= 6 else {
+            return nil
+        }
+        return gate
+    }
+
+    private func isPlausibleGate(_ gate: String) -> Bool {
+        gate.rangeOfCharacter(from: .decimalDigits) != nil
+    }
+
+    private var actionableDisruptions: [FlightDisruptionStats] {
+        response.intelligence?.disruptions.filter {
+            ($0.delays ?? 0) > 0 || ($0.cancellations ?? 0) > 0
+        } ?? []
+    }
+
+    private func disruptionTitle(_ disruption: FlightDisruptionStats) -> String {
+        let name = disruption.entityName ?? disruption.entityId ?? String(localized: "Unknown")
+        switch disruption.entityType {
+        case "airline":
+            return String(localized: "All airline flights this week · \(name)")
+        case "origin":
+            return String(localized: "All departures from this airport this week · \(name)")
+        default:
+            return String(localized: "All arrivals at this airport this week · \(name)")
+        }
+    }
+
     private func disruptionText(_ disruption: FlightDisruptionStats) -> String {
-        let delayed = disruption.delays.map { String(localized: "\($0) delayed") }
-        let cancelled = disruption.cancellations.map { String(localized: "\($0) cancelled") }
-        return [delayed, cancelled, disruption.timePeriod].compactMap { $0?.nilIfEmpty }.joined(separator: " · ")
+        let delayed: String? = disruption.delays.flatMap { delayed in
+            guard delayed > 0 else { return nil }
+            if let total = disruption.total, total > 0 {
+                let rate = disruption.delayRate.map { " · \(Int(($0 * 100).rounded()))%" } ?? ""
+                return String(localized: "Delayed this week: \(delayed) of \(total) flights\(rate)")
+            }
+            return String(localized: "Delayed this week: \(delayed) flights")
+        }
+        let cancelled: String? = disruption.cancellations.flatMap { value in
+            guard value > 0 else { return nil }
+            if let total = disruption.total, total > 0 {
+                return String(localized: "Cancelled this week: \(value) of \(total) flights")
+            }
+            return String(localized: "Cancelled this week: \(value)")
+        }
+        return [delayed, cancelled].compactMap { $0?.nilIfEmpty }.joined(separator: " · ")
+    }
+
+    private func localizedWeatherSummary(_ summary: String?) -> String? {
+        guard let summary = summary?.nilIfEmpty else { return nil }
+        let normalized = summary.lowercased()
+        if normalized.contains("partly cloudy") { return String(localized: "Partly cloudy") }
+        if normalized.contains("clear") { return String(localized: "Clear skies") }
+        if normalized.contains("overcast") { return String(localized: "Overcast") }
+        if normalized.contains("cloud") { return String(localized: "Cloudy") }
+        if normalized.contains("rain") || normalized.contains("shower") { return String(localized: "Rain") }
+        if normalized.contains("snow") { return String(localized: "Snow") }
+        if normalized.contains("fog") || normalized.contains("mist") { return String(localized: "Fog") }
+        return summary
     }
 
     private func flightDetailRow(symbol: String, title: String, value: String, showsLink: Bool = false) -> some View {
@@ -1291,7 +1486,11 @@ private struct FlightTimingMetric: View {
 }
 
 private enum FlightProviderClock {
-    static func display(_ value: String) -> String {
+    static func display(_ value: String, timeZoneOffsetSeconds: Int?) -> String {
+        if let date = date(from: value) {
+            return ItineraryDateFormatter.displayClock(date: date, timeZoneOffsetSeconds: timeZoneOffsetSeconds)
+        }
+
         let pattern = #"T(\d{2}):(\d{2})"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
@@ -1299,6 +1498,22 @@ private enum FlightProviderClock {
             return value
         }
         return value[range].dropFirst().description
+    }
+
+    static func differs(_ estimated: String, from scheduled: String?) -> Bool {
+        guard let scheduled = scheduled?.nilIfEmpty else { return true }
+        guard let estimatedDate = date(from: estimated), let scheduledDate = date(from: scheduled) else {
+            return estimated != scheduled
+        }
+        return abs(estimatedDate.timeIntervalSince(scheduledDate)) >= 60
+    }
+
+    private static func date(from value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 }
 

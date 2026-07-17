@@ -250,7 +250,7 @@ export type FlightStatusResponse = {
   };
   nextActions: string[];
   provider: {
-    name: "FlightAware AeroAPI";
+    name: "FlightAware";
     connected: boolean;
     attribution: string;
   };
@@ -1902,9 +1902,9 @@ function flightStatusSuccess(
     alerting: alerting(process.env.VOYA_API_PUBLIC_BASE_URL),
     nextActions: nextActions(snapshot),
     provider: {
-      name: "FlightAware AeroAPI",
+      name: "FlightAware",
       connected: true,
-      attribution: "Flight status, schedules, gate assignments, and alert capability from FlightAware AeroAPI."
+      attribution: "Flight status, schedules, gate assignments, and alert capability from FlightAware."
     },
     warnings
   }));
@@ -1937,9 +1937,9 @@ function flightStatusError(
     alerting: alerting(process.env.VOYA_API_PUBLIC_BASE_URL),
     nextActions: nextActions(),
     provider: {
-      name: "FlightAware AeroAPI",
+      name: "FlightAware",
       connected: state !== "provider_not_connected",
-      attribution: "Flight status, schedules, gate assignments, and alert capability from FlightAware AeroAPI."
+      attribution: "Flight status, schedules, gate assignments, and alert capability from FlightAware."
     },
     warnings: reasons
   };
