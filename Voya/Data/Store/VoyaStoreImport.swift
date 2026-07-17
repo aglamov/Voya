@@ -307,6 +307,7 @@ extension VoyaStore {
             trip.destinationImageCredit = nil
             trip.destinationImageCreditURL = nil
             trip.destinationImageProvider = nil
+            trip.destinationImageResolvedAt = nil
             trip.updatedAt = Date()
             deleteItems(deduplicated.duplicates)
             selectedTripID = trip.id
