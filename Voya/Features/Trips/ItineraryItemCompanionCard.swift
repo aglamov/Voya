@@ -125,7 +125,7 @@ struct ItemCompanionCard: View {
 
                 Divider()
 
-                HStack(spacing: 9) {
+                HStack(alignment: .top, spacing: 9) {
                     MomentMetric(title: "Time", value: timeMetric, symbol: "clock", tint: item.kind.timelineAccent)
                     MomentMetric(title: secondaryMetricTitle, value: secondaryMetricValue, symbol: secondaryMetricSymbol, tint: secondaryMetricTint)
                 }
@@ -348,7 +348,7 @@ struct ItemCompanionCard: View {
             return trimmedBody(warning)
         }
 
-        if let action = enrichment?.actions.first {
+        if let action = enrichment?.actions.first(where: { item.kind != .hotel || $0.kind != "route" }) {
             return trimmedBody([action.title, action.detail].filter { !$0.isEmpty }.joined(separator: ". "))
         }
 
@@ -557,8 +557,9 @@ struct MomentMetric: View {
                 Text(value)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(Color.voyaInk)
-                    .lineLimit(1)
+                    .lineLimit(3)
                     .minimumScaleFactor(0.72)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(10)

@@ -78,7 +78,7 @@ struct ItemInsightPanel: View {
                 DetailedInsightBrief(
                     enrichment: enrichment,
                     fallbackText: aiBriefText,
-                    itemKind: item.kind,
+                    item: item,
                     isRussian: isRussian
                 )
             } else {
@@ -574,7 +574,7 @@ struct DetailedInsightBrief: View {
     @Environment(\.openURL) private var openURL
     let enrichment: ItemEnrichment
     let fallbackText: String
-    let itemKind: ItineraryKind
+    let item: ItineraryItem
     let isRussian: Bool
 
     var body: some View {
@@ -635,7 +635,7 @@ struct DetailedInsightBrief: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
 
-            if !displayCards.isEmpty {
+            if item.kind != .hotel, !displayCards.isEmpty {
                 VStack(alignment: .leading, spacing: 9) {
                     Label(isRussian ? "Актуальные данные" : "Live context", systemImage: "waveform.path.ecg")
                         .font(.subheadline.weight(.bold))
@@ -689,7 +689,7 @@ struct DetailedInsightBrief: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
 
-            if !displayActions.isEmpty {
+            if item.kind != .hotel, !displayActions.isEmpty {
                 VStack(alignment: .leading, spacing: 9) {
                     Label(isRussian ? "Что сделать дальше" : "Next actions", systemImage: "checklist")
                         .font(.subheadline.weight(.bold))
@@ -752,11 +752,13 @@ struct DetailedInsightBrief: View {
 
     private var displayCards: [ItemEnrichmentCard] {
         let hiddenTitles: [String]
-        if itemKind == .flight {
+        if item.kind == .flight {
             hiddenTitles = [
                 "flight", "рейс", "gate", "выход", "delay", "задержка",
                 "weather", "погода", "aircraft location", "где самолет"
             ]
+        } else if item.kind == .hotel {
+            hiddenTitles = ["status", "статус", "maps", "карты", "weather", "погода"]
         } else {
             hiddenTitles = ["status", "статус", "maps", "карты"]
         }
@@ -835,12 +837,85 @@ struct DetailedInsightBrief: View {
     }
 
     private func polishedSectionsFromCards() -> [DetailedBriefSection]? {
-        switch itemKind {
+        switch item.kind {
         case .flight:
             return polishedFlightSections()
-        case .hotel, .event, .transit:
+        case .hotel:
+            return polishedHotelSections()
+        case .event, .transit:
             return nil
         }
+    }
+
+    private func polishedHotelSections() -> [DetailedBriefSection] {
+        var sections: [DetailedBriefSection] = []
+
+        let stayLines = [
+            item.startsAt.map {
+                "\(isRussian ? "Заезд" : "Check-in"): \(hotelDateTime($0, timeZoneOffsetSeconds: item.startsAtTimeZoneOffsetSeconds))"
+            },
+            item.endsAt.map {
+                "\(isRussian ? "Выезд" : "Check-out"): \(hotelDateTime($0, timeZoneOffsetSeconds: item.endsAtTimeZoneOffsetSeconds ?? item.startsAtTimeZoneOffsetSeconds))"
+            }
+        ].compactMap { $0 }
+
+        if !stayLines.isEmpty {
+            sections.append(DetailedBriefSection(
+                title: isRussian ? "Проживание" : "Stay",
+                body: stayLines.joined(separator: "\n"),
+                kind: "stay"
+            ))
+        }
+
+        let location = item.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !location.isEmpty {
+            sections.append(DetailedBriefSection(
+                title: isRussian ? "Адрес" : "Address",
+                body: location,
+                kind: "location"
+            ))
+        }
+
+        if let weather = firstCard(kind: "weather", titles: ["Погода", "Weather"]) {
+            let value = humanizedWeatherText(cleanInlineText(weather.value))
+            let detail = humanizedWeatherText(cleanInlineText(weather.detail ?? ""))
+            let body = [value, detail].filter { !$0.isEmpty }.joined(separator: "\n")
+            if !body.isEmpty {
+                sections.append(DetailedBriefSection(
+                    title: isRussian ? "Погода" : "Weather",
+                    body: body,
+                    kind: "weather"
+                ))
+            }
+        }
+
+        let bookingLines = [
+            cleanOptional(item.providerName).map { "\(isRussian ? "Поставщик" : "Provider"): \($0)" },
+            cleanOptional(item.confirmationCode).map { "\(isRussian ? "Подтверждение" : "Confirmation"): \($0)" },
+            cleanOptional(item.status).map { "\(isRussian ? "Статус" : "Status"): \($0)" }
+        ].compactMap { $0 }
+
+        if !bookingLines.isEmpty {
+            sections.append(DetailedBriefSection(
+                title: isRussian ? "Бронирование" : "Booking",
+                body: bookingLines.joined(separator: "\n"),
+                kind: "booking"
+            ))
+        }
+
+        return sections
+    }
+
+    private func hotelDateTime(_ date: Date, timeZoneOffsetSeconds: Int?) -> String {
+        ItineraryDateFormatter.displayTime(
+            start: date,
+            end: nil,
+            startTimeZoneOffsetSeconds: timeZoneOffsetSeconds
+        )
+    }
+
+    private func cleanOptional(_ value: String?) -> String? {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 
     private func polishedFlightSections() -> [DetailedBriefSection] {
@@ -908,6 +983,9 @@ struct DetailedInsightBrief: View {
     private var displayActions: [TravelAction] {
         var seen: Set<String> = []
         return enrichment.actions.filter { action in
+            if item.kind == .hotel, action.kind == "route" {
+                return false
+            }
             let key = normalizedKey("\(action.title) \(action.detail)")
             return seen.insert(key).inserted
         }
@@ -1141,6 +1219,9 @@ struct DetailedInsightSection: View {
     private var symbol: String {
         switch section.kind {
         case "route": "map"
+        case "location": "mappin.and.ellipse"
+        case "stay": "bed.double.fill"
+        case "booking": "doc.text.fill"
         case "weather": "cloud.sun"
         case "event": "ticket"
         case "flight": "airplane"
@@ -1153,7 +1234,7 @@ struct DetailedInsightSection: View {
     private var tint: Color {
         switch section.kind {
         case "risk": Color.voyaCoral
-        case "route": Color.voyaTeal
+        case "route", "location", "stay", "booking": Color.voyaTeal
         case "weather": Color.voyaSky
         case "event": Color.voyaCoral
         case "flight": Color.voyaSky
