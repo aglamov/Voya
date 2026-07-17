@@ -95,6 +95,7 @@ struct TripsView: View {
                     }
 
                     let itinerary = store.itinerary(for: trip)
+                    let timeline = store.timelineItinerary(for: trip)
                     TripOperationsCard(trip: trip, itinerary: itinerary) { item in
                         store.assistantFocusItemID = item.id
                         selectedTab = .assistant
@@ -115,16 +116,16 @@ struct TripsView: View {
                         .buttonStyle(.plain)
                     }
 
-                    if hiddenTransferCount(for: trip, itinerary: itinerary) > 0 {
+                    if hiddenTransferCount(for: trip, itinerary: timeline) > 0 {
                         RestoreHiddenTransfersCard(
-                            count: hiddenTransferCount(for: trip, itinerary: itinerary)
+                            count: hiddenTransferCount(for: trip, itinerary: timeline)
                         ) {
-                            restoreHiddenTransfers(for: trip, itinerary: itinerary)
+                            restoreHiddenTransfers(for: trip, itinerary: timeline)
                         }
                     }
 
                     VStack(spacing: 0) {
-                        ForEach(Array(itinerary.enumerated()), id: \.element.id) { index, item in
+                        ForEach(Array(timeline.enumerated()), id: \.element.id) { index, item in
                             if index == 0 {
                                 if let rawContext = VercelMobilityService.startTransferContext(
                                     for: trip,
@@ -163,18 +164,18 @@ struct TripsView: View {
                             TimelineRow(
                                 item: item,
                                 phase: ItineraryPhase(item: item),
-                                isLast: index == itinerary.count - 1
+                                isLast: index == timeline.count - 1
                             ) {
                                 itemBeingViewed = item
                             }
 
-                            if index + 1 < itinerary.count,
-                               let layover = FlightLayoverDisplay(arrivingFlight: item, departingFlight: itinerary[index + 1]) {
+                            if index + 1 < timeline.count,
+                               let layover = FlightLayoverDisplay(arrivingFlight: item, departingFlight: timeline[index + 1]) {
                                 FlightLayoverCard(layover: layover)
                             }
 
-                            if index + 1 < itinerary.count,
-                               let rawContext = VercelMobilityService.transferContext(from: item, to: itinerary[index + 1]) {
+                            if index + 1 < timeline.count,
+                               let rawContext = VercelMobilityService.transferContext(from: item, to: timeline[index + 1]) {
                                 let context = adjustedTransferContext(rawContext)
                                 if !isTransferHidden(context) {
                                     TransferRecommendationCard(
@@ -202,7 +203,7 @@ struct TripsView: View {
                                 }
                             }
 
-                            if index == itinerary.count - 1 {
+                            if index == timeline.count - 1 {
                                 if let rawContext = VercelMobilityService.endTransferContext(
                                     for: trip,
                                     lastItem: item,
