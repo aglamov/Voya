@@ -437,6 +437,8 @@ struct MetricPill: View {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
                 .opacity(0.72)
 
             Spacer(minLength: 4)
