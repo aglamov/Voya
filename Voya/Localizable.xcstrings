@@ -1888,6 +1888,16 @@
     "Anything useful for this trip" : {
 
     },
+    "App language" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Язык приложения"
+          }
+        }
+      }
+    },
     "Archive" : {
       "localizations" : {
         "ru" : {
@@ -2647,6 +2657,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Отменено за неделю: %lld из %lld рейсов"
+          }
+        }
+      }
+    },
+    "Change the language in Voya's system settings." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Измените язык в системных настройках Voya."
           }
         }
       }
@@ -6555,6 +6575,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Варианты"
+          }
+        }
+      }
+    },
+    "Opens Voya settings in the Settings app" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открывает настройки Voya в приложении «Настройки»"
           }
         }
       }

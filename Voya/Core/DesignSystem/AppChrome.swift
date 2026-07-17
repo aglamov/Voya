@@ -75,6 +75,8 @@ struct HeaderBar: View {
                             homeLocationName: $homeLocationName,
                             homeLocationAddress: $homeLocationAddress
                         )
+
+                        AppLanguageSettingsCard()
                     }
                     .padding(18)
                 }
@@ -82,6 +84,66 @@ struct HeaderBar: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+    }
+}
+
+private struct AppLanguageSettingsCard: View {
+    @Environment(\.openURL) private var openURL
+
+    private var currentLanguageName: String {
+        let languageCode = Bundle.main.preferredLocalizations.first
+            ?? Locale.current.language.languageCode?.identifier
+            ?? "en"
+        let displayLocale = Locale(identifier: Bundle.main.preferredLocalizations.first ?? languageCode)
+
+        return displayLocale.localizedString(forLanguageCode: languageCode)?
+            .capitalized(with: displayLocale)
+            ?? languageCode.uppercased()
+    }
+
+    var body: some View {
+        Button {
+            guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+            openURL(settingsURL)
+        } label: {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 12) {
+                    Image(systemName: "character.bubble.fill")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .background(Color.voyaTeal)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("App language")
+                            .font(.headline)
+                            .foregroundStyle(Color.voyaInk)
+                        Text(currentLanguageName)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+
+                Text("Change the language in Voya's system settings.")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(18)
+            .background(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(Text("Opens Voya settings in the Settings app"))
     }
 }
 
