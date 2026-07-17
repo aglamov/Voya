@@ -430,20 +430,26 @@ struct IconTextButton: View {
 struct MetricPill: View {
     let title: LocalizedStringKey
     let value: String
+    var height: CGFloat = 62
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
             Text(title)
                 .font(.caption.weight(.semibold))
+                .lineLimit(2)
                 .opacity(0.72)
+
+            Spacer(minLength: 4)
+
             Text(value)
                 .font(.subheadline.bold())
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
-        .frame(height: 62)
+        .padding(.vertical, 10)
+        .frame(height: height)
         .background(.white.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }

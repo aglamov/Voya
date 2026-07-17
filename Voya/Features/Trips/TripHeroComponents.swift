@@ -54,25 +54,16 @@ struct TripHeroCard: View {
 
             Spacer(minLength: 0)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(summary.statusText)
-                    .font(.title3.bold())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-                    .shadow(color: .black.opacity(0.45), radius: 8, y: 2)
-
-                Text(summary.readinessText)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.86))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                    .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
-            }
+            Text(summary.statusText)
+                .font(.title3.bold())
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .shadow(color: .black.opacity(0.45), radius: 8, y: 2)
 
             HStack(spacing: 10) {
-                MetricPill(title: "Duration", value: summary.durationText)
-                MetricPill(title: "Items", value: summary.itemCountText)
-                MetricPill(title: "Status", value: summary.phaseText)
+                MetricPill(title: "Duration", value: summary.durationText, height: 72)
+                MetricPill(title: "Items", value: summary.itemCountText, height: 72)
+                MetricPill(title: "Status", value: summary.phaseText, height: 72)
             }
 
             if let credit = trip.destinationImageCredit?.nilIfEmpty {
@@ -132,7 +123,6 @@ struct TripHeroSummary {
     let itemCountText: String
     let phaseText: String
     let firstUpText: String
-    let readinessText: String
 
     init(trip: Trip, now: Date = Date(), calendar: Calendar = .current) {
         let range = TripDateRange(trip: trip, calendar: calendar)
@@ -145,7 +135,7 @@ struct TripHeroSummary {
             statusText = String(localized: "In progress")
             phaseText = String(localized: "Live")
         } else if let daysUntilStart, daysUntilStart > 0 {
-            statusText = String(localized: "Starts in \(daysUntilStart) \(daysUntilStart == 1 ? "day" : "days")")
+            statusText = String(localized: "Starts in \(daysUntilStart) days")
             phaseText = String(localized: "Ready")
         } else if range != nil {
             statusText = String(localized: "Trip ended")
@@ -156,15 +146,14 @@ struct TripHeroSummary {
         }
 
         if let nights = range?.nights, nights > 0 {
-            durationText = String(localized: "\(nights) \(nights == 1 ? "night" : "nights")")
+            durationText = String(localized: "\(nights) nights")
         } else if let days = range?.days, days > 0 {
-            durationText = String(localized: "\(days) \(days == 1 ? "day" : "days")")
+            durationText = String(localized: "\(days) days")
         } else {
             durationText = trip.displayDates
         }
 
-        itemCountText = String(localized: "\(trip.items.count) \(trip.items.count == 1 ? "item" : "items")")
-        readinessText = String(localized: "Plan is ready")
+        itemCountText = String(localized: "\(trip.items.count) items")
 
         let firstItem = trip.items
             .filter { $0.startsAt != nil }
