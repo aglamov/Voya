@@ -661,43 +661,20 @@ struct ItineraryItemDetailView: View {
 
     private var flightAlertWatchControl: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button {
-                Task {
-                    await subscribeToFlightAlerts()
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    if isUpdatingFlightAlertWatch {
-                        ProgressView()
-                            .scaleEffect(0.78)
-                            .tint(Color.voyaTeal)
-                            .frame(width: 20, height: 20)
-                    } else {
-                        Image(systemName: isFlightAlertSubscribed ? "checkmark.circle.fill" : "bell.badge")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(isFlightAlertSubscribed ? Color.voyaTeal : Color.voyaInk)
-                            .frame(width: 20, height: 20)
+            if isFlightAlertSubscribed {
+                flightAlertWatchLabel
+            } else {
+                Button {
+                    Task {
+                        await subscribeToFlightAlerts()
                     }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(isFlightAlertSubscribed ? "Alerts subscribed" : "Subscribe to alerts")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.voyaInk)
-                        Text(flightAlertWatchDetail)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Color.voyaMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer(minLength: 0)
+                } label: {
+                    flightAlertWatchLabel
                 }
-                .padding(12)
-                .background(Color.voyaSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .buttonStyle(.plain)
+                .disabled(isUpdatingFlightAlertWatch || flightLookupNumber == nil)
+                .opacity(flightLookupNumber == nil ? 0.55 : 1)
             }
-            .buttonStyle(.plain)
-            .disabled(isUpdatingFlightAlertWatch || isFlightAlertSubscribed || flightLookupNumber == nil)
-            .opacity(flightLookupNumber == nil ? 0.55 : 1)
 
             if let message = flightAlertWatchMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
                 Text(message)
@@ -706,6 +683,37 @@ struct ItineraryItemDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var flightAlertWatchLabel: some View {
+        HStack(spacing: 10) {
+            if isUpdatingFlightAlertWatch {
+                ProgressView()
+                    .scaleEffect(0.78)
+                    .tint(Color.voyaTeal)
+                    .frame(width: 20, height: 20)
+            } else {
+                Image(systemName: isFlightAlertSubscribed ? "checkmark.circle.fill" : "bell.badge")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(isFlightAlertSubscribed ? Color.voyaTeal : Color.voyaInk)
+                    .frame(width: 20, height: 20)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isFlightAlertSubscribed ? "Alerts subscribed" : "Subscribe to alerts")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.voyaInk)
+                Text(flightAlertWatchDetail)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.voyaSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var flightAlertWatchDetail: String {
@@ -889,75 +897,6 @@ private struct FlightStatusSummaryView: View {
                 }
             }
 
-            if let aircraftPosition {
-                Button {
-                    if let url = URL(string: "https://maps.apple.com/?ll=\(aircraftPosition.lat),\(aircraftPosition.lon)") {
-                        openURL(url)
-                    }
-                } label: {
-                    HStack(alignment: .center, spacing: 12) {
-                        Image(systemName: "airplane.circle.fill")
-                            .font(.title2.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.voyaSky)
-                            .clipShape(Circle())
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Where is the aircraft")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(Color.voyaMuted)
-                            Text(aircraftPositionTitle)
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(Color.voyaInk)
-                            if let aircraftPositionDetail {
-                                Text(aircraftPositionDetail)
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(Color.voyaMuted)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-
-                        Spacer(minLength: 0)
-
-                        Image(systemName: "map")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(Color.voyaSky)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.voyaSky.opacity(0.10))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            } else {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "airplane.circle")
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(Color.voyaMuted)
-                        .frame(width: 44, height: 44)
-                        .background(Color.voyaSurface)
-                        .clipShape(Circle())
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Where is the aircraft")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(Color.voyaMuted)
-                        Text("Aircraft position is not available yet")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(Color.voyaInk)
-                        Text("FlightAware will show the aircraft here when it receives a live track for this flight or its assigned inbound flight.")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Color.voyaMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.voyaSurface.opacity(0.72))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-
             HStack(spacing: 10) {
                 FlightStatusMetric(title: String(localized: "Gate"), value: gateValue)
                 FlightStatusMetric(title: String(localized: "Delay"), value: delayValue)
@@ -1015,11 +954,12 @@ private struct FlightStatusSummaryView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if hasMoreDetails {
-                VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 10) {
                     Label("Additional flight data", systemImage: "slider.horizontal.3")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(Color.voyaTeal)
+
+                    aircraftTrackingView
 
                     if let arrivalDetail {
                         flightDetailRow(symbol: "airplane.arrival", title: String(localized: "Arrival"), value: arrivalDetail)
@@ -1027,22 +967,12 @@ private struct FlightStatusSummaryView: View {
                     if let baggage = response.gate?.baggageClaim ?? response.snapshot?.baggageClaim ?? response.candidate?.baggageClaim {
                         flightDetailRow(symbol: "suitcase.fill", title: String(localized: "Baggage"), value: baggage)
                     }
-                    if aircraftPosition == nil, let aircraftDetail {
-                        Button {
-                            if let position = response.snapshot?.position ?? response.plane?.position,
-                               let url = URL(string: "https://maps.apple.com/?ll=\(position.lat),\(position.lon)") {
-                                openURL(url)
-                            }
-                        } label: {
-                            flightDetailRow(
-                                symbol: "airplane.circle.fill",
-                                title: String(localized: "Aircraft"),
-                                value: aircraftDetail,
-                                showsLink: (response.snapshot?.position ?? response.plane?.position) != nil
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled((response.snapshot?.position ?? response.plane?.position) == nil)
+                    if let aircraftDetail {
+                        flightDetailRow(
+                            symbol: "airplane.circle.fill",
+                            title: String(localized: "Aircraft"),
+                            value: aircraftDetail
+                        )
                     }
                     if let routeDetail {
                         flightDetailRow(symbol: "point.topleft.down.curvedto.point.bottomright.up", title: String(localized: "Route"), value: routeDetail)
@@ -1060,7 +990,6 @@ private struct FlightStatusSummaryView: View {
                     if let weatherDetail {
                         flightDetailRow(symbol: "cloud.sun.fill", title: String(localized: "Airport weather"), value: weatherDetail)
                     }
-                }
             }
 
             if let validationIssueText {
@@ -1097,6 +1026,79 @@ private struct FlightStatusSummaryView: View {
 
     private var statusText: String {
         operationalStatus.label
+    }
+
+    @ViewBuilder
+    private var aircraftTrackingView: some View {
+        if let aircraftPosition {
+            Button {
+                if let url = URL(string: "https://maps.apple.com/?ll=\(aircraftPosition.lat),\(aircraftPosition.lon)") {
+                    openURL(url)
+                }
+            } label: {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: "airplane.circle.fill")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(Color.voyaSky)
+                        .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Where is the aircraft")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Color.voyaMuted)
+                        Text(aircraftPositionTitle)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                        if let aircraftPositionDetail {
+                            Text(aircraftPositionDetail)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "map")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaSky)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.voyaSky.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Open map")
+        } else {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "airplane.circle")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(Color.voyaMuted)
+                    .frame(width: 36, height: 36)
+                    .background(Color.voyaSurface)
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Where is the aircraft")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(Color.voyaMuted)
+                    Text("Aircraft position is not available yet")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                    Text("FlightAware will show the aircraft here when it receives a live track for this flight or its assigned inbound flight.")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.voyaSurface.opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
     }
 
     private var providerDisplayName: String? {
@@ -1329,16 +1331,6 @@ private struct FlightStatusSummaryView: View {
         return [originText, destinationText].compactMap { $0 }.joined(separator: "\n").nilIfEmpty
     }
 
-    private var hasMoreDetails: Bool {
-        arrivalDetail != nil
-            || (aircraftPosition == nil && aircraftDetail != nil)
-            || routeDetail != nil
-            || reliabilityText != nil
-            || weatherDetail != nil
-            || !actionableDisruptions.isEmpty
-            || (response.gate?.baggageClaim ?? response.snapshot?.baggageClaim ?? response.candidate?.baggageClaim) != nil
-    }
-
     private var validationIssueText: String? {
         guard response.validation.state != "validated", response.snapshot == nil else {
             return nil
@@ -1459,7 +1451,7 @@ private struct FlightDisplayTiming {
         switch tone {
         case .actual: Color.voyaTeal
         case .estimated: Color.voyaGold
-        case .scheduled: Color.voyaMuted
+        case .scheduled: Color.voyaInk
         }
     }
 }
