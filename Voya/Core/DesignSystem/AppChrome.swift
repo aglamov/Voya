@@ -201,37 +201,43 @@ struct TripOperationsCard: View {
     let itinerary: [ItineraryItem]
     let onOpenAssistant: (ItineraryItem) -> Void
 
-    private var sortedItems: [ItineraryItem] {
-        itinerary.sorted { first, second in
-            switch (first.startsAt, second.startsAt) {
-            case let (firstDate?, secondDate?):
-                return firstDate < secondDate
-            case (_?, nil):
-                return true
-            case (nil, _?):
-                return false
-            case (nil, nil):
-                return first.createdAt < second.createdAt
-            }
-        }
-    }
-
     private var nextItem: ItineraryItem? {
         let now = Date()
-        return sortedItems.first { item in
+
+        if let currentMovement = itinerary.first(where: { item in
+            guard item.kind != .hotel,
+                  let start = item.startsAt else {
+                return false
+            }
+            return start <= now && (item.endsAt ?? start) >= now
+        }) {
+            return currentMovement
+        }
+
+        if let upcomingItem = itinerary.first(where: { item in
             guard let start = item.startsAt else {
                 return false
             }
-            return (item.endsAt ?? start) >= now
-        } ?? sortedItems.first
+            return start >= now
+        }) {
+            return upcomingItem
+        }
+
+        return itinerary.first { item in
+            guard item.kind == .hotel,
+                  let start = item.startsAt else {
+                return false
+            }
+            return start <= now && (item.endsAt ?? start) >= now
+        } ?? itinerary.first
     }
 
     private var firstTimedItem: ItineraryItem? {
-        sortedItems.first { $0.startsAt != nil }
+        itinerary.first { $0.startsAt != nil }
     }
 
     private var lastTimedItem: ItineraryItem? {
-        sortedItems.last { $0.startsAt != nil || $0.endsAt != nil }
+        itinerary.last { $0.startsAt != nil || $0.endsAt != nil }
     }
 
     var body: some View {

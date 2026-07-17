@@ -94,9 +94,8 @@ struct TripsView: View {
                         }
                     }
 
-                    let itinerary = store.itinerary(for: trip)
                     let timeline = store.timelineItinerary(for: trip)
-                    TripOperationsCard(trip: trip, itinerary: itinerary) { item in
+                    TripOperationsCard(trip: trip, itinerary: timeline) { item in
                         store.assistantFocusItemID = item.id
                         selectedTab = .assistant
                     }
