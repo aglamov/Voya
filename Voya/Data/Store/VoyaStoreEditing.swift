@@ -303,5 +303,11 @@ extension VoyaStore {
         var updatedPreview = preview
         updatedPreview.fields = ConfirmationParser.fields(for: preview.items, sourceName: preview.sourceName)
         extractedPreview = updatedPreview
+
+        if let suggestedTripID = suggestedImportTripID(for: updatedPreview.items) {
+            importTripDestination = .existing(suggestedTripID)
+        } else {
+            importTripDestination = .newTrip
+        }
     }
 }

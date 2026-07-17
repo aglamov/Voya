@@ -126,9 +126,10 @@ struct ItemCompanionCard: View {
                 Divider()
 
                 HStack(alignment: .top, spacing: 9) {
-                    MomentMetric(title: "Time", value: timeMetric, symbol: "clock", tint: item.kind.timelineAccent)
-                    MomentMetric(title: secondaryMetricTitle, value: secondaryMetricValue, symbol: secondaryMetricSymbol, tint: secondaryMetricTint)
+                    MomentMetric(title: "Time", value: timeMetric, symbol: "clock", tint: item.kind.timelineAccent, fillsAvailableHeight: true)
+                    MomentMetric(title: secondaryMetricTitle, value: secondaryMetricValue, symbol: secondaryMetricSymbol, tint: secondaryMetricTint, fillsAvailableHeight: true)
                 }
+                .fixedSize(horizontal: false, vertical: true)
 
                 if let summaryText {
                     Text(summaryText)
@@ -253,7 +254,7 @@ struct ItemCompanionCard: View {
 
         let status = item.status.trimmingCharacters(in: .whitespacesAndNewlines)
         if !status.isEmpty {
-            return status
+            return localizedStatus(status)
         }
 
         return phase.label
@@ -477,7 +478,7 @@ struct ItemCompanionCard: View {
                 return nil
             }
 
-            return nights == 1 ? String(localized: "1 night") : String(localized: "\(nights) nights")
+            return String(localized: "\(nights) nights")
         }
 
         let minutes = max(0, Int(endsAt.timeIntervalSince(startsAt) / 60))
@@ -494,6 +495,27 @@ struct ItemCompanionCard: View {
             return "\(hours)h"
         }
         return "\(remainder)m"
+    }
+
+    private func localizedStatus(_ value: String) -> String {
+        let isRussian = VoyaAppLocale.currentLanguageCode == "ru"
+
+        switch value.lowercased() {
+        case "confirmed", "confirmation confirmed":
+            return String(localized: "Confirmed")
+        case "cancelled", "canceled":
+            return String(localized: "Cancelled")
+        case "checked in", "check-in complete", "check in complete":
+            return String(localized: "Checked in")
+        case "pending":
+            return isRussian ? "Ожидает подтверждения" : "Pending"
+        case "booked", "reserved":
+            return isRussian ? "Забронировано" : value
+        case "paid":
+            return isRussian ? "Оплачено" : "Paid"
+        default:
+            return value
+        }
     }
 }
 
@@ -542,6 +564,7 @@ struct MomentMetric: View {
     let value: String
     let symbol: String
     let tint: Color
+    var fillsAvailableHeight = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -563,7 +586,11 @@ struct MomentMetric: View {
             }
         }
         .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: fillsAvailableHeight ? .infinity : nil,
+            alignment: .leading
+        )
         .background(Color.voyaSurface)
         .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
     }

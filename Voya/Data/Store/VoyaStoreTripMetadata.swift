@@ -5,21 +5,42 @@ import SwiftUI
 @MainActor
 extension VoyaStore {
     func tripTitle(for items: [ItineraryItem], fallback: String, preferredDestination: String? = nil) -> String {
-        if let longestStayPlace = longestStayPlaceName(from: items) {
-            return longestStayPlace
-        }
-
         if let destination = destinationName(from: items) {
             return destination
         }
 
-        if let preferredDestination = normalizedPlaceName(preferredDestination), !preferredDestination.isEmpty {
+        if let preferredDestination = geographicPlaceName(preferredDestination, excluding: items) {
             return preferredDestination
         }
 
-        return fallback
+        if let longestStayPlace = longestStayPlaceName(from: items) {
+            return longestStayPlace
+        }
+
+        let normalizedFallback = fallback
             .replacingOccurrences(of: "Trip to ", with: "", options: .caseInsensitive)
             .replacingOccurrences(of: "Stay at ", with: "", options: .caseInsensitive)
+
+        return geographicPlaceName(normalizedFallback, excluding: items)
+            ?? String(localized: "Trip")
+    }
+
+    func stableTripDestination(
+        current: String?,
+        items: [ItineraryItem],
+        fallback: String,
+        preferredDestination: String? = nil
+    ) -> String {
+        if let current = normalizedPlaceName(current),
+           !matchesKnownVenueName(current, in: items) {
+            return current
+        }
+
+        return tripTitle(
+            for: items,
+            fallback: fallback,
+            preferredDestination: preferredDestination
+        )
     }
 
     func destinationName(from items: [ItineraryItem]) -> String? {
@@ -29,7 +50,7 @@ extension VoyaStore {
         }
 
         if let hotel = items.first(where: { $0.kind == .hotel }) {
-            return cityName(from: hotel.location)
+            return geographicPlaceName(hotel.location, excluding: items)
         }
 
         return nil
@@ -63,7 +84,7 @@ extension VoyaStore {
                 }
 
                 guard let duration = durationMinutes(for: item),
-                      let place = placeName(for: item) else {
+                      let place = geographicPlaceName(item.location, excluding: items) else {
                     return nil
                 }
 
@@ -249,6 +270,56 @@ extension VoyaStore {
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
 
         return normalized.isEmpty ? nil : normalized
+    }
+
+    func geographicPlaceName(_ value: String?, excluding items: [ItineraryItem]) -> String? {
+        guard let place = normalizedPlaceName(value),
+              !isSpecificVenueName(place, in: items) else {
+            return nil
+        }
+
+        return place
+    }
+
+    private func isSpecificVenueName(_ value: String, in items: [ItineraryItem]) -> Bool {
+        let normalizedValue = comparablePlaceName(value)
+        guard !normalizedValue.isEmpty else { return true }
+
+        if matchesKnownVenueName(value, in: items) {
+            return true
+        }
+
+        let venueWords: Set<String> = [
+            "hotel", "hostel", "resort", "inn", "suites", "apartment", "apartments",
+            "отель", "гостиница", "хостел", "апартаменты"
+        ]
+        let words = Set(normalizedValue.split(separator: " ").map(String.init))
+        return !words.isDisjoint(with: venueWords)
+    }
+
+    private func matchesKnownVenueName(_ value: String, in items: [ItineraryItem]) -> Bool {
+        let normalizedValue = comparablePlaceName(value)
+        guard !normalizedValue.isEmpty else { return false }
+
+        let venueNames = items
+            .filter { $0.kind == .hotel || $0.kind == .event }
+            .flatMap { [$0.title, $0.providerName] }
+            .compactMap { $0 }
+            .map(comparablePlaceName)
+            .filter { !$0.isEmpty }
+
+        return venueNames.contains(where: {
+            $0 == normalizedValue
+                || ($0.count >= 5 && normalizedValue.contains($0))
+        })
+    }
+
+    private func comparablePlaceName(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     private func flightDestination(from location: String) -> String? {

@@ -302,12 +302,21 @@ extension VoyaStore {
             trip.summary = summaryText(for: trip)
             trip.sourceName = combinedSourceName(trip.sourceName, preview.sourceName)
             trip.rawData = nil
-            trip.destination = tripTitle(for: trip.items, fallback: trip.title, preferredDestination: preview.normalizedDestination)
-            trip.destinationImageURL = nil
-            trip.destinationImageCredit = nil
-            trip.destinationImageCreditURL = nil
-            trip.destinationImageProvider = nil
-            trip.destinationImageResolvedAt = nil
+            let previousDestination = trip.destination
+            let destination = stableTripDestination(
+                current: trip.destination,
+                items: trip.items,
+                fallback: trip.title,
+                preferredDestination: preview.normalizedDestination
+            )
+            trip.destination = destination
+            if destination.localizedCaseInsensitiveCompare(previousDestination ?? "") != .orderedSame {
+                trip.destinationImageURL = nil
+                trip.destinationImageCredit = nil
+                trip.destinationImageCreditURL = nil
+                trip.destinationImageProvider = nil
+                trip.destinationImageResolvedAt = nil
+            }
             trip.updatedAt = Date()
             deleteItems(deduplicated.duplicates)
             selectedTripID = trip.id

@@ -892,7 +892,7 @@ struct DetailedInsightBrief: View {
         let bookingLines = [
             cleanOptional(item.providerName).map { "\(isRussian ? "Поставщик" : "Provider"): \($0)" },
             cleanOptional(item.confirmationCode).map { "\(isRussian ? "Подтверждение" : "Confirmation"): \($0)" },
-            cleanOptional(item.status).map { "\(isRussian ? "Статус" : "Status"): \($0)" }
+            cleanOptional(item.status).map { "\(isRussian ? "Статус" : "Status"): \(localizedStatus($0))" }
         ].compactMap { $0 }
 
         if !bookingLines.isEmpty {
@@ -916,6 +916,29 @@ struct DetailedInsightBrief: View {
 
     private func cleanOptional(_ value: String?) -> String? {
         value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    }
+
+    private func localizedStatus(_ value: String) -> String {
+        guard isRussian else {
+            return value
+        }
+
+        switch value.lowercased() {
+        case "confirmed", "confirmation confirmed":
+            return "Подтверждено"
+        case "cancelled", "canceled":
+            return "Отменено"
+        case "checked in", "check-in complete", "check in complete":
+            return "Заселение завершено"
+        case "pending":
+            return "Ожидает подтверждения"
+        case "booked", "reserved":
+            return "Забронировано"
+        case "paid":
+            return "Оплачено"
+        default:
+            return value
+        }
     }
 
     private func polishedFlightSections() -> [DetailedBriefSection] {
@@ -1122,9 +1145,19 @@ struct DetailedInsightBrief: View {
         value
             .replacingOccurrences(of: #"(\d+)\s*C\b"#, with: "$1 °C", options: .regularExpression)
             .replacingOccurrences(of: " - ", with: " · ")
+            .replacingOccurrences(of: "Clear sky", with: isRussian ? "ясно" : "clear sky", options: .caseInsensitive)
             .replacingOccurrences(of: "Clear skies", with: isRussian ? "ясное небо" : "clear skies", options: .caseInsensitive)
             .replacingOccurrences(of: "Few clouds", with: isRussian ? "малооблачно" : "few clouds", options: .caseInsensitive)
             .replacingOccurrences(of: "Scattered clouds", with: isRussian ? "переменная облачность" : "scattered clouds", options: .caseInsensitive)
+            .replacingOccurrences(of: "Broken clouds", with: isRussian ? "облачно с прояснениями" : "broken clouds", options: .caseInsensitive)
+            .replacingOccurrences(of: "Overcast clouds", with: isRussian ? "пасмурно" : "overcast clouds", options: .caseInsensitive)
+            .replacingOccurrences(of: "Light rain", with: isRussian ? "небольшой дождь" : "light rain", options: .caseInsensitive)
+            .replacingOccurrences(of: "Moderate rain", with: isRussian ? "умеренный дождь" : "moderate rain", options: .caseInsensitive)
+            .replacingOccurrences(of: "Heavy intensity rain", with: isRussian ? "сильный дождь" : "heavy intensity rain", options: .caseInsensitive)
+            .replacingOccurrences(of: "Thunderstorm", with: isRussian ? "гроза" : "thunderstorm", options: .caseInsensitive)
+            .replacingOccurrences(of: "Mist", with: isRussian ? "дымка" : "mist", options: .caseInsensitive)
+            .replacingOccurrences(of: "Fog", with: isRussian ? "туман" : "fog", options: .caseInsensitive)
+            .replacingOccurrences(of: "Snow", with: isRussian ? "снег" : "snow", options: .caseInsensitive)
     }
 
     private func normalizedKey(_ value: String) -> String {

@@ -669,7 +669,7 @@ async function weatherCard(location: string | LocationLookup | undefined, isRuss
   url.searchParams.set("lat", String(place.lat));
   url.searchParams.set("lon", String(place.lon));
   url.searchParams.set("units", "metric");
-  url.searchParams.set("lang", "en");
+  url.searchParams.set("lang", isRussian ? "ru" : "en");
   url.searchParams.set("appid", apiKey);
 
   const response = await fetch(url);

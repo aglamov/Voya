@@ -37,6 +37,7 @@ extension VoyaStore {
             migrateLegacyTripSourceDocuments()
             removeDuplicateItemsFromLoadedTrips()
             backfillFlightBookingDetailsFromSources()
+            normalizeLoadedTripDestinations()
             if let selectedTripID, !trips.contains(where: { $0.id == selectedTripID }) {
                 self.selectedTripID = trips.first?.id
             } else if selectedTripID == nil {
@@ -259,6 +260,37 @@ extension VoyaStore {
             try modelContext.save()
         } catch {
             importMessage = String(localized: "Could not update flight booking details")
+        }
+    }
+
+    func normalizeLoadedTripDestinations() {
+        guard let modelContext else { return }
+        var didChange = false
+
+        for trip in trips {
+            let destination = stableTripDestination(
+                current: trip.destination,
+                items: trip.items,
+                fallback: trip.title
+            )
+            guard destination != trip.destination else { continue }
+
+            trip.destination = destination
+            trip.destinationImageURL = nil
+            trip.destinationImageCredit = nil
+            trip.destinationImageCreditURL = nil
+            trip.destinationImageProvider = nil
+            trip.destinationImageResolvedAt = nil
+            trip.updatedAt = Date()
+            didChange = true
+        }
+
+        guard didChange else { return }
+
+        do {
+            try modelContext.save()
+        } catch {
+            importMessage = String(localized: "Could not normalize trip destinations")
         }
     }
 
