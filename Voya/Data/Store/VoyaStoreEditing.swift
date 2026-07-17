@@ -67,6 +67,31 @@ extension VoyaStore {
         saveTrips()
     }
 
+    func updateTransferRoute(
+        for context: MobilityTransferContext,
+        in trip: Trip,
+        origin: String,
+        destination: String
+    ) {
+        let normalizedOrigin = origin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDestination = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedOrigin.isEmpty, !normalizedDestination.isEmpty else {
+            return
+        }
+
+        var overrides = trip.transferRouteOverrides
+        overrides[context.id] = MobilityTransferRouteOverride(
+            origin: normalizedOrigin,
+            destination: normalizedDestination
+        )
+
+        if let data = try? JSONEncoder().encode(overrides) {
+            trip.transferRouteOverridesRaw = String(data: data, encoding: .utf8)
+        }
+        trip.updatedAt = Date()
+        saveTrips()
+    }
+
     func addItineraryItem(
         to trip: Trip,
         kind: ItineraryKind,

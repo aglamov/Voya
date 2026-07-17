@@ -15,11 +15,17 @@ struct TransferDetailView: View {
     let plan: MobilityPlan?
     let errorMessage: String?
     let isLoading: Bool
-    let onRefresh: () -> Void
-    let onUpdateBuffer: (Int) -> Void
+    let onRefresh: (MobilityTransferContext) -> Void
+    let onUpdateBuffer: (Int, MobilityTransferContext) -> Void
+    let onUpdateRoute: (String, String) -> Void
     let onDelete: () -> Void
     @State private var displayOrigin = ""
     @State private var displayDestination = ""
+    @State private var draftOrigin = ""
+    @State private var draftDestination = ""
+    @State private var appliedOrigin = ""
+    @State private var appliedDestination = ""
+    @State private var isEditingRoute = false
     @State private var draftBufferMinutes: Int?
     @State private var appliedBufferMinutes: Int?
     @State private var isShowingDeleteConfirmation = false
@@ -72,6 +78,7 @@ struct TransferDetailView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .voyaKeyboardDismissToolbar()
         .alert("Delete transfer?", isPresented: $isShowingDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 onDelete()
@@ -81,7 +88,11 @@ struct TransferDetailView: View {
         } message: {
             Text("This hides the transfer recommendation from the timeline. You can restore hidden transfers from the trip timeline.")
         }
-        .task(id: context.id) {
+        .task(id: "\(context.id)|\(context.origin)|\(context.destination)") {
+            draftOrigin = context.origin
+            draftDestination = context.destination
+            appliedOrigin = context.origin
+            appliedDestination = context.destination
             displayOrigin = LocationDisplayResolver.immediateDisplayName(for: context.origin)
             displayDestination = LocationDisplayResolver.immediateDisplayName(for: context.destination)
             async let origin = LocationDisplayResolver.resolvedDisplayName(for: context.origin)
@@ -112,7 +123,9 @@ struct TransferDetailView: View {
             Spacer()
 
             HStack(spacing: 8) {
-                Button(action: onRefresh) {
+                Button {
+                    onRefresh(effectiveContext)
+                } label: {
                     Image(systemName: isLoading ? "hourglass" : "arrow.clockwise")
                         .font(.headline.weight(.bold))
                         .foregroundStyle(isLoading ? Color.voyaMuted : Color.voyaInk)
@@ -186,7 +199,7 @@ struct TransferDetailView: View {
             if hasPendingBufferChanges {
                 Button {
                     let bufferMinutes = effectiveBufferMinutes
-                    onUpdateBuffer(bufferMinutes)
+                    onUpdateBuffer(bufferMinutes, effectiveContext)
                     appliedBufferMinutes = bufferMinutes
                 } label: {
                     Label("Save changes", systemImage: "arrow.clockwise")
@@ -209,22 +222,77 @@ struct TransferDetailView: View {
 
     private var routeMapCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(spacing: 8) {
-                    Circle()
-                        .fill(Color.voyaTeal)
-                        .frame(width: 11, height: 11)
-                    Rectangle()
-                        .fill(Color.voyaTeal.opacity(0.34))
-                        .frame(width: 2, height: 34)
-                    Circle()
-                        .fill(Color.voyaGold)
-                        .frame(width: 11, height: 11)
-                }
+            HStack {
+                Label("Route", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                    .font(.headline)
+                    .foregroundStyle(Color.voyaInk)
 
+                Spacer()
+
+                Button {
+                    if isEditingRoute {
+                        cancelRouteEditing()
+                    } else {
+                        isEditingRoute = true
+                    }
+                } label: {
+                    Label(isEditingRoute ? "Cancel" : "Edit", systemImage: isEditingRoute ? "xmark" : "pencil")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaTeal)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if isEditingRoute {
                 VStack(alignment: .leading, spacing: 12) {
-                    routePlace("From", displayOrigin.isEmpty ? context.origin : displayOrigin)
-                    routePlace("To", displayDestination.isEmpty ? context.destination : displayDestination)
+                    ClearableTextField(
+                        "From",
+                        text: $draftOrigin,
+                        prompt: "Address, place, or Google Maps link",
+                        lineLimit: 2...4
+                    )
+                    ClearableTextField(
+                        "To",
+                        text: $draftDestination,
+                        prompt: "Address, place, or Google Maps link",
+                        lineLimit: 2...4
+                    )
+
+                    Text("These points are saved for this transfer in the trip.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button(action: saveRoute) {
+                        Label("Save route", systemImage: "checkmark")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .foregroundStyle(.white)
+                            .background(canSaveRoute ? Color.voyaTeal : Color.voyaMuted)
+                            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSaveRoute || isLoading)
+                }
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(spacing: 8) {
+                        Circle()
+                            .fill(Color.voyaTeal)
+                            .frame(width: 11, height: 11)
+                        Rectangle()
+                            .fill(Color.voyaTeal.opacity(0.34))
+                            .frame(width: 2, height: 34)
+                        Circle()
+                            .fill(Color.voyaGold)
+                            .frame(width: 11, height: 11)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        routePlace("From", displayOrigin.isEmpty ? context.origin : displayOrigin)
+                        routePlace("To", displayDestination.isEmpty ? context.destination : displayDestination)
+                    }
                 }
             }
 
@@ -620,6 +688,52 @@ struct TransferDetailView: View {
 
     private var primaryOption: MobilityRouteOption? {
         plan?.defaultOption
+    }
+
+    private var effectiveContext: MobilityTransferContext {
+        var updatedContext = context
+        updatedContext.origin = draftOrigin.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? context.origin
+        updatedContext.destination = draftDestination.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? context.destination
+        updatedContext.airportBufferMinutes = effectiveBufferMinutes
+        return updatedContext
+    }
+
+    private var canSaveRoute: Bool {
+        let origin = draftOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let destination = draftDestination.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !origin.isEmpty
+            && !destination.isEmpty
+            && (origin != appliedOrigin || destination != appliedDestination)
+    }
+
+    private func saveRoute() {
+        let origin = draftOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let destination = draftDestination.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !origin.isEmpty, !destination.isEmpty else {
+            return
+        }
+
+        draftOrigin = origin
+        draftDestination = destination
+        appliedOrigin = origin
+        appliedDestination = destination
+        displayOrigin = LocationDisplayResolver.immediateDisplayName(for: origin)
+        displayDestination = LocationDisplayResolver.immediateDisplayName(for: destination)
+        isEditingRoute = false
+        onUpdateRoute(origin, destination)
+
+        Task {
+            async let resolvedOrigin = LocationDisplayResolver.resolvedDisplayName(for: origin)
+            async let resolvedDestination = LocationDisplayResolver.resolvedDisplayName(for: destination)
+            displayOrigin = await resolvedOrigin
+            displayDestination = await resolvedDestination
+        }
+    }
+
+    private func cancelRouteEditing() {
+        draftOrigin = appliedOrigin.isEmpty ? context.origin : appliedOrigin
+        draftDestination = appliedDestination.isEmpty ? context.destination : appliedDestination
+        isEditingRoute = false
     }
 
     private var effectiveBufferMinutes: Int {

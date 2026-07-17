@@ -176,6 +176,7 @@ struct EditItineraryItemView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .voyaKeyboardDismissToolbar()
     }
 
     private var flightLookupPanel: some View {

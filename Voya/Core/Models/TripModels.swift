@@ -229,6 +229,7 @@ final class Trip: Identifiable {
     var startLocationAddress: String?
     var endLocationName: String?
     var endLocationAddress: String?
+    var transferRouteOverridesRaw: String?
 
     init(
         id: UUID = UUID(),
@@ -253,7 +254,8 @@ final class Trip: Identifiable {
         startLocationName: String? = nil,
         startLocationAddress: String? = nil,
         endLocationName: String? = nil,
-        endLocationAddress: String? = nil
+        endLocationAddress: String? = nil,
+        transferRouteOverridesRaw: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -278,6 +280,7 @@ final class Trip: Identifiable {
         self.startLocationAddress = startLocationAddress
         self.endLocationName = endLocationName
         self.endLocationAddress = endLocationAddress
+        self.transferRouteOverridesRaw = transferRouteOverridesRaw
     }
 }
 

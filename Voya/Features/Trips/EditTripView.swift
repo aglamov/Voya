@@ -182,6 +182,7 @@ struct EditTripView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .voyaKeyboardDismissToolbar()
         .alert("Delete trip?", isPresented: $isShowingDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 onDelete()

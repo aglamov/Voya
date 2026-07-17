@@ -113,12 +113,33 @@ struct MobilityRecommendation: Codable {
 
 struct MobilityTransferContext: Identifiable {
     var id: String
+    var tripID: UUID?
     var origin: String
     var destination: String
     var targetArrivalAt: Date?
     var targetDepartureAt: Date?
     var airportBufferMinutes: Int
     var taxiPickupBufferMinutes: Int
+}
+
+struct MobilityTransferRouteOverride: Codable {
+    var origin: String
+    var destination: String
+}
+
+extension Trip {
+    var transferRouteOverrides: [String: MobilityTransferRouteOverride] {
+        guard let rawValue = transferRouteOverridesRaw,
+              let data = rawValue.data(using: .utf8),
+              let overrides = try? JSONDecoder().decode([String: MobilityTransferRouteOverride].self, from: data) else {
+            return [:]
+        }
+        return overrides
+    }
+
+    func transferRouteOverride(for contextID: String) -> MobilityTransferRouteOverride? {
+        transferRouteOverrides[contextID]
+    }
 }
 
 struct VercelMobilityService {
@@ -180,7 +201,11 @@ struct VercelMobilityService {
         return try JSONDecoder().decode(MobilityPlan.self, from: data)
     }
 
-    static func transferContext(from originItem: ItineraryItem, to destinationItem: ItineraryItem) -> MobilityTransferContext? {
+    static func transferContext(
+        from originItem: ItineraryItem,
+        to destinationItem: ItineraryItem,
+        tripID: UUID? = nil
+    ) -> MobilityTransferContext? {
         guard destinationItem.kind != .transit else {
             return nil
         }
@@ -212,6 +237,7 @@ struct VercelMobilityService {
 
         return MobilityTransferContext(
             id: "\(originItem.id.uuidString)-\(destinationItem.id.uuidString)",
+            tripID: tripID,
             origin: origin,
             destination: destination,
             targetArrivalAt: destinationIsAfterOrigin ? destinationTargetAt : nil,
@@ -234,12 +260,9 @@ struct VercelMobilityService {
             return nil
         }
 
-        let idOrigin = originAddress
-            .lowercased()
-            .replacingOccurrences(of: #"\W+"#, with: "-", options: .regularExpression)
-
         return MobilityTransferContext(
-            id: "\(trip.id.uuidString)-start-\(firstItem.id.uuidString)-\(idOrigin)",
+            id: "\(trip.id.uuidString)-start-\(firstItem.id.uuidString)",
+            tripID: trip.id,
             origin: originAddress,
             destination: destination,
             targetArrivalAt: firstItem.startsAt,
@@ -261,12 +284,9 @@ struct VercelMobilityService {
             return nil
         }
 
-        let idDestination = destinationAddress
-            .lowercased()
-            .replacingOccurrences(of: #"\W+"#, with: "-", options: .regularExpression)
-
         return MobilityTransferContext(
-            id: "\(trip.id.uuidString)-end-\(lastItem.id.uuidString)-\(idDestination)",
+            id: "\(trip.id.uuidString)-end-\(lastItem.id.uuidString)",
+            tripID: trip.id,
             origin: origin,
             destination: destinationAddress,
             targetArrivalAt: nil,
@@ -290,7 +310,7 @@ struct VercelMobilityService {
             guard let origin = parts.last ?? value.nilIfEmpty else {
                 return nil
             }
-            return item.kind == .flight ? airportArrivalsAddress(origin) : origin
+            return item.kind == .flight ? airportAddress(origin) : origin
         }
 
         return value
@@ -306,7 +326,7 @@ struct VercelMobilityService {
             guard let destination = routeParts(in: value).first ?? value.nilIfEmpty else {
                 return nil
             }
-            return item.kind == .flight ? airportDeparturesAddress(destination) : destination
+            return item.kind == .flight ? airportAddress(destination) : destination
         }
 
         return value
@@ -320,20 +340,13 @@ struct VercelMobilityService {
             .filter { !$0.isEmpty }
     }
 
-    private static func airportDeparturesAddress(_ value: String) -> String {
+    private static func airportAddress(_ value: String) -> String {
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return airportPointAddress(normalized, point: "Departures", markers: airportDepartureMarkers)
-    }
-
-    private static func airportArrivalsAddress(_ value: String) -> String {
-        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return airportPointAddress(normalized, point: "Arrivals", markers: airportArrivalMarkers)
-    }
-
-    private static func airportPointAddress(_ value: String, point: String, markers: [String]) -> String {
-        let airport = airportPointBase(value, markers: markers)
-        let airportName = isAirportLike(airport) ? airport : "\(airport) Airport"
-        return "\(airportName) \(point)"
+        let airport = airportPointBase(
+            normalized,
+            markers: airportDepartureMarkers + airportArrivalMarkers
+        )
+        return isAirportLike(airport) ? airport : "\(airport) Airport"
     }
 
     private static let airportDepartureMarkers = [

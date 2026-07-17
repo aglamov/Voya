@@ -164,6 +164,7 @@ struct ItineraryItemDetailView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .voyaKeyboardDismissToolbar()
         .interactiveDismissDisabled(isEditing || isRefreshingFlightStatus)
         .alert("Delete item?", isPresented: $isShowingDeleteConfirmation) {
             Button("Delete", role: .destructive) {
@@ -959,6 +960,14 @@ private struct FlightStatusSummaryView: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(Color.voyaTeal)
 
+                    if let aircraftDetail {
+                        flightDetailRow(
+                            symbol: "airplane.circle.fill",
+                            title: String(localized: "Aircraft"),
+                            value: aircraftDetail
+                        )
+                    }
+
                     aircraftTrackingView
 
                     if let arrivalDetail {
@@ -966,13 +975,6 @@ private struct FlightStatusSummaryView: View {
                     }
                     if let baggage = response.gate?.baggageClaim ?? response.snapshot?.baggageClaim ?? response.candidate?.baggageClaim {
                         flightDetailRow(symbol: "suitcase.fill", title: String(localized: "Baggage"), value: baggage)
-                    }
-                    if let aircraftDetail {
-                        flightDetailRow(
-                            symbol: "airplane.circle.fill",
-                            title: String(localized: "Aircraft"),
-                            value: aircraftDetail
-                        )
                     }
                     if let routeDetail {
                         flightDetailRow(symbol: "point.topleft.down.curvedto.point.bottomright.up", title: String(localized: "Route"), value: routeDetail)

@@ -115,6 +115,24 @@ extension Color {
     static let voyaLine = Color(red: 0.86, green: 0.89, blue: 0.88)
 }
 
+extension View {
+    func voyaKeyboardDismissToolbar() -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil,
+                        from: nil,
+                        for: nil
+                    )
+                }
+            }
+        }
+    }
+}
+
 extension ItineraryKind {
     var timelineAccent: Color {
         switch self {

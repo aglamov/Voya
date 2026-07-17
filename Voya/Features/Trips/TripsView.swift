@@ -174,7 +174,11 @@ struct TripsView: View {
                             }
 
                             if index + 1 < timeline.count,
-                               let rawContext = VercelMobilityService.transferContext(from: item, to: timeline[index + 1]) {
+                               let rawContext = VercelMobilityService.transferContext(
+                                   from: item,
+                                   to: timeline[index + 1],
+                                   tripID: trip.id
+                               ) {
                                 let context = adjustedTransferContext(rawContext)
                                 if !isTransferHidden(context) {
                                     TransferRecommendationCard(
@@ -350,15 +354,37 @@ struct TripsView: View {
                 plan: mobilityPlans[context.id],
                 errorMessage: mobilityPlanErrors[context.id],
                 isLoading: loadingMobilityPlanIDs.contains(context.id),
-                onRefresh: {
+                onRefresh: { refreshedContext in
                     Task {
-                        await loadMobilityPlan(context: context, forceRefresh: true)
+                        await loadMobilityPlan(context: refreshedContext, forceRefresh: true)
                     }
                 },
-                onUpdateBuffer: { minutes in
+                onUpdateBuffer: { minutes, routeContext in
                     setTransferBufferOverride(minutes, for: context)
-                    var updatedContext = context
+                    var updatedContext = routeContext
                     updatedContext.airportBufferMinutes = minutes
+                    Task {
+                        await loadMobilityPlan(context: updatedContext, forceRefresh: true)
+                    }
+                },
+                onUpdateRoute: { origin, destination in
+                    var updatedContext = context
+                    updatedContext.origin = origin
+                    updatedContext.destination = destination
+
+                    if let tripID = context.tripID,
+                       let trip = store.trips.first(where: { $0.id == tripID }) {
+                        store.updateTransferRoute(
+                            for: context,
+                            in: trip,
+                            origin: origin,
+                            destination: destination
+                        )
+                    }
+
+                    mobilityPlans[context.id] = nil
+                    mobilityPlanErrors[context.id] = nil
+                    MobilityPlanCache.clear(for: context)
                     Task {
                         await loadMobilityPlan(context: updatedContext, forceRefresh: true)
                     }
@@ -417,15 +443,6 @@ struct TripsView: View {
     }
 
     @MainActor
-    private func loadMobilityPlan(from originItem: ItineraryItem, to destinationItem: ItineraryItem, forceRefresh: Bool = false) async {
-        guard let rawContext = VercelMobilityService.transferContext(from: originItem, to: destinationItem) else {
-            return
-        }
-        let context = adjustedTransferContext(rawContext)
-        await loadMobilityPlan(context: context, forceRefresh: forceRefresh)
-    }
-
-    @MainActor
     private func loadMobilityPlan(context: MobilityTransferContext, forceRefresh: Bool = false) async {
         if !forceRefresh, mobilityPlans[context.id] != nil {
             return
@@ -451,7 +468,10 @@ struct TripsView: View {
 
         do {
             let plan = try await VercelMobilityService().planTransfer(context: adjustedContext)
-            guard adjustedTransferContext(context).airportBufferMinutes == adjustedContext.airportBufferMinutes else {
+            let currentContext = adjustedTransferContext(context)
+            guard currentContext.airportBufferMinutes == adjustedContext.airportBufferMinutes,
+                  currentContext.origin == adjustedContext.origin,
+                  currentContext.destination == adjustedContext.destination else {
                 return
             }
             mobilityPlans[context.id] = plan
@@ -504,12 +524,19 @@ struct TripsView: View {
     }
 
     private func adjustedTransferContext(_ context: MobilityTransferContext) -> MobilityTransferContext {
-        guard let bufferMinutes = transferBufferOverrides[context.id] else {
-            return context
+        var adjustedContext = context
+
+        if let bufferMinutes = transferBufferOverrides[context.id] {
+            adjustedContext.airportBufferMinutes = bufferMinutes
         }
 
-        var adjustedContext = context
-        adjustedContext.airportBufferMinutes = bufferMinutes
+        if let tripID = context.tripID,
+           let trip = store.trips.first(where: { $0.id == tripID }),
+           let routeOverride = trip.transferRouteOverride(for: context.id) {
+            adjustedContext.origin = routeOverride.origin
+            adjustedContext.destination = routeOverride.destination
+        }
+
         return adjustedContext
     }
 
@@ -542,7 +569,11 @@ struct TripsView: View {
         }
 
         for index in itinerary.indices.dropLast() {
-            if let context = VercelMobilityService.transferContext(from: itinerary[index], to: itinerary[index + 1]) {
+            if let context = VercelMobilityService.transferContext(
+                from: itinerary[index],
+                to: itinerary[index + 1],
+                tripID: trip.id
+            ) {
                 contexts.append(context)
             }
         }

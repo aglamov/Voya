@@ -1145,7 +1145,16 @@ struct AssistantIntelligenceBuilder {
             contexts.append(context)
         }
 
-        return contexts
+        return contexts.map { context in
+            guard let routeOverride = trip.transferRouteOverride(for: context.id) else {
+                return context
+            }
+
+            var adjustedContext = context
+            adjustedContext.origin = routeOverride.origin
+            adjustedContext.destination = routeOverride.destination
+            return adjustedContext
+        }
     }
 
     private func transferAlert(context: MobilityTransferContext, plan: MobilityPlan, option: MobilityRouteOption) -> TravelAlert {
