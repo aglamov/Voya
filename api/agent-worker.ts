@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { timingSafeEqual } from "node:crypto";
 import { sendAPNsAlert } from "./_apns.js";
+import { googleTravelContext } from "./_google-context.js";
 import {
   type AgentJob,
   readInspirationRelease,
@@ -37,6 +38,24 @@ function primaryAgent(kind: string): SpecialistAgent {
     case "concierge": return "concierge";
     default: return "coordinator";
   }
+}
+
+async function providerContext(context: Record<string, unknown>) {
+  const destination = typeof context.destination === "string" ? context.destination.trim() : "";
+  if (!destination) return context;
+  const locale = typeof context.locale === "string" ? context.locale : "en";
+  const google = await googleTravelContext(destination, locale);
+  if (!("data" in google.place)) return context;
+  return {
+    ...context,
+    verifiedPlace: {
+      name: google.place.data.name,
+      address: google.place.data.address,
+      mapsURL: google.place.data.mapsURL
+    },
+    airQuality: google.airQuality && "data" in google.airQuality ? google.airQuality.data : undefined,
+    pollen: google.pollen && "data" in google.pollen ? google.pollen.data : undefined
+  };
 }
 
 async function claim(job: AgentJob) {
@@ -136,7 +155,7 @@ async function processMission(job: Extract<AgentJob, { type: "mission" }>) {
     const run = await runSpecialistAgent({
       agent: specialist,
       mission: `${mission.title}\n${mission.detail}`,
-      context: mission.context ?? {},
+      context: await providerContext(mission.context ?? {}),
       locale: typeof mission.context?.locale === "string" ? mission.context.locale : undefined
     });
     const now = new Date();

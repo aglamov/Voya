@@ -37,7 +37,7 @@ Creates and tracks long-running user outcomes. Missions are scoped to the anonym
 
 ### `POST /api/guardian`
 
-Accepts a minimal trip snapshot and performs deterministic checks for missing timing, booking evidence, cancellation states, and tight connections. It returns findings attributed to Sentinel, Navigator, Clerk, or Coordinator. Provider-backed live checks continue to use the existing flight, weather, and mobility services.
+Accepts a minimal trip snapshot and performs deterministic checks for missing timing, booking evidence, cancellation states, and tight connections. Sentinel also resolves the relevant location with Google Places and checks Google Air Quality and Pollen when configured. It returns findings attributed to Sentinel, Navigator, Clerk, or Coordinator. Provider failure never suppresses the deterministic report.
 
 ### `POST /api/specialist-agents`
 
@@ -55,7 +55,7 @@ Protected recurring monitor that reads the Redis due-set and dispatches backgrou
 
 | Agent | Responsibility |
 | --- | --- |
-| Sentinel | Flight, weather, status changes, and disruption signals |
+| Sentinel | Flight, weather, air quality, pollen, status changes, and disruption signals |
 | Navigator | Transfers, route timing, buffers, and connections |
 | Clerk | Booking completeness, documents, and missing fields |
 | Scout | Inspiration, events, nature, and candidate discovery |

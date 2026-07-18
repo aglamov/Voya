@@ -3,6 +3,7 @@ import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { getFlightStatus } from "./_flight.js";
+import { googleTravelContext } from "./_google-context.js";
 import { openAIModelFor } from "./_ai-models.js";
 import { weatherAlertDetails } from "./_weather.js";
 import { protectPublicEndpoint } from "./_security.js";
@@ -12,7 +13,7 @@ type EnrichmentCard = {
   value: string;
   detail?: string;
   actionURL?: string;
-  kind: "weather" | "flight" | "events" | "maps" | "ai" | "warning";
+  kind: "weather" | "flight" | "events" | "maps" | "place" | "air" | "pollen" | "ai" | "warning";
 };
 
 type EnrichmentResponse = {
@@ -746,6 +747,73 @@ async function weatherCard(location: string | LocationLookup | undefined, isRuss
     ].filter(Boolean).join(" · "),
     kind: hasMeaningfulAlert ? "warning" : "weather"
   };
+}
+
+async function googleContextCards(
+  kind: string,
+  title: string,
+  location: string,
+  lookup: LocationLookup | undefined,
+  languageCode: string,
+  isRussian = false
+): Promise<EnrichmentCard[]> {
+  const providerLocation = lookup?.query || location;
+  const preciseKinds = new Set(["hotel", "event"]);
+  const query = [preciseKinds.has(kind) ? title : undefined, providerLocation].filter(Boolean).join(", ");
+  if (!query) return [];
+
+  const context = await googleTravelContext(query, languageCode);
+  if (!("data" in context.place)) return [];
+  const place = context.place.data;
+  const rating = place.rating == null
+    ? undefined
+    : isRussian
+      ? `${place.rating.toFixed(1)}${place.userRatingCount == null ? "" : ` · ${place.userRatingCount} оценок`}`
+      : `${place.rating.toFixed(1)}${place.userRatingCount == null ? "" : ` · ${place.userRatingCount} ratings`}`;
+  const openState = place.openNow == null
+    ? undefined
+    : place.openNow
+      ? (isRussian ? "Сейчас открыто" : "Open now")
+      : (isRussian ? "Сейчас закрыто" : "Closed now");
+  const cards: EnrichmentCard[] = [{
+    title: "Google Places",
+    value: place.name,
+    detail: [rating, openState, place.address].filter(Boolean).join(" · "),
+    actionURL: place.mapsURL,
+    kind: "place"
+  }];
+
+  if (context.airQuality && "data" in context.airQuality) {
+    const air = context.airQuality.data;
+    const isRisk = air.aqi != null && air.aqi >= 60;
+    cards.push({
+      title: "Google Air Quality",
+      value: air.aqi == null ? (air.category ?? (isRussian ? "Данные готовы" : "Available")) : `UAQI ${air.aqi}`,
+      detail: [
+        air.category,
+        air.dominantPollutant ? (isRussian ? `Загрязнитель: ${air.dominantPollutant.toUpperCase()}` : `Pollutant: ${air.dominantPollutant.toUpperCase()}`) : undefined,
+        isRisk ? air.recommendation : undefined
+      ].filter(Boolean).join(" · "),
+      kind: isRisk ? "warning" : "air"
+    });
+  }
+
+  if (context.pollen && "data" in context.pollen) {
+    const pollen = context.pollen.data;
+    const isRisk = pollen.maximumIndex != null && pollen.maximumIndex >= 3;
+    const types = pollen.dominantTypes.map((type) => type.name).join(", ");
+    cards.push({
+      title: "Google Pollen",
+      value: pollen.maximumIndex == null ? (isRussian ? "Низкий уровень" : "Low") : `UPI ${pollen.maximumIndex}/5`,
+      detail: [
+        types || undefined,
+        pollen.peakDate ? (isRussian ? `Пик: ${pollen.peakDate}` : `Peak: ${pollen.peakDate}`) : undefined,
+        isRisk ? pollen.dominantTypes.find((type) => type.recommendation)?.recommendation : undefined
+      ].filter(Boolean).join(" · "),
+      kind: isRisk ? "warning" : "pollen"
+    });
+  }
+  return cards;
 }
 
 async function eventsContext(location: string | LocationLookup | undefined, kind: string, startsAt?: string | number | null, endsAt?: string | number | null, isRussian = false): Promise<{ card: EnrichmentCard; events: NearbyEvent[] }> {
@@ -1497,9 +1565,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const languageName = clean(body.languageName) || languageCode;
   const isRussian = languageCode.toLowerCase().startsWith("ru");
 
-  const [weather, eventContext] = await Promise.all([
+  const [weather, eventContext, googleCards] = await Promise.all([
     weatherCard(lookupPlace, isRussian),
-    eventsContext(lookupPlace, kind, body.startsAt, body.endsAt, isRussian)
+    eventsContext(lookupPlace, kind, body.startsAt, body.endsAt, isRussian),
+    googleContextCards(kind, title, location, lookupPlace, languageCode, isRussian)
   ]);
   const cards: EnrichmentCard[] = [
     {
@@ -1514,6 +1583,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       detail: location || (isRussian ? "Добавьте адрес, аэропорт, отель, место или город." : "Add an address, airport, hotel, venue, or city."),
       kind: "maps"
     },
+    ...googleCards,
     weather,
     eventContext.card
   ];

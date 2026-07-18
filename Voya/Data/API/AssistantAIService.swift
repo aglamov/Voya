@@ -202,6 +202,7 @@ struct InspirationStory: Identifiable, Codable, Equatable {
     var sourceTitle: String
     var sourceURL: URL
     var confidence: Double
+    var place: InspirationPlace? = nil
 
     static let fallback: [InspirationStory] = [
         InspirationStory(
@@ -265,6 +266,15 @@ struct InspirationStory: Identifiable, Codable, Equatable {
             confidence: 0.91
         )
     ]
+}
+
+struct InspirationPlace: Codable, Equatable {
+    var id: String
+    var name: String
+    var address: String?
+    var rating: Double?
+    var userRatingCount: Int?
+    var mapsURL: URL?
 }
 
 enum AgentMissionKind: String, Codable, CaseIterable {

@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { z } from "zod";
+import { findGooglePlace } from "./_google-context.js";
 import { openAIModelFor } from "./_ai-models.js";
 import { protectPublicEndpoint } from "./_security.js";
 import { normalizeDeviceToken } from "./_storage.js";
@@ -32,6 +33,14 @@ export type InspirationStory = {
   sourceTitle: string;
   sourceURL: string;
   confidence: number;
+  place?: {
+    id: string;
+    name: string;
+    address?: string;
+    rating?: number;
+    userRatingCount?: number;
+    mapsURL?: string;
+  };
 };
 
 export const STORIES: InspirationStory[] = [
@@ -247,7 +256,23 @@ export async function buildInspirationFeed(mood: string, savedThemes: string[] =
       // The deterministic editorial feed is intentionally usable without AI.
     }
   }
-  return { ...curated, usedAI };
+  const enrichedStories = await Promise.all(curated.stories.slice(0, 8).map(async (story) => {
+    const result = await findGooglePlace(`${story.destination}, ${story.country}`, "en");
+    if (!("data" in result)) return story;
+    const place = result.data;
+    return {
+      ...story,
+      place: {
+        id: place.id,
+        name: place.name,
+        address: place.address,
+        rating: place.rating,
+        userRatingCount: place.userRatingCount,
+        mapsURL: place.mapsURL
+      }
+    };
+  }));
+  return { ...curated, stories: [...enrichedStories, ...curated.stories.slice(8)], usedAI };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

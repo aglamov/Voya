@@ -448,6 +448,28 @@ private struct InspirationStoryDetail: View {
                         InspirationDetailSection(title: "The experience", lines: story.experience)
                         InspirationDetailSection(title: "Know before you go", lines: story.practicalNotes + [story.mainRisk])
 
+                        if let place = story.place {
+                            InspirationDetailSection(
+                                title: "Place context",
+                                lines: [
+                                    place.name,
+                                    place.address,
+                                    place.rating.map { rating in
+                                        let count = place.userRatingCount.map { " · \($0) ratings" } ?? ""
+                                        return String(format: "%.1f", rating) + count
+                                    }
+                                ].compactMap { $0 }
+                            )
+                            if let mapsURL = place.mapsURL {
+                                Button { openURL(mapsURL) } label: {
+                                    Label("Open in Google Maps", systemImage: "map")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(Color.voyaTeal)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
                         Button { openURL(story.sourceURL) } label: {
                             Label(story.sourceTitle, systemImage: "checkmark.seal")
                                 .font(.caption.weight(.semibold))

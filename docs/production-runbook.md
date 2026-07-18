@@ -66,6 +66,8 @@ Create a second QStash schedule with cron expression `*/10 * * * *`, destination
 
 When QStash is not configured outside production, initial jobs execute inline so local development remains usable. Production health requires QStash and both agent secrets.
 
+Enable Places API (New), Air Quality API, and Pollen API in the Google Cloud project. Configure either a shared `GOOGLE_MAPS_API_KEY` or the restricted `GOOGLE_PLACES_API_KEY`, `GOOGLE_AIR_QUALITY_API_KEY`, and `GOOGLE_POLLEN_API_KEY` variables. The restricted-key setup is preferred: allow only the matching API on each key and restrict usage to the backend environment. `/api/health` reports each capability independently without exposing key values.
+
 Manual agent monitor run:
 
 ```bash
@@ -101,13 +103,14 @@ curl --fail-with-body \
 1. Import a real but redacted flight/hotel confirmation and verify the review screen before saving.
 2. Confirm the flight is enriched with the expected route/date and that its alert watch reports subscribed.
 3. Open a transfer and verify Google route duration, map handoff, and the local time-to-leave notification.
-4. Open an itinerary item and verify weather and Ticketmaster cards do not show provider-configuration warnings.
+4. Open an itinerary item and verify Google Places, air quality, pollen, weather, and Ticketmaster context appears without provider-configuration warnings.
 5. Confirm the device token created both flight and weather watches in the endpoint responses/logs.
 6. Send one APNs test through the same production credentials or use a controlled FlightAware callback fixture.
 7. Check QStash delivery logs and Vercel function logs after at least one ten-minute interval.
 8. Verify `/api/health` returns HTTP 200.
 9. Open Inspiration on a fresh install, verify the announcement is initially empty, request a collection, observe the preparing state, and confirm the ready push opens the finished edition.
 10. Create a mission, verify `queued → running → completed/active`, and confirm its result appears in Assistant.
+11. Refresh Trip Guardian for a trip with a destination and verify Sentinel reports attributed air-quality and pollen context or omits an unsupported regional forecast without failing the report.
 
 ## 9. App Store essentials
 

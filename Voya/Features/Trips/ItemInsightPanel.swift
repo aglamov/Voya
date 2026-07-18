@@ -480,6 +480,12 @@ struct ItemInsightPanel: View {
             return String(localized: "Nearby opportunity")
         case "maps":
             return String(localized: "Getting there")
+        case "place":
+            return String(localized: "Place context")
+        case "air":
+            return String(localized: "Air quality")
+        case "pollen":
+            return String(localized: "Pollen forecast")
         case "warning":
             return String(localized: "Watch this")
         default:
@@ -493,6 +499,9 @@ struct ItemInsightPanel: View {
         case "flight": "airplane"
         case "events": "ticket"
         case "maps": "map"
+        case "place": "mappin.and.ellipse"
+        case "air": "aqi.medium"
+        case "pollen": "allergens"
         case "warning": "exclamationmark.triangle"
         default: "sparkles"
         }
@@ -504,6 +513,9 @@ struct ItemInsightPanel: View {
         case "flight": Color.voyaSky
         case "events": Color.voyaCoral
         case "maps": Color.voyaTeal
+        case "place": Color.voyaTeal
+        case "air": Color.voyaSky
+        case "pollen": Color.voyaGold
         case "warning": Color.voyaCoral
         default: Color.voyaGold
         }
@@ -783,6 +795,9 @@ struct DetailedInsightBrief: View {
         case "weather": "cloud.sun.fill"
         case "events": "ticket.fill"
         case "maps": "map.fill"
+        case "place": "mappin.and.ellipse"
+        case "air": "aqi.medium"
+        case "pollen": "allergens"
         case "warning": "exclamationmark.triangle.fill"
         case "flight": "airplane"
         default: "sparkles"

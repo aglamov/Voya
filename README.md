@@ -121,6 +121,7 @@ Optional enrichment environment variables:
 - `PEXELS_API_KEY`: enables curated landscape hero photos for trip destinations. The app falls back to Wikipedia when Pexels is unavailable or has no matching photo.
 - `FLIGHTAWARE_AEROAPI_KEY`: enables `GET/POST /api/flight-status` and `POST /api/booking-validation` through FlightAware AeroAPI for flight existence checks, airline schedules, gate assignments, gate times, baggage claim, delay fields, aircraft details, tracking data, and alert capability.
 - `GOOGLE_ROUTES_API_KEY` or `GOOGLE_MAPS_API_KEY`: enables `POST /api/mobility` through Google Routes API for live transfer duration, traffic-aware driving, public transit, walking, cycling, route comparison, and time-to-leave planning.
+- `GOOGLE_PLACES_API_KEY`, `GOOGLE_AIR_QUALITY_API_KEY`, and `GOOGLE_POLLEN_API_KEY`: enable Google place verification, current Universal AQI, and the three-day pollen outlook. A shared server-side `GOOGLE_MAPS_API_KEY` can be used instead, although separate restricted keys make quotas and incident response easier to control. Enable Places API (New), Air Quality API, and Pollen API in the same Google Cloud project.
 - `UBER_CLIENT_ID` and `UBER_CLIENT_SECRET`: optional Uber developer credentials. `GET /api/uber-diagnostics` checks whether OAuth and estimates/products endpoints are accessible without exposing secrets.
 - `VOYA_API_PUBLIC_BASE_URL`: required public backend URL used for the FlightAware callback endpoint, for example `https://voya-lime.vercel.app`.
 - `FLIGHTAWARE_ALERT_WEBHOOK_SECRET`: required shared secret for `POST /api/flightaware-alerts`.
@@ -142,6 +143,13 @@ Flight support endpoints:
 Mobility support endpoints:
 
 - `POST /api/mobility` with origin, destination, target arrival/departure time, candidate modes, and Voya buffer settings. Send `arrivalTimeZoneOffsetSeconds` or `departureTimeZoneOffsetSeconds` with a target so Voya can preserve its wall-clock time when the route is in another time zone. It returns provider-neutral route options, total duration, travel duration, buffer minutes, leave-by time, route time-zone identifiers, trade-offs, map handoff URLs, and a recommended mode. Without a Google key, it returns explicit provider warnings and usable map handoff URLs instead of fake ETAs.
+
+Google travel context:
+
+- `POST /api/enrich` resolves a hotel, venue, airport, or destination through Places Text Search and adds Google Places, air-quality, and pollen cards when the corresponding APIs are configured.
+- `POST /api/guardian` evaluates the most relevant upcoming itinerary location and attributes air and pollen findings to Sentinel. Provider failures are omitted instead of replacing deterministic itinerary checks.
+- Inspiration stories are enriched with a verified Google Maps destination handoff after the Curator orders the collection. Recurring missions receive the same provider context before a specialist runs.
+- Results use short-lived in-memory caches and narrow Places field masks. Keep Google keys server-side, apply API restrictions, and preserve Google attribution in the UI.
 
 Destination image endpoint:
 
