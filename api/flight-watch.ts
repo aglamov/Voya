@@ -148,8 +148,10 @@ async function ensureFlightAwareAlert(
   const existingSubscribed = await redisCommand<string>(["HGET", metaKey, "flightAwareAlertSubscribed"]);
   const existingAlertId = await redisCommand<string>(["HGET", metaKey, "flightAwareAlertId"]);
   const existingLocation = await redisCommand<string>(["HGET", metaKey, "flightAwareAlertLocation"]);
+  const existingTargetURL = await redisCommand<string>(["HGET", metaKey, "flightAwareAlertTargetURL"]);
+  const targetURL = flightAwareAlertTargetURL();
 
-  if (existingSubscribed === "1") {
+  if (existingSubscribed === "1" && existingTargetURL === targetURL) {
     return {
       requested: false,
       configured: Boolean(flightAwareApiKey()),
@@ -184,8 +186,12 @@ async function ensureFlightAwareAlert(
   }
 
   const body = compactRecord(flightAwareAlertPayload(flightNumber, date, originAirport, destinationAirport));
-  const response = await fetch("https://aeroapi.flightaware.com/aeroapi/alerts", {
-    method: "POST",
+  const canRepairExisting = existingSubscribed === "1" && Boolean(existingAlertId);
+  const alertURL = canRepairExisting
+    ? `https://aeroapi.flightaware.com/aeroapi/alerts/${encodeURIComponent(existingAlertId!)}`
+    : "https://aeroapi.flightaware.com/aeroapi/alerts";
+  const response = await fetch(alertURL, {
+    method: canRepairExisting ? "PUT" : "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
@@ -194,8 +200,8 @@ async function ensureFlightAwareAlert(
     body: JSON.stringify(body)
   });
   const data = await response.json().catch(() => undefined) as unknown;
-  const location = response.headers.get("location") ?? undefined;
-  const alertId = alertIdFromLocation(location ?? null);
+  const location = response.headers.get("location") ?? existingLocation ?? undefined;
+  const alertId = alertIdFromLocation(location ?? null) ?? existingAlertId ?? undefined;
 
   if (!response.ok) {
     return {
@@ -217,6 +223,8 @@ async function ensureFlightAwareAlert(
     alertId ?? "",
     "flightAwareAlertLocation",
     location ?? "",
+    "flightAwareAlertTargetURL",
+    targetURL ?? "",
     "flightAwareAlertCreatedAt",
     new Date().toISOString()
   ]);
@@ -225,7 +233,7 @@ async function ensureFlightAwareAlert(
     requested: true,
     configured: true,
     subscribed: true,
-    existing: false,
+    existing: canRepairExisting,
     status: response.status,
     alertId,
     location
@@ -237,12 +245,14 @@ async function flightAwareAlertStatus(key: string) {
   const subscribed = await redisCommand<string>(["HGET", metaKey, "flightAwareAlertSubscribed"]);
   const alertId = await redisCommand<string>(["HGET", metaKey, "flightAwareAlertId"]);
   const location = await redisCommand<string>(["HGET", metaKey, "flightAwareAlertLocation"]);
+  const storedTargetURL = await redisCommand<string>(["HGET", metaKey, "flightAwareAlertTargetURL"]);
+  const isCurrent = subscribed === "1" && storedTargetURL === flightAwareAlertTargetURL();
 
   return {
     requested: false,
     configured: Boolean(flightAwareApiKey()),
-    subscribed: subscribed === "1",
-    existing: subscribed === "1",
+    subscribed: isCurrent,
+    existing: isCurrent,
     alertId: alertId || undefined,
     location: location || undefined
   };

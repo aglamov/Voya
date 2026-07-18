@@ -10,8 +10,10 @@ import Vision
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var store: VoyaStore
     @State private var selectedTab: VoyaTab = .trips
+    @State private var pendingNotificationDestination: VoyaNotificationDestination?
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -37,10 +39,14 @@ struct ContentView: View {
         .onAppear {
             store.configure(modelContext: modelContext)
             if let destination = VoyaNotificationScheduler.shared.takePendingDestination() {
-                openNotification(destination)
+                queueNotification(destination)
             } else if store.selectCurrentTripIfAvailable() {
                 selectedTab = .trips
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            openPendingNotificationAfterActivation()
         }
         .onReceive(NotificationCenter.default.publisher(for: .voyaPushDeviceTokenDidChange)) { _ in
             Task {
@@ -50,8 +56,28 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .voyaNotificationOpened)) { notification in
             if let destination = VoyaNotificationScheduler.shared.takePendingDestination()
                 ?? notification.userInfo?["destination"] as? VoyaNotificationDestination {
-                openNotification(destination)
+                queueNotification(destination)
             }
+        }
+    }
+
+    private func queueNotification(_ destination: VoyaNotificationDestination) {
+        pendingNotificationDestination = destination
+        guard scenePhase == .active else { return }
+        openPendingNotificationAfterActivation()
+    }
+
+    private func openPendingNotificationAfterActivation() {
+        Task { @MainActor in
+            // Notification responses can arrive while SwiftUI is restoring the scene.
+            // Presenting a sheet during that transaction can leave UIKit's presenter stuck.
+            await Task.yield()
+            guard scenePhase == .active,
+                  let destination = pendingNotificationDestination else {
+                return
+            }
+            pendingNotificationDestination = nil
+            openNotification(destination)
         }
     }
 

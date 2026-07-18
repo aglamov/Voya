@@ -704,7 +704,7 @@ async function weatherCard(location: string | LocationLookup | undefined, isRuss
   const current = data.data?.[0];
   const temp = current?.temp;
   const description = current?.weather?.[0]?.description;
-  const alertIDs = current?.alerts ?? [];
+  const alertIDs = [...new Set(current?.alerts ?? [])];
   const alerts = await Promise.all(alertIDs.slice(0, 5).map(async (id) => {
     try {
       return await weatherAlertDetails(id);
@@ -713,37 +713,38 @@ async function weatherCard(location: string | LocationLookup | undefined, isRuss
       return undefined;
     }
   }));
-  const alertSummaries = alerts.flatMap((alert) => {
+  const alertSummaries = [...new Set(alerts.flatMap((alert) => {
     if (!alert) return [];
 
+    const event = alert.event.replace(/\s+/g, " ").trim();
     const description = alert.description
       .replace(/\s+/g, " ")
       .trim();
-    const distinctDescription = description.toLowerCase() === alert.event.toLowerCase()
+    const distinctDescription = description.toLowerCase() === event.toLowerCase()
       ? ""
       : description;
+    const isGenericEvent = /^(weather alert|погодное предупреждение)$/i.test(event);
+    if (isGenericEvent && !distinctDescription) {
+      return [];
+    }
+
     const compactDescription = distinctDescription.length > 180
       ? `${distinctDescription.slice(0, 177)}...`
       : distinctDescription;
-    const basis = isRussian
-      ? `Источник: ${alert.source}. Предупреждение относится к району или периоду, а не обязательно к погоде прямо сейчас.`
-      : `Source: ${alert.source}. The advisory applies to an area or time window, not necessarily to conditions at this exact moment.`;
-    return [[alert.event, compactDescription, basis].filter(Boolean).join(" · ")];
-  });
-  const alertCount = alertIDs.length;
+    return [[isGenericEvent ? (isRussian ? "Погодное предупреждение" : "Weather advisory") : event, compactDescription]
+      .filter(Boolean)
+      .join(" · ")];
+  }))];
+  const hasMeaningfulAlert = alertSummaries.length > 0;
 
   return {
     title: isRussian ? "Погода" : "Weather",
     value: temp == null ? (isRussian ? "Прогноз готов" : "Forecast ready") : `${Math.round(temp)} C`,
     detail: [
       description,
-      alertCount > 0
-        ? (alertSummaries.join("; ") || (isRussian
-          ? `${alertCount} погодных предупреждений от OpenWeather. Они могут относиться к более широкой территории или другому времени.`
-          : `${alertCount} OpenWeather alert${alertCount === 1 ? "" : "s"}. They may apply to a wider area or a different time window.`))
-        : undefined
+      hasMeaningfulAlert ? alertSummaries.join("; ") : undefined
     ].filter(Boolean).join(" · "),
-    kind: alertCount > 0 ? "warning" : "weather"
+    kind: hasMeaningfulAlert ? "warning" : "weather"
   };
 }
 

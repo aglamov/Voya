@@ -67,7 +67,12 @@ struct TripsView: View {
 
                 Picker("Trips", selection: $tripListMode) {
                     ForEach(TripListMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
+                        if mode == .archive {
+                            Text(verbatim: "\(mode.displayName) (\(store.archivedTrips.count))")
+                                .tag(mode)
+                        } else {
+                            Text(mode.displayName).tag(mode)
+                        }
                     }
                 }
                 .pickerStyle(.segmented)
@@ -81,14 +86,65 @@ struct TripsView: View {
                     }
 
                     if displayedTrips.count > 1 {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(displayedTrips) { trip in
-                                    TripChip(
-                                        trip: trip,
-                                        isSelected: trip.id == displayedTrip?.id
-                                    ) {
-                                        store.selectedTripID = trip.id
+                        if tripListMode == .archive {
+                            Menu {
+                                ForEach(displayedTrips) { archivedTrip in
+                                    Button {
+                                        store.selectedTripID = archivedTrip.id
+                                    } label: {
+                                        Label(
+                                            "\(archivedTrip.destination?.nilIfEmpty ?? archivedTrip.title) · \(archivedTrip.displayDates)",
+                                            systemImage: archivedTrip.id == trip.id ? "checkmark.circle.fill" : "circle"
+                                        )
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "archivebox.fill")
+                                        .font(.headline)
+                                        .foregroundStyle(Color.voyaTeal)
+
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("Archive")
+                                            .font(.subheadline.weight(.bold))
+                                            .foregroundStyle(Color.voyaInk)
+                                        Text(trip.destination?.nilIfEmpty ?? trip.title)
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(Color.voyaMuted)
+                                            .lineLimit(1)
+                                    }
+
+                                    Spacer(minLength: 0)
+
+                                    Text("\(displayedTrips.count)")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(Color.voyaTeal)
+                                        .padding(.horizontal, 9)
+                                        .frame(height: 26)
+                                        .background(Color.voyaTeal.opacity(0.12))
+                                        .clipShape(Capsule())
+
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(Color.voyaMuted)
+                                }
+                                .padding(.horizontal, 14)
+                                .frame(maxWidth: .infinity, minHeight: 58)
+                                .background(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .shadow(color: .black.opacity(0.04), radius: 12, y: 8)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 10) {
+                                    ForEach(displayedTrips) { trip in
+                                        TripChip(
+                                            trip: trip,
+                                            isSelected: trip.id == displayedTrip?.id
+                                        ) {
+                                            store.selectedTripID = trip.id
+                                        }
                                     }
                                 }
                             }
@@ -96,9 +152,12 @@ struct TripsView: View {
                     }
 
                     let timeline = store.timelineItinerary(for: trip)
-                    TripOperationsCard(trip: trip, itinerary: timeline) { item in
-                        store.assistantFocusItemID = item.id
-                        selectedTab = .assistant
+                    let isArchived = store.isArchived(trip, at: Date())
+                    if !isArchived {
+                        TripOperationsCard(trip: trip, itinerary: timeline) { item in
+                            store.assistantFocusItemID = item.id
+                            selectedTab = .assistant
+                        }
                     }
 
                     HStack {
@@ -106,14 +165,16 @@ struct TripsView: View {
                             .font(.title3.bold())
                             .foregroundStyle(Color.voyaInk)
                         Spacer()
-                        Button {
-                            tripAddingItem = trip
-                        } label: {
-                            Label("Add", systemImage: "plus")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Color.voyaTeal)
+                        if !isArchived {
+                            Button {
+                                tripAddingItem = trip
+                            } label: {
+                                Label("Add", systemImage: "plus")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Color.voyaTeal)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
 
                     if hiddenTransferCount(for: trip, itinerary: timeline) > 0 {

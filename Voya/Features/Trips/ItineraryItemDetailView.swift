@@ -165,7 +165,9 @@ struct ItineraryItemDetailView: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .voyaKeyboardDismissToolbar()
-        .interactiveDismissDisabled(isEditing || isRefreshingFlightStatus)
+        // A live flight refresh may take several seconds. It must never trap the
+        // user in a sheet opened automatically from a push notification.
+        .interactiveDismissDisabled(isEditing)
         .alert("Delete item?", isPresented: $isShowingDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 onDelete()

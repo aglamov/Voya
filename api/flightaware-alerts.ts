@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { sendAPNsAlert } from "./_apns.js";
 import {
   fallbackPushTokens,
@@ -313,6 +313,24 @@ function pushCopy(
     };
   }
 
+  // FlightAware reports gate assignments through the bundled `change` event,
+  // not only through an event whose code contains `gate`. This fallback also
+  // lets a provider retry recover a delivery that previously failed after the
+  // latest state had already been persisted.
+  if (departureGate && (event.includes("gate") || event.includes("change"))) {
+    return {
+      title: `${flight} gate update`,
+      body: `Departure gate is ${departureGate}${departureTerminal ? `, terminal ${departureTerminal}` : ""}.`
+    };
+  }
+
+  if (arrivalGate && (event.includes("gate") || event.includes("change"))) {
+    return {
+      title: `${flight} arrival gate update`,
+      body: `Arrival gate is ${arrivalGate}.`
+    };
+  }
+
   return undefined;
 }
 
@@ -341,13 +359,32 @@ async function saveState(flightNumber: string, date: string | undefined, state: 
   await redisCommand(["SET", stateKey(flightNumber, date), JSON.stringify(state), "EX", 14 * 24 * 60 * 60]);
 }
 
-async function alreadyProcessed(idempotencyKey: string) {
+function deliveryKey(idempotencyKey: string, deviceToken: string) {
+  const recipient = createHash("sha256").update(deviceToken).digest("hex");
+  return `voya:flight-alert-delivery:${idempotencyKey}:${recipient}`;
+}
+
+async function claimDelivery(idempotencyKey: string, deviceToken: string) {
   if (!storageConfigured()) {
-    return false;
+    return true;
   }
 
-  const result = await redisCommand<string | null>(["SET", `voya:flight-alert-event:${idempotencyKey}`, "1", "EX", 24 * 60 * 60, "NX"]);
-  return result !== "OK";
+  const result = await redisCommand<string | null>([
+    "SET",
+    deliveryKey(idempotencyKey, deviceToken),
+    "1",
+    "EX",
+    24 * 60 * 60,
+    "NX"
+  ]);
+  return result === "OK";
+}
+
+async function releaseDelivery(idempotencyKey: string, deviceToken: string) {
+  if (!storageConfigured()) {
+    return;
+  }
+  await redisCommand(["DEL", deliveryKey(idempotencyKey, deviceToken)]);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -371,7 +408,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const flightNumber = normalized.flightNumber;
   if (!flightNumber) {
-    return res.status(202).json({
+    return res.status(200).json({
       accepted: true,
       alert: normalized,
       push: {
@@ -383,14 +420,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const previous = await previousState(flightNumber, normalized.flightDate);
   const nextState: StoredFlightAlertState = {
-    departureGate: normalized.gate.departureGate,
-    arrivalGate: normalized.gate.arrivalGate,
-    departureTerminal: normalized.gate.departureTerminal,
-    arrivalTerminal: normalized.gate.arrivalTerminal,
-    scheduledDepartureAt: normalized.timing.scheduledDepartureAt,
-    scheduledArrivalAt: normalized.timing.scheduledArrivalAt,
-    estimatedDepartureAt: normalized.timing.estimatedDepartureAt,
-    estimatedArrivalAt: normalized.timing.estimatedArrivalAt,
+    departureGate: normalized.gate.departureGate ?? previous?.departureGate,
+    arrivalGate: normalized.gate.arrivalGate ?? previous?.arrivalGate,
+    departureTerminal: normalized.gate.departureTerminal ?? previous?.departureTerminal,
+    arrivalTerminal: normalized.gate.arrivalTerminal ?? previous?.arrivalTerminal,
+    scheduledDepartureAt: normalized.timing.scheduledDepartureAt ?? previous?.scheduledDepartureAt,
+    scheduledArrivalAt: normalized.timing.scheduledArrivalAt ?? previous?.scheduledArrivalAt,
+    estimatedDepartureAt: normalized.timing.estimatedDepartureAt ?? previous?.estimatedDepartureAt,
+    estimatedArrivalAt: normalized.timing.estimatedArrivalAt ?? previous?.estimatedArrivalAt,
     eventType: normalized.eventType,
     updatedAt: normalized.receivedAt
   };
@@ -405,7 +442,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     normalized.timing.estimatedDepartureAt,
     normalized.timing.estimatedArrivalAt
   ].filter(Boolean).join(":");
-  const duplicate = await alreadyProcessed(idempotencyKey);
   await saveState(flightNumber, normalized.flightDate, nextState);
 
   const copy = pushCopy(normalized, previous);
@@ -415,18 +451,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     || changed(previous?.arrivalTerminal, normalized.gate.arrivalTerminal);
   const hasNewGateInfo = Boolean((normalized.gate.departureGate && !previous?.departureGate)
     || (normalized.gate.arrivalGate && !previous?.arrivalGate));
-  const eventLooksImportant = /gate|delay|schedule|cancel|divert/i.test(normalized.eventType);
+  const eventLooksImportant = /gate|change|delay|schedule|cancel|divert/i.test(normalized.eventType);
   const hasTimeDiff = meaningfulTimeShift(normalized, previous) !== undefined;
-  const shouldPush = !duplicate && copy && (hasGateDiff || hasNewGateInfo || hasTimeDiff || eventLooksImportant);
+  const shouldPush = copy && (hasGateDiff || hasNewGateInfo || hasTimeDiff || eventLooksImportant);
   const storedTargets = await registeredTargetsForFlight(flightNumber, normalized.flightDate);
   const testTokens = storedTargets.length ? [] : fallbackPushTokens();
   const targets: RegisteredFlightTarget[] = storedTargets.length
     ? storedTargets
     : testTokens.map((deviceToken) => ({ deviceToken }));
   const deliveryResults: Awaited<ReturnType<typeof sendAPNsAlert>>[] = [];
+  let duplicateTargets = 0;
   if (shouldPush && targets.length) {
     for (let index = 0; index < targets.length; index += 10) {
-      const batch = await Promise.all(targets.slice(index, index + 10).map((target) => sendAPNsAlert([target.deviceToken], {
+      const batch = await Promise.all(targets.slice(index, index + 10).map(async (target) => {
+        const claimed = await claimDelivery(idempotencyKey, target.deviceToken);
+        if (!claimed) {
+          duplicateTargets += 1;
+          return undefined;
+        }
+        const result = await sendAPNsAlert([target.deviceToken], {
           title: copy.title,
           body: copy.body,
           threadId: flightNumber,
@@ -439,8 +482,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             tripId: target.tripId,
             itemId: target.itemId
           }
-        })));
-      deliveryResults.push(...batch);
+        });
+        if (result.sent === 0) {
+          // A provider retry must be able to redeliver after transient APNs or
+          // configuration failures. Only successful recipient deliveries stay
+          // deduplicated for the event window.
+          await releaseDelivery(idempotencyKey, target.deviceToken);
+        }
+        return result;
+      }));
+      deliveryResults.push(...batch.filter((result): result is Awaited<ReturnType<typeof sendAPNsAlert>> => Boolean(result)));
     }
   }
   const push = deliveryResults.length
@@ -454,10 +505,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     : {
         configured: false,
-        attempted: targets.length,
+        attempted: 0,
         sent: 0,
         failed: 0,
-        errors: shouldPush ? ["No registered device tokens for this flight."] : ["Alert did not produce a new traveler-facing push."],
+        errors: !shouldPush
+          ? ["Alert did not produce a new traveler-facing push."]
+          : targets.length === 0
+            ? ["No registered device tokens for this flight."]
+            : [],
         invalidDeviceTokens: [] as string[]
       };
 
@@ -468,11 +523,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await redisCommand(["HDEL", flightWatchTargetsKey(flightNumber), token]);
   }
 
-  return res.status(202).json({
+  return res.status(200).json({
     accepted: true,
     alert: normalized,
     push: {
-      duplicate,
+      duplicate: Boolean(targets.length && duplicateTargets === targets.length),
+      duplicateTargets,
       shouldPush: Boolean(shouldPush),
       matchedRegisteredDevices: storedTargets.length,
       matchedFallbackDevices: testTokens.length,

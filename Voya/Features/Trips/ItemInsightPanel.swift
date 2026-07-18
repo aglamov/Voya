@@ -886,7 +886,7 @@ struct DetailedInsightBrief: View {
 
         if let weather = firstCard(kind: "weather", titles: ["Погода", "Weather"]) {
             let value = humanizedWeatherText(cleanInlineText(weather.value))
-            let detail = humanizedWeatherText(cleanInlineText(weather.detail ?? ""))
+            let detail = eventWeatherDetail(weather.detail ?? "")
             var weatherLines = [value, detail].filter { !$0.isEmpty }
             if weather.kind == "warning" {
                 weatherLines.append(isRussian
@@ -999,7 +999,9 @@ struct DetailedInsightBrief: View {
         let normalized = status.lowercased()
         let placeholders = [
             "unknown", "status unknown", "needs review", "need to review",
-            "неизвест", "неизвестно", "статус неизвестен", "нужно проверить", "требует проверки"
+            "not specified", "not provided", "status unavailable",
+            "неизвест", "неизвестно", "статус неизвестен", "нужно проверить", "требует проверки",
+            "не указан", "не указано", "статус не указан", "данных о статусе нет"
         ]
         return placeholders.contains(where: normalized.contains) ? nil : status
     }
@@ -1007,6 +1009,28 @@ struct DetailedInsightBrief: View {
     private func isWeatherWarning(_ warning: String) -> Bool {
         let normalized = warning.lowercased()
         return normalized.contains("weather") || normalized.contains("погод")
+    }
+
+    private func eventWeatherDetail(_ value: String) -> String {
+        var seen = Set<String>()
+        return value
+            .components(separatedBy: CharacterSet(charactersIn: "·;"))
+            .map { humanizedWeatherText(cleanInlineText($0)) }
+            .filter { part in
+                guard !part.isEmpty else { return false }
+                let normalized = part.lowercased()
+                guard normalized != "weather alert",
+                      normalized != "погодное предупреждение",
+                      !normalized.contains("источник:"),
+                      !normalized.contains("source:"),
+                      !normalized.contains("@"),
+                      !normalized.contains("предупреждение относится к району или периоду"),
+                      !normalized.contains("advisory applies to an area or time window") else {
+                    return false
+                }
+                return seen.insert(normalizedKey(part)).inserted
+            }
+            .joined(separator: " · ")
     }
 
     private func localizedStatus(_ value: String) -> String {
