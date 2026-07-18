@@ -174,3 +174,416 @@ struct VercelAssistantAIService {
         return try JSONDecoder().decode(AssistantAIAdvice.self, from: data)
     }
 }
+
+enum InspirationTheme: String, Codable, CaseIterable {
+    case music
+    case nature
+    case culture
+    case phenomenon
+    case seasonal
+}
+
+struct InspirationStory: Identifiable, Codable, Equatable {
+    var id: String
+    var title: String
+    var hook: String
+    var destination: String
+    var country: String
+    var theme: InspirationTheme
+    var moods: [String]
+    var timing: String
+    var idealDays: Int
+    var whyNow: String
+    var experience: [String]
+    var practicalNotes: [String]
+    var mainRisk: String
+    var symbol: String
+    var gradient: [String]
+    var sourceTitle: String
+    var sourceURL: URL
+    var confidence: Double
+
+    static let fallback: [InspirationStory] = [
+        InspirationStory(
+            id: "lofoten-aurora",
+            title: String(localized: "Northern lights above the Lofoten Islands"),
+            hook: String(localized: "Long blue hours, fishing villages and four nights with a chance to see the sky turn green."),
+            destination: "Lofoten Islands",
+            country: String(localized: "Norway"),
+            theme: .phenomenon,
+            moods: ["wonder", "nature", "remote", "winter"],
+            timing: String(localized: "September–March"),
+            idealDays: 6,
+            whyNow: String(localized: "The dark season creates long viewing windows, while the islands remain a remarkable journey even if the aurora stays hidden."),
+            experience: [String(localized: "Aurora nights"), String(localized: "Scenic island roads"), String(localized: "Arctic fishing villages")],
+            practicalNotes: [String(localized: "A car makes the islands much easier"), String(localized: "Keep at least four viewing nights")],
+            mainRisk: String(localized: "Cloud cover is unpredictable, so no single night can be promised."),
+            symbol: "sparkles",
+            gradient: ["122B45", "49A99A"],
+            sourceTitle: "Visit Norway — Northern Lights",
+            sourceURL: URL(string: "https://www.visitnorway.com/things-to-do/nature-attractions/northern-lights/")!,
+            confidence: 0.92
+        ),
+        InspirationStory(
+            id: "japan-sakura",
+            title: String(localized: "Follow spring through Japan"),
+            hook: String(localized: "A slow journey from temple gardens to mountain onsen as the cherry blossom season moves north."),
+            destination: String(localized: "Kyoto and the Japanese Alps"),
+            country: String(localized: "Japan"),
+            theme: .seasonal,
+            moods: ["beauty", "culture", "slow", "spring"],
+            timing: String(localized: "Late March–April"),
+            idealDays: 9,
+            whyNow: String(localized: "The blossom forecast turns an ordinary route into a time-sensitive journey through several stages of spring."),
+            experience: [String(localized: "Temple gardens"), String(localized: "Mountain onsen"), String(localized: "Seasonal food")],
+            practicalNotes: [String(localized: "Exact bloom dates vary every year"), String(localized: "Book popular cities well ahead")],
+            mainRisk: String(localized: "Peak bloom is brief and weather can move it earlier or later."),
+            symbol: "camera.macro",
+            gradient: ["BB6F86", "F1B6A8"],
+            sourceTitle: "Japan National Tourism Organization",
+            sourceURL: URL(string: "https://www.japan.travel/en/uk/inspiration/cherry-blossom-forecast/")!,
+            confidence: 0.9
+        ),
+        InspirationStory(
+            id: "azores-whales",
+            title: String(localized: "Meet the whales of the Azores"),
+            hook: String(localized: "Volcanic lakes, Atlantic cliffs and days shaped around what appears on the horizon."),
+            destination: "São Miguel",
+            country: String(localized: "Portugal"),
+            theme: .nature,
+            moods: ["ocean", "wildlife", "quiet", "nature"],
+            timing: String(localized: "April–October"),
+            idealDays: 7,
+            whyNow: String(localized: "Different species pass through the archipelago across the season, making wildlife part of a broader volcanic-island trip."),
+            experience: [String(localized: "Whale watching"), String(localized: "Volcanic hot springs"), String(localized: "Crater-lake walks")],
+            practicalNotes: [String(localized: "Leave a weather buffer for the boat"), String(localized: "Choose a responsible operator")],
+            mainRisk: String(localized: "Sea conditions can cancel departures and sightings are never guaranteed."),
+            symbol: "water.waves",
+            gradient: ["145B63", "6CB6A6"],
+            sourceTitle: "Visit Azores — Whale Watching",
+            sourceURL: URL(string: "https://www.visitazores.com/en/experience-the-azores/whale-watching")!,
+            confidence: 0.91
+        )
+    ]
+}
+
+enum AgentMissionKind: String, Codable, CaseIterable {
+    case guardian
+    case inspiration
+    case planning
+    case recovery
+    case concierge
+
+    var symbol: String {
+        switch self {
+        case .guardian: "shield.checkered"
+        case .inspiration: "sparkles"
+        case .planning: "map"
+        case .recovery: "lifepreserver"
+        case .concierge: "bell.and.waves.left.and.right"
+        }
+    }
+}
+
+enum AgentMissionStatus: String, Codable {
+    case active
+    case waiting
+    case completed
+    case cancelled
+}
+
+struct AgentMission: Identifiable, Codable, Equatable {
+    var id: UUID
+    var tripId: UUID?
+    var inspirationId: String?
+    var kind: AgentMissionKind
+    var title: String
+    var detail: String
+    var status: AgentMissionStatus
+    var createdAt: Date
+    var updatedAt: Date
+    var nextCheckAt: Date?
+}
+
+enum AgentMissionLocalStore {
+    private static let key = "voya-agent-missions-v1"
+
+    static func load() -> [AgentMission] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let missions = try? decoder.decode([AgentMission].self, from: data) else {
+            return []
+        }
+        return missions
+    }
+
+    static func save(_ missions: [AgentMission]) {
+        guard let data = try? encoder.encode(missions) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private static var encoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+
+    private static var decoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+}
+
+struct GuardianReport: Codable, Equatable {
+    var generatedAt: Date
+    var status: String
+    var headline: String
+    var summary: String
+    var watchCount: Int
+    var findings: [GuardianFinding]
+    var agents: [GuardianAgent]
+}
+
+struct GuardianFinding: Identifiable, Codable, Equatable {
+    var id: String
+    var agent: String
+    var severity: String
+    var title: String
+    var detail: String
+    var itemId: UUID?
+}
+
+struct GuardianAgent: Identifiable, Codable, Equatable {
+    var id: String
+    var name: String
+    var responsibility: String
+    var state: String
+}
+
+private struct InspirationFeedResponse: Decodable {
+    var curatorNote: String
+    var stories: [InspirationStory]
+}
+
+private struct MissionResponse: Decodable {
+    var mission: AgentMission
+}
+
+@MainActor
+struct VoyaAgentService {
+    private let session: URLSession
+    private let baseURL: URL?
+
+    init(session: URLSession = .shared, baseURL: URL? = VoyaAPIConfiguration.baseURL) {
+        self.session = session
+        self.baseURL = baseURL
+    }
+
+    func inspiration(mood: String) async throws -> (stories: [InspirationStory], curatorNote: String) {
+        let data = try await request(path: "api/inspiration", method: "POST", body: ["mood": mood])
+        let feed = try decoder.decode(InspirationFeedResponse.self, from: data)
+        return (feed.stories, feed.curatorNote)
+    }
+
+    func createMission(_ mission: AgentMission) async throws -> AgentMission {
+        struct Body: Encodable {
+            var kind: AgentMissionKind
+            var title: String
+            var detail: String
+            var tripId: UUID?
+            var inspirationId: String?
+            var nextCheckAt: Date?
+        }
+        let body = Body(
+            kind: mission.kind,
+            title: mission.title,
+            detail: mission.detail,
+            tripId: mission.tripId,
+            inspirationId: mission.inspirationId,
+            nextCheckAt: mission.nextCheckAt
+        )
+        let data = try await request(path: "api/missions", method: "POST", body: body)
+        return try decoder.decode(MissionResponse.self, from: data).mission
+    }
+
+    func guardian(trip: Trip, itinerary: [ItineraryItem]) async throws -> GuardianReport {
+        struct Item: Encodable {
+            var id: UUID
+            var kind: String
+            var title: String
+            var location: String
+            var status: String
+            var startsAt: Date?
+            var endsAt: Date?
+            var hasConfirmationCode: Bool
+        }
+        struct TripBody: Encodable {
+            var id: UUID
+            var title: String
+            var destination: String?
+            var startsAt: Date?
+            var endsAt: Date?
+        }
+        struct Body: Encodable {
+            var trip: TripBody
+            var itinerary: [Item]
+            var locale: String
+        }
+        let body = Body(
+            trip: TripBody(id: trip.id, title: trip.title, destination: trip.destination, startsAt: trip.startsAt, endsAt: trip.endsAt),
+            itinerary: itinerary.map {
+                Item(
+                    id: $0.id,
+                    kind: $0.kind.rawValue,
+                    title: $0.title,
+                    location: $0.location,
+                    status: $0.status,
+                    startsAt: $0.startsAt,
+                    endsAt: $0.endsAt,
+                    hasConfirmationCode: $0.confirmationCode?.isEmpty == false
+                )
+            },
+            locale: Locale.current.identifier
+        )
+        let data = try await request(path: "api/guardian", method: "POST", body: body)
+        return try decoder.decode(GuardianReport.self, from: data)
+    }
+
+    private func request<Body: Encodable>(path: String, method: String, body: Body) async throws -> Data {
+        guard let baseURL else { throw VercelExtractionError.notConfigured }
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        VoyaAPIConfiguration.authorize(&request)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+        request.httpBody = try encoder.encode(body)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw VercelExtractionError.badResponse
+        }
+        return data
+    }
+
+    private var encoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+
+    private var decoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = fractional.date(from: value) {
+                return date
+            }
+            let standard = ISO8601DateFormatter()
+            standard.formatOptions = [.withInternetDateTime]
+            guard let date = standard.date(from: value) else {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO-8601 date")
+            }
+            return date
+        }
+        return decoder
+    }
+}
+
+@MainActor
+extension VoyaStore {
+    func refreshInspiration(mood: String = "") async {
+        guard !isLoadingInspiration else { return }
+        isLoadingInspiration = true
+        defer { isLoadingInspiration = false }
+        do {
+            let feed = try await VoyaAgentService().inspiration(mood: mood)
+            inspirationStories = feed.stories
+            inspirationCuratorNote = feed.curatorNote
+        } catch {
+            if inspirationStories.isEmpty {
+                inspirationStories = InspirationStory.fallback
+            }
+        }
+    }
+
+    @discardableResult
+    func startMission(
+        kind: AgentMissionKind,
+        title: String,
+        detail: String,
+        tripID: UUID? = nil,
+        inspirationID: String? = nil
+    ) -> AgentMission {
+        let now = Date()
+        let mission = AgentMission(
+            id: UUID(),
+            tripId: tripID,
+            inspirationId: inspirationID,
+            kind: kind,
+            title: title,
+            detail: detail,
+            status: .active,
+            createdAt: now,
+            updatedAt: now,
+            nextCheckAt: Calendar.current.date(byAdding: .hour, value: 6, to: now)
+        )
+        agentMissions.insert(mission, at: 0)
+        AgentMissionLocalStore.save(agentMissions)
+        Task {
+            if let synced = try? await VoyaAgentService().createMission(mission),
+               let index = agentMissions.firstIndex(where: { $0.id == mission.id }) {
+                agentMissions[index] = synced
+                AgentMissionLocalStore.save(agentMissions)
+            }
+        }
+        return mission
+    }
+
+    func completeMission(_ mission: AgentMission) {
+        guard let index = agentMissions.firstIndex(where: { $0.id == mission.id }) else { return }
+        agentMissions[index].status = .completed
+        agentMissions[index].updatedAt = Date()
+        AgentMissionLocalStore.save(agentMissions)
+    }
+
+    func refreshGuardian(for trip: Trip) async {
+        guard !refreshingGuardianTripIDs.contains(trip.id) else { return }
+        refreshingGuardianTripIDs.insert(trip.id)
+        defer { refreshingGuardianTripIDs.remove(trip.id) }
+        do {
+            guardianReports[trip.id] = try await VoyaAgentService().guardian(trip: trip, itinerary: itinerary(for: trip))
+        } catch {
+            guardianReports[trip.id] = localGuardianReport(for: trip)
+        }
+    }
+
+    private func localGuardianReport(for trip: Trip) -> GuardianReport {
+        let missingTimes = trip.items.filter { $0.startsAt == nil }
+        let findings = missingTimes.prefix(4).map {
+            GuardianFinding(
+                id: "missing-time-\($0.id.uuidString)",
+                agent: "clerk",
+                severity: "watch",
+                title: String(localized: "Add timing for \($0.title)"),
+                detail: String(localized: "Guardian needs a time to protect this connection."),
+                itemId: $0.id
+            )
+        }
+        return GuardianReport(
+            generatedAt: Date(),
+            status: findings.isEmpty ? "calm" : "watch",
+            headline: findings.isEmpty ? String(localized: "Guardian is watching your journey") : String(localized: "Guardian is watching a few weak points"),
+            summary: findings.isEmpty ? String(localized: "Everything currently looks coherent.") : String(localized: "Some itinerary details still need attention."),
+            watchCount: trip.items.count,
+            findings: findings,
+            agents: [
+                GuardianAgent(id: "sentinel", name: "Sentinel", responsibility: String(localized: "Live changes"), state: "watching"),
+                GuardianAgent(id: "navigator", name: "Navigator", responsibility: String(localized: "Transfers"), state: "watching"),
+                GuardianAgent(id: "clerk", name: "Clerk", responsibility: String(localized: "Booking details"), state: "watching"),
+                GuardianAgent(id: "coordinator", name: "Coordinator", responsibility: String(localized: "Trip-wide impact"), state: "watching")
+            ]
+        )
+    }
+}

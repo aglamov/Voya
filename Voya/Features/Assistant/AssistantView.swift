@@ -237,6 +237,22 @@ struct AssistantView: View {
                         isRefreshing: isRefreshingIntelligence
                     )
 
+                    TripGuardianCard(
+                        report: store.guardianReports[trip.id],
+                        isRefreshing: store.refreshingGuardianTripIDs.contains(trip.id)
+                    ) {
+                        Task { await store.refreshGuardian(for: trip) }
+                    }
+
+                    AgentMissionBoardCard(
+                        trip: trip,
+                        missions: store.agentMissions.filter { $0.tripId == nil || $0.tripId == trip.id },
+                        onStart: { kind, title, detail in
+                            store.startMission(kind: kind, title: title, detail: detail, tripID: trip.id)
+                        },
+                        onComplete: store.completeMission
+                    )
+
                     AssistantSyncStatusCard(
                         stage: processingStage,
                         isRefreshing: isRefreshingIntelligence || intelligence.isPlaceholder,
@@ -378,7 +394,11 @@ struct AssistantView: View {
             loadAssistantConversation()
         }
         .task(id: intelligenceRefreshID) {
-            await refreshAssistantIntelligenceIfNeeded()
+            async let intelligenceTask: Void = refreshAssistantIntelligenceIfNeeded()
+            if let trip {
+                await store.refreshGuardian(for: trip)
+            }
+            await intelligenceTask
         }
     }
 
@@ -679,6 +699,205 @@ struct AssistantView: View {
     private func appendConversationMessage(_ message: AssistantChatMessage) {
         conversation = Array((conversation + [message]).suffix(24))
         AssistantConversationStore.save(conversation, tripID: trip?.id)
+    }
+}
+
+private struct TripGuardianCard: View {
+    let report: GuardianReport?
+    let isRefreshing: Bool
+    let onRefresh: () -> Void
+
+    private var accent: Color {
+        switch report?.status {
+        case "action": .voyaCoral
+        case "watch": .voyaGold
+        default: .voyaTeal
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "shield.checkered")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Trip Guardian")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text(report?.headline ?? String(localized: "Preparing the journey watch"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(accent)
+                }
+                Spacer()
+                Button(action: onRefresh) {
+                    if isRefreshing {
+                        ProgressView().tint(accent)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(accent)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isRefreshing)
+            }
+
+            Text(report?.summary ?? String(localized: "Sentinel, Navigator, Clerk, and Coordinator are checking the trip."))
+                .font(.subheadline)
+                .foregroundStyle(Color.voyaMuted)
+
+            if let report {
+                HStack(spacing: 8) {
+                    Label("\(report.watchCount) watched", systemImage: "eye")
+                    Label("\(report.agents.count) agents", systemImage: "point.3.connected.trianglepath.dotted")
+                }
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaInk)
+
+                ForEach(report.findings.prefix(3)) { finding in
+                    HStack(alignment: .top, spacing: 10) {
+                        Circle()
+                            .fill(finding.severity == "action" ? Color.voyaCoral : finding.severity == "watch" ? Color.voyaGold : Color.voyaTeal)
+                            .frame(width: 8, height: 8)
+                            .padding(.top, 5)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(finding.title)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Color.voyaInk)
+                            Text(finding.detail)
+                                .font(.caption)
+                                .foregroundStyle(Color.voyaMuted)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+}
+
+private struct AgentMissionBoardCard: View {
+    let trip: Trip
+    let missions: [AgentMission]
+    let onStart: (AgentMissionKind, String, String) -> Void
+    let onComplete: (AgentMission) -> Void
+    @State private var draft = ""
+
+    private var activeMissions: [AgentMission] {
+        missions.filter { $0.status == .active || $0.status == .waiting }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Missions")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text("Give Voya an outcome to keep working on.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+                Spacer()
+                Text("\(activeMissions.count) active")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaTeal)
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(Color.voyaMint)
+                    .clipShape(Capsule())
+            }
+
+            HStack(spacing: 8) {
+                TextField("Watch, find, prepare…", text: $draft)
+                    .font(.subheadline.weight(.medium))
+                    .submitLabel(.done)
+                    .onSubmit(startDraft)
+                Button(action: startDraft) {
+                    Image(systemName: "arrow.up")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.voyaMuted : Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(8)
+            .padding(.leading, 6)
+            .background(Color.voyaSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    missionPreset("Watch my connection", kind: .guardian, symbol: "arrow.triangle.branch")
+                    missionPreset("Prepare a plan B", kind: .recovery, symbol: "lifepreserver")
+                    missionPreset("Plan a free evening", kind: .concierge, symbol: "moon.stars")
+                }
+            }
+
+            ForEach(activeMissions.prefix(4)) { mission in
+                HStack(spacing: 11) {
+                    Image(systemName: mission.kind.symbol)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaTeal)
+                        .frame(width: 36, height: 36)
+                        .background(Color.voyaMint)
+                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(mission.title)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                            .lineLimit(1)
+                        Text(mission.detail)
+                            .font(.caption)
+                            .foregroundStyle(Color.voyaMuted)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 4)
+                    Button { onComplete(mission) } label: {
+                        Image(systemName: "checkmark.circle")
+                            .font(.headline)
+                            .foregroundStyle(Color.voyaMuted)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private func missionPreset(_ title: String, kind: AgentMissionKind, symbol: String) -> some View {
+        Button {
+            onStart(kind, title, String(localized: "Voya will keep this mission active for \(trip.title) and surface the next useful decision."))
+        } label: {
+            Label(LocalizedStringKey(title), systemImage: symbol)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaInk)
+                .padding(.horizontal, 11)
+                .frame(height: 36)
+                .background(Color.voyaSurface)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func startDraft() {
+        let title = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        onStart(.planning, title, String(localized: "Coordinator will route this mission to the right Voya specialists."))
+        draft = ""
     }
 }
 

@@ -22,6 +22,8 @@ struct ContentView: View {
 
             Group {
                 switch selectedTab {
+                case .inspire:
+                    InspireView()
                 case .trips:
                     TripsView(selectedTab: $selectedTab)
                 case .import:
@@ -100,6 +102,7 @@ struct ContentView: View {
 }
 
 enum VoyaTab: String, CaseIterable, Identifiable {
+    case inspire = "Inspiration"
     case trips = "Trips"
     case `import` = "Import"
     case assistant = "Assistant"
@@ -108,6 +111,7 @@ enum VoyaTab: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .inspire: String(localized: "Inspiration")
         case .trips: String(localized: "Trips")
         case .import: String(localized: "Import")
         case .assistant: String(localized: "Assistant")
@@ -116,6 +120,7 @@ enum VoyaTab: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
+        case .inspire: "sparkles"
         case .trips: "calendar"
         case .import: "tray.and.arrow.down"
         case .assistant: "message.badge"

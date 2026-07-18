@@ -141,6 +141,8 @@ This is the most important reliability boundary in the product. AI can be uncert
 
 ## AI Pipelines
 
+The agentic runtime and its autonomy boundaries are described in [Agent Architecture](agent-architecture.md).
+
 ### Trip Inspiration Pipeline
 
 1. User describes the desired trip.
