@@ -19,12 +19,22 @@ struct InspireView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HeaderBar(title: "Inspiration", subtitle: "Journeys worth wanting")
 
-                InspirationEditorCard(
-                    mood: $mood,
-                    curatorNote: store.inspirationCuratorNote,
-                    isLoading: store.isLoadingInspiration
-                ) {
-                    Task { await store.refreshInspiration(mood: mood) }
+                if store.inspirationRelease?.status == "ready" {
+                    InspirationReadyHeader(
+                        mood: $mood,
+                        curatorNote: store.inspirationCuratorNote,
+                        isLoading: store.isLoadingInspiration
+                    ) {
+                        prepareCollection()
+                    }
+                } else {
+                    InspirationAnnouncementCard(
+                        mood: $mood,
+                        release: store.inspirationRelease,
+                        isLoading: store.isLoadingInspiration
+                    ) {
+                        prepareCollection()
+                    }
                 }
 
                 if let createdMission {
@@ -45,14 +55,16 @@ struct InspireView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
 
-                SectionHeader(title: "Selected by Voya", action: "")
+                if !store.inspirationStories.isEmpty {
+                    SectionHeader(title: "Selected by Voya", action: "")
 
-                LazyVStack(spacing: 16) {
-                    ForEach(store.inspirationStories) { story in
-                        InspirationStoryCard(story: story) {
-                            selectedStory = story
-                        } onWant: {
-                            startMission(for: story)
+                    LazyVStack(spacing: 16) {
+                        ForEach(store.inspirationStories) { story in
+                            InspirationStoryCard(story: story) {
+                                selectedStory = story
+                            } onWant: {
+                                startMission(for: story)
+                            }
                         }
                     }
                 }
@@ -63,14 +75,27 @@ struct InspireView: View {
         .task {
             await store.refreshInspiration()
         }
+        .task(id: store.inspirationRelease?.status) {
+            guard store.inspirationRelease?.status == "preparing" else { return }
+            while !Task.isCancelled && store.inspirationRelease?.status == "preparing" {
+                try? await Task.sleep(for: .seconds(3))
+                await store.refreshInspiration()
+            }
+        }
         .refreshable {
-            await store.refreshInspiration(mood: mood)
+            await store.refreshInspiration()
         }
         .sheet(item: $selectedStory) { story in
             InspirationStoryDetail(story: story) {
                 selectedStory = nil
                 startMission(for: story)
             }
+        }
+    }
+
+    private func prepareCollection() {
+        Task {
+            await store.prepareInspiration(mood: mood)
         }
     }
 
@@ -83,6 +108,176 @@ struct InspireView: View {
                 inspirationID: story.id
             )
         }
+    }
+}
+
+private struct InspirationAnnouncementCard: View {
+    @Binding var mood: String
+    let release: InspirationRelease?
+    let isLoading: Bool
+    let onPrepare: () -> Void
+
+    private var isPreparing: Bool { release?.status == "preparing" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                Image(systemName: "sparkles.rectangle.stack.fill")
+                    .font(.title.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 58, height: 58)
+                    .background(.white.opacity(0.16))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                Spacer()
+                if isPreparing {
+                    Text("\(Int((release?.progress ?? 0) * 100))%")
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.82))
+                } else {
+                    Text("FIRST EDITION")
+                        .font(.caption2.weight(.black))
+                        .tracking(1.4)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
+
+            Spacer(minLength: 42)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text(isPreparing ? "Voya is preparing your collection" : "Some journeys begin before you know where to go.")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(isPreparing
+                     ? "Scout is finding the possibilities. Verifier checks the facts. The editor and curator will turn the strongest ones into a small travel edition."
+                     : "Tell us what you want to feel. Voya's agents will search for real moments, rare places, and beautiful reasons to leave home.")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.76))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if isPreparing {
+                VStack(spacing: 12) {
+                    ProgressView(value: release?.progress ?? 0)
+                        .tint(.white)
+                    ForEach(release?.agents ?? []) { agent in
+                        HStack(spacing: 10) {
+                            Image(systemName: agent.state == "complete" ? "checkmark.circle.fill" : agent.state == "working" ? "circle.dotted.circle.fill" : "circle")
+                                .foregroundStyle(agent.state == "complete" ? Color.voyaMint : .white.opacity(agent.state == "working" ? 1 : 0.42))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(agent.name).font(.caption.weight(.bold))
+                                Text(agent.detail).font(.caption2).foregroundStyle(.white.opacity(0.62))
+                            }
+                            Spacer()
+                        }
+                        .foregroundStyle(.white)
+                    }
+                }
+            } else {
+                VStack(spacing: 12) {
+                    TextField("Awe, silence, music, the ocean…", text: $mood)
+                        .font(.body.weight(.medium))
+                        .padding(.horizontal, 14)
+                        .frame(height: 50)
+                        .background(.white.opacity(0.94))
+                        .foregroundStyle(Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .submitLabel(.go)
+                        .onSubmit(onPrepare)
+
+                    Button(action: onPrepare) {
+                        HStack {
+                            Text(release?.status == "failed" ? "Try again" : "Prepare my first collection")
+                            Spacer()
+                            if isLoading {
+                                ProgressView().tint(Color.voyaInk)
+                            } else {
+                                Image(systemName: "arrow.right")
+                            }
+                        }
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                        .padding(.horizontal, 16)
+                        .frame(height: 52)
+                        .background(Color.voyaMint)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    .disabled(isLoading)
+
+                    if let error = release?.error {
+                        Text(error)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+                }
+            }
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, minHeight: 520, alignment: .topLeading)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [Color(red: 0.035, green: 0.09, blue: 0.16), Color(red: 0.03, green: 0.34, blue: 0.31)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Circle()
+                    .fill(Color.voyaTeal.opacity(0.28))
+                    .frame(width: 280, height: 280)
+                    .blur(radius: 2)
+                    .offset(x: 130, y: -190)
+                Circle()
+                    .fill(Color.voyaPlum.opacity(0.28))
+                    .frame(width: 220, height: 220)
+                    .blur(radius: 18)
+                    .offset(x: -160, y: 250)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .shadow(color: .black.opacity(0.18), radius: 28, y: 18)
+    }
+}
+
+private struct InspirationReadyHeader: View {
+    @Binding var mood: String
+    let curatorNote: String
+    let isLoading: Bool
+    let onPrepare: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("YOUR VOYA EDITION", systemImage: "checkmark.seal.fill")
+                .font(.caption.weight(.black))
+                .tracking(1.1)
+                .foregroundStyle(Color.voyaTeal)
+            Text(curatorNote)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(Color.voyaInk)
+            HStack(spacing: 10) {
+                TextField("A different mood…", text: $mood)
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 12)
+                    .frame(height: 44)
+                    .background(Color.voyaSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                Button(action: onPrepare) {
+                    if isLoading {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.subheadline.weight(.bold))
+                    }
+                }
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(Color.voyaInk)
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
     }
 }
 

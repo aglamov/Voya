@@ -29,7 +29,7 @@ The confirmed itinerary remains owned by SwiftData on the device. Agent requests
 
 ### `GET/POST /api/inspiration`
 
-Returns a small editorial feed. `POST` accepts a mood and uses AI only to rank supplied, verified candidates. The model cannot invent destinations, events, dates, prices, or source URLs. A deterministic curated feed is returned when OpenAI is unavailable.
+`POST` creates an asynchronous editorial release and queues Scout, Verifier, Story Editor, and Curator. `GET` returns the current preparation state or finished edition. The model can rank only supplied, verified candidates; it cannot invent dates, prices, or source URLs.
 
 ### `GET/POST/PATCH/DELETE /api/missions`
 
@@ -42,6 +42,14 @@ Accepts a minimal trip snapshot and performs deterministic checks for missing ti
 ### `POST /api/specialist-agents`
 
 Runs one bounded specialist against supplied context. The prompt forbids claims that an external action was performed and marks actions involving money, cancellation, communication, or reservations as approval-required.
+
+### `POST /api/agent-worker`
+
+Protected QStash destination that processes inspiration releases and missions, persists results, schedules the next recurring Guardian check, and delivers APNs results.
+
+### `GET/POST /api/agent-monitor`
+
+Protected recurring monitor that reads the Redis due-set and dispatches background missions. Flight and weather provider events can bypass the cadence and wake the relevant Guardian immediately.
 
 ## Specialist Responsibilities
 
@@ -61,4 +69,4 @@ The current implementation supports **observe**, **advise**, and **prepare**. It
 
 ## Production Evolution
 
-The current Redis mission store is suitable for the account-free MVP. PostgreSQL becomes appropriate when Voya adds multi-device accounts, collaborative trips, long-lived travel memory, mission history, or subscriptions. Inspiration candidates should later be supplied by provider adapters and an editorial review queue; AI should remain the curator and storyteller, not the source of truth.
+The current Redis mission store is suitable for the account-free MVP. PostgreSQL becomes appropriate when Voya adds multi-device accounts, collaborative trips, long-lived travel memory, mission history, or subscriptions. Ticketmaster is the first live Inspiration Scout adapter; nature and seasonal candidates currently come from a verified editorial seed. More provider adapters and an editorial review queue can expand that base, while AI remains the curator and storyteller rather than the source of truth.

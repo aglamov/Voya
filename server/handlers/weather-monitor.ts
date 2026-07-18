@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { timingSafeEqual } from "node:crypto";
 import { sendAPNsAlert } from "../../api/_apns.js";
+import { dispatchGuardianEvent } from "../../api/_agents.js";
 import { redisCommand, storageConfigured } from "../../api/_storage.js";
 import {
   currentWeatherAt,
@@ -184,6 +185,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               tripId: watch.tripId,
               itemId: watch.itemId
             }
+          });
+          await dispatchGuardianEvent(watch.tripId, {
+            provider: alert.provider,
+            eventType: "weather_alert",
+            alertId: alert.id,
+            severity: alert.severity,
+            title: alert.event,
+            description: compactDescription(alert.description),
+            startsAt: alert.startsAt,
+            endsAt: alert.endsAt,
+            itemId: watch.itemId
           });
           pushesSent += push.sent;
           errors.push(...push.errors);

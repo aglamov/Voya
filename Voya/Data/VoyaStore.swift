@@ -26,8 +26,9 @@ final class VoyaStore: ObservableObject {
     @Published var isConfirmingExtraction = false
     @Published var assistantIntelligenceCache: [String: AssistantIntelligence] = [:]
     @Published var refreshingAssistantIntelligenceKeys: Set<String> = []
-    @Published var inspirationStories: [InspirationStory] = InspirationStory.fallback
-    @Published var inspirationCuratorNote = String(localized: "A small collection of journeys worth wanting.")
+    @Published var inspirationStories: [InspirationStory] = []
+    @Published var inspirationCuratorNote = ""
+    @Published var inspirationRelease: InspirationRelease?
     @Published var isLoadingInspiration = false
     @Published var agentMissions: [AgentMission] = AgentMissionLocalStore.load()
     @Published var guardianReports: [UUID: GuardianReport] = [:]

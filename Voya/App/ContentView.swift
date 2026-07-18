@@ -12,7 +12,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var store: VoyaStore
-    @State private var selectedTab: VoyaTab = .trips
+    @State private var selectedTab: VoyaTab = .inspire
     @State private var pendingNotificationDestination: VoyaNotificationDestination?
 
     var body: some View {
@@ -84,6 +84,16 @@ struct ContentView: View {
     }
 
     private func openNotification(_ destination: VoyaNotificationDestination) {
+        if destination.eventType == "inspiration_ready" {
+            selectedTab = .inspire
+            Task { await store.refreshInspiration() }
+            return
+        }
+        if destination.eventType == "mission_result" {
+            selectedTab = .assistant
+            Task { await store.refreshAgentMissions() }
+            return
+        }
         selectedTab = .trips
 
         if let itemID = destination.itemID,

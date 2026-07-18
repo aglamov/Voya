@@ -286,9 +286,12 @@ enum AgentMissionKind: String, Codable, CaseIterable {
 }
 
 enum AgentMissionStatus: String, Codable {
+    case queued
     case active
+    case running
     case waiting
     case completed
+    case failed
     case cancelled
 }
 
@@ -303,6 +306,37 @@ struct AgentMission: Identifiable, Codable, Equatable {
     var createdAt: Date
     var updatedAt: Date
     var nextCheckAt: Date?
+    var assignedAgents: [String]?
+    var resultTitle: String?
+    var resultSummary: String?
+    var resultActions: [String]?
+    var requiresApproval: Bool?
+    var lastRunAt: Date?
+    var runCount: Int?
+    var lastError: String?
+}
+
+struct InspirationReleaseAgent: Identifiable, Codable, Equatable {
+    var id: String
+    var name: String
+    var state: String
+    var detail: String
+}
+
+struct InspirationRelease: Identifiable, Codable, Equatable {
+    var id: UUID
+    var status: String
+    var mood: String
+    var stage: String
+    var progress: Double
+    var requestedAt: Date
+    var updatedAt: Date
+    var readyAt: Date?
+    var curatorNote: String?
+    var stories: [InspirationStory]?
+    var usedAI: Bool?
+    var error: String?
+    var agents: [InspirationReleaseAgent]
 }
 
 enum AgentMissionLocalStore {
@@ -360,13 +394,16 @@ struct GuardianAgent: Identifiable, Codable, Equatable {
     var state: String
 }
 
-private struct InspirationFeedResponse: Decodable {
-    var curatorNote: String
-    var stories: [InspirationStory]
+private struct InspirationReleaseResponse: Decodable {
+    var release: InspirationRelease?
 }
 
 private struct MissionResponse: Decodable {
     var mission: AgentMission
+}
+
+private struct MissionsResponse: Decodable {
+    var missions: [AgentMission]
 }
 
 @MainActor
@@ -379,13 +416,25 @@ struct VoyaAgentService {
         self.baseURL = baseURL
     }
 
-    func inspiration(mood: String) async throws -> (stories: [InspirationStory], curatorNote: String) {
-        let data = try await request(path: "api/inspiration", method: "POST", body: ["mood": mood])
-        let feed = try decoder.decode(InspirationFeedResponse.self, from: data)
-        return (feed.stories, feed.curatorNote)
+    func prepareInspiration(mood: String) async throws -> InspirationRelease? {
+        struct Body: Encodable {
+            var mood: String
+            var deviceToken: String?
+        }
+        let data = try await request(
+            path: "api/inspiration",
+            method: "POST",
+            body: Body(mood: mood, deviceToken: VoyaPushRegistrationService.shared.currentDeviceToken)
+        )
+        return try decoder.decode(InspirationReleaseResponse.self, from: data).release
     }
 
-    func createMission(_ mission: AgentMission) async throws -> AgentMission {
+    func inspirationRelease() async throws -> InspirationRelease? {
+        let data = try await get(path: "api/inspiration")
+        return try decoder.decode(InspirationReleaseResponse.self, from: data).release
+    }
+
+    func createMission(_ mission: AgentMission, context: [String: String]) async throws -> AgentMission {
         struct Body: Encodable {
             var kind: AgentMissionKind
             var title: String
@@ -393,6 +442,8 @@ struct VoyaAgentService {
             var tripId: UUID?
             var inspirationId: String?
             var nextCheckAt: Date?
+            var deviceToken: String?
+            var context: [String: String]
         }
         let body = Body(
             kind: mission.kind,
@@ -400,9 +451,25 @@ struct VoyaAgentService {
             detail: mission.detail,
             tripId: mission.tripId,
             inspirationId: mission.inspirationId,
-            nextCheckAt: mission.nextCheckAt
+            nextCheckAt: mission.nextCheckAt,
+            deviceToken: VoyaPushRegistrationService.shared.currentDeviceToken,
+            context: context
         )
         let data = try await request(path: "api/missions", method: "POST", body: body)
+        return try decoder.decode(MissionResponse.self, from: data).mission
+    }
+
+    func missions() async throws -> [AgentMission] {
+        let data = try await get(path: "api/missions")
+        return try decoder.decode(MissionsResponse.self, from: data).missions
+    }
+
+    func updateMission(id: UUID, status: AgentMissionStatus) async throws -> AgentMission {
+        struct Body: Encodable {
+            var id: UUID
+            var status: AgentMissionStatus
+        }
+        let data = try await request(path: "api/missions", method: "PATCH", body: Body(id: id, status: status))
         return try decoder.decode(MissionResponse.self, from: data).mission
     }
 
@@ -464,6 +531,20 @@ struct VoyaAgentService {
         return data
     }
 
+    private func get(path: String) async throws -> Data {
+        guard let baseURL else { throw VercelExtractionError.notConfigured }
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        VoyaAPIConfiguration.authorize(&request)
+        request.httpMethod = "GET"
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.timeoutInterval = 20
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw VercelExtractionError.badResponse
+        }
+        return data
+    }
+
     private var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -493,19 +574,79 @@ struct VoyaAgentService {
 
 @MainActor
 extension VoyaStore {
-    func refreshInspiration(mood: String = "") async {
+    func refreshInspiration() async {
         guard !isLoadingInspiration else { return }
         isLoadingInspiration = true
         defer { isLoadingInspiration = false }
         do {
-            let feed = try await VoyaAgentService().inspiration(mood: mood)
-            inspirationStories = feed.stories
-            inspirationCuratorNote = feed.curatorNote
+            applyInspirationRelease(try await VoyaAgentService().inspirationRelease())
         } catch {
-            if inspirationStories.isEmpty {
-                inspirationStories = InspirationStory.fallback
-            }
+            // Keep the announcement or last ready release visible offline.
         }
+    }
+
+    func prepareInspiration(mood: String) async {
+        guard !isLoadingInspiration else { return }
+        isLoadingInspiration = true
+        inspirationStories = []
+        inspirationCuratorNote = ""
+        defer { isLoadingInspiration = false }
+        do {
+            applyInspirationRelease(try await VoyaAgentService().prepareInspiration(mood: mood))
+        } catch {
+            if case VercelExtractionError.notConfigured = error {
+                try? await Task.sleep(for: .seconds(1.2))
+                let now = Date()
+                let local = InspirationRelease(
+                    id: UUID(),
+                    status: "ready",
+                    mood: mood,
+                    stage: "ready",
+                    progress: 1,
+                    requestedAt: now,
+                    updatedAt: now,
+                    readyAt: now,
+                    curatorNote: String(localized: "A small offline preview of journeys worth wanting."),
+                    stories: InspirationStory.fallback,
+                    usedAI: false,
+                    error: nil,
+                    agents: [
+                        InspirationReleaseAgent(id: "scout", name: "Scout", state: "complete", detail: String(localized: "Found promising reasons to travel")),
+                        InspirationReleaseAgent(id: "verifier", name: "Verifier", state: "complete", detail: String(localized: "Checked the source evidence")),
+                        InspirationReleaseAgent(id: "editor", name: "Story Editor", state: "complete", detail: String(localized: "Prepared the travel stories")),
+                        InspirationReleaseAgent(id: "curator", name: "Curator", state: "complete", detail: String(localized: "Shaped the collection"))
+                    ]
+                )
+                applyInspirationRelease(local)
+                return
+            }
+            inspirationRelease = InspirationRelease(
+                id: UUID(),
+                status: "failed",
+                mood: mood,
+                stage: "failed",
+                progress: 0,
+                requestedAt: Date(),
+                updatedAt: Date(),
+                readyAt: nil,
+                curatorNote: nil,
+                stories: nil,
+                usedAI: false,
+                error: String(localized: "Voya could not start the collection yet. Try again when the backend is available."),
+                agents: []
+            )
+        }
+    }
+
+    private func applyInspirationRelease(_ release: InspirationRelease?) {
+        inspirationRelease = release
+        guard release?.status == "ready" else {
+            inspirationStories = []
+            inspirationCuratorNote = ""
+            return
+        }
+        inspirationStories = release?.stories ?? []
+        inspirationCuratorNote = release?.curatorNote ?? ""
     }
 
     @discardableResult
@@ -524,15 +665,24 @@ extension VoyaStore {
             kind: kind,
             title: title,
             detail: detail,
-            status: .active,
+            status: .queued,
             createdAt: now,
             updatedAt: now,
-            nextCheckAt: Calendar.current.date(byAdding: .hour, value: 6, to: now)
+            nextCheckAt: Calendar.current.date(byAdding: .hour, value: 6, to: now),
+            assignedAgents: nil,
+            resultTitle: nil,
+            resultSummary: nil,
+            resultActions: nil,
+            requiresApproval: nil,
+            lastRunAt: nil,
+            runCount: nil,
+            lastError: nil
         )
         agentMissions.insert(mission, at: 0)
         AgentMissionLocalStore.save(agentMissions)
         Task {
-            if let synced = try? await VoyaAgentService().createMission(mission),
+            let context = missionContext(tripID: tripID)
+            if let synced = try? await VoyaAgentService().createMission(mission, context: context),
                let index = agentMissions.firstIndex(where: { $0.id == mission.id }) {
                 agentMissions[index] = synced
                 AgentMissionLocalStore.save(agentMissions)
@@ -541,15 +691,60 @@ extension VoyaStore {
         return mission
     }
 
+    private func missionContext(tripID: UUID?) -> [String: String] {
+        guard let tripID, let trip = trips.first(where: { $0.id == tripID }) else {
+            return ["locale": Locale.current.identifier]
+        }
+        let stages = itinerary(for: trip).prefix(24).map { item in
+            [item.kind.rawValue, item.title, item.location, item.status, item.startsAt?.ISO8601Format() ?? "time unknown"]
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+        }.joined(separator: "\n")
+        return [
+            "locale": Locale.current.identifier,
+            "trip": trip.title,
+            "destination": trip.destination ?? "",
+            "dates": trip.displayDates,
+            "itinerary": stages
+        ]
+    }
+
     func completeMission(_ mission: AgentMission) {
         guard let index = agentMissions.firstIndex(where: { $0.id == mission.id }) else { return }
         agentMissions[index].status = .completed
         agentMissions[index].updatedAt = Date()
         AgentMissionLocalStore.save(agentMissions)
+        Task {
+            if let synced = try? await VoyaAgentService().updateMission(id: mission.id, status: .completed),
+               let syncedIndex = agentMissions.firstIndex(where: { $0.id == synced.id }) {
+                agentMissions[syncedIndex] = synced
+                AgentMissionLocalStore.save(agentMissions)
+            }
+        }
+    }
+
+    func refreshAgentMissions() async {
+        guard let remote = try? await VoyaAgentService().missions(), !remote.isEmpty else { return }
+        let localOnly = agentMissions.filter { local in !remote.contains(where: { $0.id == local.id }) }
+        agentMissions = (remote + localOnly).sorted { $0.updatedAt > $1.updatedAt }
+        AgentMissionLocalStore.save(agentMissions)
     }
 
     func refreshGuardian(for trip: Trip) async {
         guard !refreshingGuardianTripIDs.contains(trip.id) else { return }
+        if !agentMissions.contains(where: {
+            $0.kind == .guardian
+                && $0.tripId == trip.id
+                && $0.status != .cancelled
+                && $0.status != .failed
+        }) {
+            startMission(
+                kind: .guardian,
+                title: String(localized: "Keep \(trip.title) on track"),
+                detail: String(localized: "Watch the journey as a whole and surface only changes that affect the next useful decision."),
+                tripID: trip.id
+            )
+        }
         refreshingGuardianTripIDs.insert(trip.id)
         defer { refreshingGuardianTripIDs.remove(trip.id) }
         do {

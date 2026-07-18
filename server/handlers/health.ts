@@ -52,7 +52,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     cron: configured("CRON_SECRET", "WEATHER_MONITOR_SECRET"),
     clientProtection: configured("VOYA_CLIENT_API_KEY"),
     flightAwareWebhook: configured("FLIGHTAWARE_ALERT_WEBHOOK_SECRET"),
-    publicBaseURL: configured("VOYA_API_PUBLIC_BASE_URL")
+    publicBaseURL: configured("VOYA_API_PUBLIC_BASE_URL"),
+    agentQueue: configured("QSTASH_TOKEN"),
+    agentWorker: configured("AGENT_WORKER_SECRET"),
+    agentMonitor: configured("AGENT_MONITOR_SECRET", "CRON_SECRET")
   };
   let redisReachable = false;
   if (checks.redis) {

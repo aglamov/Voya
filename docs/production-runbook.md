@@ -1,6 +1,6 @@
 # Voya production runbook
 
-This is the release path for the current account-free MVP: Trips, Import, Assistant, live flights, routes, events, weather, and push notifications. The removed Inspire tab and later product tracks are not part of this release.
+This is the release path for the account-free Voya application: Inspiration editions, durable missions, Trip Guardian, specialist agents, Trips, Import, live flights, routes, events, weather, and push notifications.
 
 ## 1. Production services
 
@@ -15,6 +15,7 @@ This is the release path for the current account-free MVP: Trips, Import, Assist
 | Push delivery | Apple APNs | `.p8` key, key ID, team ID, bundle ID |
 | Hosting | Vercel Hobby | production deployment |
 | Weather schedule | Upstash QStash Free | ten-minute POST schedule and `WEATHER_MONITOR_SECRET` |
+| Agent jobs and recurring missions | Upstash QStash | publish token, worker secret, and monitor schedule |
 
 Use `.env.example` as the variable inventory. Store values only in Vercel and the relevant CI/Xcode secret store; never commit them.
 
@@ -22,7 +23,7 @@ Use `.env.example` as the variable inventory. Store values only in Vercel and th
 
 1. Link this repository to the existing Vercel project or run `vercel link` after `vercel login`.
 2. Add every required variable from `.env.example` to Production. Provider keys needed by previews may also be added to Preview.
-3. Use independent random values of at least 32 bytes for `WEATHER_MONITOR_SECRET`, `FLIGHTAWARE_ALERT_WEBHOOK_SECRET`, `VOYA_ADMIN_SECRET`, and `VOYA_CLIENT_API_KEY`.
+3. Use independent random values of at least 32 bytes for `WEATHER_MONITOR_SECRET`, `AGENT_WORKER_SECRET`, `AGENT_MONITOR_SECRET`, `FLIGHTAWARE_ALERT_WEBHOOK_SECRET`, `VOYA_ADMIN_SECRET`, and `VOYA_CLIENT_API_KEY`.
 4. Deploy production, then create the QStash schedule described below.
 5. Set a low Vercel spend notification and hard limit appropriate for the MVP.
 
@@ -57,7 +58,24 @@ Create the schedule with cron expression `*/10 * * * *`, destination `https://vo
 
 OpenWeather One Call 4.0 includes a finite free daily allowance. Start with the default limit of 12, inspect usage after TestFlight, and lower it if destinations become numerous. Invalid APNs tokens remove their weather watches automatically.
 
-## 6. Diagnostics
+## 6. Agent runtime
+
+Set `QSTASH_TOKEN` to the Upstash QStash publish token. Voya publishes jobs to `/api/agent-worker` with `Authorization: Bearer <AGENT_WORKER_SECRET>` forwarded by QStash.
+
+Create a second QStash schedule with cron expression `*/10 * * * *`, destination `https://voya-lime.vercel.app/api/agent-monitor`, method `POST`, and `Authorization: Bearer <AGENT_MONITOR_SECRET>`. The monitor dispatches due recurring Guardian missions. FlightAware and weather events can also wake the relevant Guardian immediately.
+
+When QStash is not configured outside production, initial jobs execute inline so local development remains usable. Production health requires QStash and both agent secrets.
+
+Manual agent monitor run:
+
+```bash
+curl --fail-with-body \
+  --request POST \
+  --url "https://voya-lime.vercel.app/api/agent-monitor" \
+  --header "Authorization: Bearer YOUR_AGENT_MONITOR_SECRET"
+```
+
+## 7. Diagnostics
 
 Configuration health, without secret values:
 
@@ -78,7 +96,7 @@ curl --fail-with-body \
 
 `/api/health` returns HTTP 200 only when every retained production provider, Redis, APNs production mode, weather-schedule protection, callback secret, and public URL are configured and Redis responds. It reports the optional shared client-key protection separately.
 
-## 7. Release smoke test
+## 8. Release smoke test
 
 1. Import a real but redacted flight/hotel confirmation and verify the review screen before saving.
 2. Confirm the flight is enriched with the expected route/date and that its alert watch reports subscribed.
@@ -88,7 +106,9 @@ curl --fail-with-body \
 6. Send one APNs test through the same production credentials or use a controlled FlightAware callback fixture.
 7. Check QStash delivery logs and Vercel function logs after at least one ten-minute interval.
 8. Verify `/api/health` returns HTTP 200.
+9. Open Inspiration on a fresh install, verify the announcement is initially empty, request a collection, observe the preparing state, and confirm the ready push opens the finished edition.
+10. Create a mission, verify `queued → running → completed/active`, and confirm its result appears in Assistant.
 
-## 8. App Store essentials
+## 9. App Store essentials
 
 Before external TestFlight or review, provide a public privacy policy and support URL, complete App Privacy answers for booking documents, diagnostics, approximate itinerary locations, and device identifiers, explain notification value before the system prompt, and include a clear disclaimer that weather and travel warnings supplement rather than replace official emergency and carrier information.

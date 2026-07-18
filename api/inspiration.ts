@@ -4,8 +4,16 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import { openAIModelFor } from "./_ai-models.js";
 import { protectPublicEndpoint } from "./_security.js";
+import { normalizeDeviceToken } from "./_storage.js";
+import {
+  enqueueAgentJob,
+  newInspirationRelease,
+  readInspirationRelease,
+  requestInstallId,
+  saveInspirationRelease
+} from "./_agents.js";
 
-type InspirationStory = {
+export type InspirationStory = {
   id: string;
   title: string;
   hook: string;
@@ -26,7 +34,7 @@ type InspirationStory = {
   confidence: number;
 };
 
-const STORIES: InspirationStory[] = [
+export const STORIES: InspirationStory[] = [
   {
     id: "lofoten-aurora",
     title: "Northern lights above the Lofoten Islands",
@@ -130,9 +138,81 @@ const STORIES: InspirationStory[] = [
 ];
 
 const curationSchema = z.object({
-  orderedIds: z.array(z.string()).min(1).max(STORIES.length),
+  orderedIds: z.array(z.string()).min(1).max(20),
   curatorNote: z.string().min(1).max(400)
 });
+
+type TicketmasterDiscoveryEvent = {
+  id?: string;
+  name?: string;
+  url?: string;
+  dates?: { start?: { localDate?: string; localTime?: string } };
+  classifications?: Array<{ segment?: { name?: string }; genre?: { name?: string } }>;
+  _embedded?: {
+    venues?: Array<{
+      name?: string;
+      city?: { name?: string };
+      country?: { name?: string; countryCode?: string };
+    }>;
+  };
+};
+
+async function ticketmasterStories(mood: string): Promise<InspirationStory[]> {
+  const apiKey = (process.env.TICKETMASTER_API_KEY ?? process.env.TICKETMASTER_CONSUMER_KEY)?.trim();
+  if (!apiKey) return [];
+  const now = new Date();
+  const end = new Date(now.getTime() + 270 * 24 * 60 * 60 * 1000);
+  const url = new URL("https://app.ticketmaster.com/discovery/v2/events.json");
+  url.searchParams.set("apikey", apiKey);
+  url.searchParams.set("classificationName", "music");
+  url.searchParams.set("size", "8");
+  url.searchParams.set("sort", "date,asc");
+  url.searchParams.set("includeTBA", "no");
+  url.searchParams.set("includeTBD", "no");
+  url.searchParams.set("startDateTime", now.toISOString().replace(/\.\d{3}Z$/, "Z"));
+  url.searchParams.set("endDateTime", end.toISOString().replace(/\.\d{3}Z$/, "Z"));
+  const normalizedMood = mood.trim();
+  if (normalizedMood && !/^(music|concert|festival|музыка|концерт|фестиваль)$/i.test(normalizedMood)) {
+    url.searchParams.set("keyword", normalizedMood);
+  }
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return [];
+    const data = await response.json() as { _embedded?: { events?: TicketmasterDiscoveryEvent[] } };
+    return (data._embedded?.events ?? []).flatMap((event): InspirationStory[] => {
+      const venue = event._embedded?.venues?.[0];
+      const name = event.name?.trim();
+      const city = venue?.city?.name?.trim();
+      const country = venue?.country?.name?.trim() ?? venue?.country?.countryCode?.trim();
+      const date = event.dates?.start?.localDate;
+      const sourceURL = event.url?.trim();
+      if (!name || !city || !country || !date || !sourceURL) return [];
+      const genre = event.classifications?.[0]?.genre?.name?.trim();
+      return [{
+        id: `ticketmaster-${event.id ?? Buffer.from(sourceURL).toString("base64url").slice(0, 24)}`,
+        title: `${name} — and a few days in ${city}`,
+        hook: `Build a journey around a real night of ${genre && genre !== "Undefined" ? genre.toLowerCase() : "live music"}, then let the city become the rest of the story.`,
+        destination: city,
+        country,
+        theme: "music",
+        moods: ["music", "event", "city", genre ?? "live"],
+        timing: date,
+        idealDays: 4,
+        whyNow: `${name} is scheduled for ${date}${venue?.name ? ` at ${venue.name}` : ""}. The event gives the trip a fixed centre without prescribing everything around it.`,
+        experience: [name, `A free day in ${city}`, "A neighbourhood evening away from the venue"],
+        practicalNotes: ["Verify ticket availability before arranging travel", "Keep the event confirmation separate from transport bookings"],
+        mainRisk: "Event dates and line-ups can change; Voya treats the organiser listing as evidence, not a guarantee.",
+        symbol: "music.note",
+        gradient: ["51336F", "D14F63"],
+        sourceTitle: `Ticketmaster — ${name}`,
+        sourceURL,
+        confidence: 0.96
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
 
 function localCuration(mood: string, savedThemes: string[]) {
   const tokens = `${mood} ${savedThemes.join(" ")}`.toLowerCase().split(/\W+/).filter(Boolean);
@@ -142,6 +222,32 @@ function localCuration(mood: string, savedThemes: string[]) {
     return right - left;
   });
   return { stories, curatorNote: mood ? `Ideas selected around “${mood}”.` : "A small collection of journeys worth wanting." };
+}
+
+export async function buildInspirationFeed(mood: string, savedThemes: string[] = []) {
+  const liveStories = await ticketmasterStories(mood);
+  const candidates = [...liveStories, ...STORIES];
+  const local = localCuration(mood, savedThemes);
+  let curated = { stories: [...liveStories, ...local.stories], curatorNote: local.curatorNote };
+  let usedAI = false;
+  if (mood && process.env.OPENAI_API_KEY) {
+    try {
+      const { object } = await generateObject({
+        model: openai(openAIModelFor("brief")),
+        schema: curationSchema,
+        system: "You are Voya's travel editor. Rank only the supplied verified story IDs. Never invent an event, date, price, or destination. Prefer a varied, emotionally coherent collection over generic popularity.",
+        prompt: JSON.stringify({ mood, savedThemes, candidates: candidates.map(({ id, title, hook, theme, moods, timing, mainRisk }) => ({ id, title, hook, theme, moods, timing, mainRisk })) })
+      });
+      const byId = new Map(candidates.map((story) => [story.id, story]));
+      const ordered = object.orderedIds.flatMap((id) => byId.get(id) ?? []);
+      const remainder = candidates.filter((story) => !object.orderedIds.includes(story.id));
+      curated = { stories: [...ordered, ...remainder], curatorNote: object.curatorNote };
+      usedAI = true;
+    } catch {
+      // The deterministic editorial feed is intentionally usable without AI.
+    }
+  }
+  return { ...curated, usedAI };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -156,31 +262,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     maxBodyBytes: 24_000
   }))) return;
 
+  const installId = requestInstallId(req);
+  if (req.method === "GET") {
+    const release = await readInspirationRelease(installId);
+    return res.status(200).json({ release: release ?? null });
+  }
+
   const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
   const mood = typeof body.mood === "string" ? body.mood.trim().slice(0, 160) : "";
   const savedThemes = Array.isArray(body.savedThemes)
     ? body.savedThemes.filter((item): item is string => typeof item === "string").slice(0, 12)
     : [];
-  let curated = localCuration(mood, savedThemes);
-  let usedAI = false;
-
-  if (req.method === "POST" && mood && process.env.OPENAI_API_KEY) {
-    try {
-      const { object } = await generateObject({
-        model: openai(openAIModelFor("brief")),
-        schema: curationSchema,
-        system: "You are Voya's travel editor. Rank only the supplied verified story IDs. Never invent an event, date, price, or destination. Prefer a varied, emotionally coherent collection over generic popularity.",
-        prompt: JSON.stringify({ mood, savedThemes, candidates: STORIES.map(({ id, title, hook, theme, moods, timing, mainRisk }) => ({ id, title, hook, theme, moods, timing, mainRisk })) })
-      });
-      const byId = new Map(STORIES.map((story) => [story.id, story]));
-      const ordered = object.orderedIds.flatMap((id) => byId.get(id) ?? []);
-      const remainder = STORIES.filter((story) => !object.orderedIds.includes(story.id));
-      curated = { stories: [...ordered, ...remainder], curatorNote: object.curatorNote };
-      usedAI = true;
-    } catch {
-      // The deterministic editorial feed is intentionally usable without AI.
-    }
+  const deviceToken = normalizeDeviceToken(body.deviceToken);
+  const release = newInspirationRelease(installId, mood, deviceToken);
+  await saveInspirationRelease(release);
+  const queued = await enqueueAgentJob({ type: "inspiration", installId, releaseId: release.id });
+  if (queued) {
+    return res.status(202).json({ release, queued: true });
   }
 
-  return res.status(200).json({ generatedAt: new Date().toISOString(), curatorNote: curated.curatorNote, stories: curated.stories, usedAI });
+  const curated = await buildInspirationFeed(mood, savedThemes);
+  const now = new Date().toISOString();
+  const ready = {
+    ...release,
+    status: "ready" as const,
+    stage: "ready" as const,
+    progress: 1,
+    updatedAt: now,
+    readyAt: now,
+    curatorNote: curated.curatorNote,
+    stories: curated.stories,
+    usedAI: curated.usedAI,
+    agents: release.agents.map((agent) => ({ ...agent, state: "complete" as const }))
+  };
+  await saveInspirationRelease(ready);
+
+  return res.status(200).json({ release: ready, queued: false });
 }

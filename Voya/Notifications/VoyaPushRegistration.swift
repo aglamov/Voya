@@ -51,6 +51,10 @@ final class VoyaPushRegistrationService {
         self.userDefaults = userDefaults
     }
 
+    var currentDeviceToken: String? {
+        userDefaults.string(forKey: deviceTokenKey)
+    }
+
     func registerDeviceToken(_ data: Data) async {
         let token = data.map { String(format: "%02x", $0) }.joined()
         let previousToken = userDefaults.string(forKey: deviceTokenKey)

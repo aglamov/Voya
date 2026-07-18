@@ -21,6 +21,32 @@ const resultSchema = z.object({
   confidence: z.number().min(0).max(1)
 });
 
+export type SpecialistAgent = z.infer<typeof agentSchema>["agent"];
+export type SpecialistResult = z.infer<typeof resultSchema>;
+
+export async function runSpecialistAgent(input: z.infer<typeof agentSchema>) {
+  if (!process.env.OPENAI_API_KEY) {
+    return {
+      result: {
+        title: `${input.agent} prepared the next step`,
+        summary: `The mission “${input.mission}” is active. Voya has recorded its context and will surface a meaningful change.`,
+        observations: [] as string[],
+        nextActions: ["Keep the mission active and refresh it when new trip evidence arrives."],
+        needsApproval: false,
+        confidence: 0.45
+      },
+      usedAI: false
+    };
+  }
+  const { object } = await generateObject({
+    model: openai(openAIModelFor("brief")),
+    schema: resultSchema,
+    system: `You are Voya's ${input.agent} travel specialist. Use only the supplied context. Separate facts from recommendations, admit missing evidence, and never claim that a booking or external action was performed. Any action with money, cancellation, communication, or reservation requires approval.`,
+    prompt: JSON.stringify(input)
+  });
+  return { result: object, usedAI: true };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -34,29 +60,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }))) return;
   const parsed = agentSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid agent run." });
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(200).json({
-      agent: parsed.data.agent,
-      result: {
-        title: `${parsed.data.agent} is ready`,
-        summary: "The mission was recorded, but AI analysis is not configured in this environment.",
-        observations: [],
-        nextActions: ["Keep the mission active and retry when the agent service is available."],
-        needsApproval: false,
-        confidence: 0.4
-      },
-      usedAI: false
-    });
-  }
-
   try {
-    const { object } = await generateObject({
-      model: openai(openAIModelFor("brief")),
-      schema: resultSchema,
-      system: `You are Voya's ${parsed.data.agent} travel specialist. Use only the supplied context. Separate facts from recommendations, admit missing evidence, and never claim that a booking or external action was performed. Any action with money, cancellation, communication, or reservation requires approval.`,
-      prompt: JSON.stringify(parsed.data)
-    });
-    return res.status(200).json({ agent: parsed.data.agent, result: object, usedAI: true });
+    const run = await runSpecialistAgent(parsed.data);
+    return res.status(200).json({ agent: parsed.data.agent, ...run });
   } catch {
     return res.status(502).json({ error: "The specialist could not complete this run." });
   }

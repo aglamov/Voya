@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sendAPNsAlert } from "./_apns.js";
+import { dispatchGuardianEvent } from "./_agents.js";
 import {
   fallbackPushTokens,
   flightWatchKey,
@@ -461,6 +462,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : testTokens.map((deviceToken) => ({ deviceToken }));
   const deliveryResults: Awaited<ReturnType<typeof sendAPNsAlert>>[] = [];
   let duplicateTargets = 0;
+  let guardianMissionsDispatched = 0;
+  if (shouldPush) {
+    const tripIds = [...new Set(targets.flatMap((target) => target.tripId ?? []))];
+    const dispatches = await Promise.all(tripIds.map((tripId) => dispatchGuardianEvent(tripId, {
+      provider: "flightaware",
+      eventType: normalized.eventType,
+      flightNumber,
+      flightDate: normalized.flightDate,
+      gate: normalized.gate,
+      timing: normalized.timing
+    })));
+    guardianMissionsDispatched = dispatches.reduce((sum, count) => sum + count, 0);
+  }
   if (shouldPush && targets.length) {
     for (let index = 0; index < targets.length; index += 10) {
       const batch = await Promise.all(targets.slice(index, index + 10).map(async (target) => {
@@ -532,6 +546,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       shouldPush: Boolean(shouldPush),
       matchedRegisteredDevices: storedTargets.length,
       matchedFallbackDevices: testTokens.length,
+      guardianMissionsDispatched,
       ...push
     }
   });

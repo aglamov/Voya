@@ -165,6 +165,12 @@ struct AssistantView: View {
         store.refreshingAssistantIntelligenceKeys.contains(intelligenceRefreshID)
     }
 
+    private var missionPollingID: String {
+        store.agentMissions
+            .map { "\($0.id.uuidString):\($0.status.rawValue):\($0.updatedAt.timeIntervalSince1970)" }
+            .joined(separator: "|")
+    }
+
     private var flightInsights: [TravelAlert] {
         let source = isRefreshingIntelligence
             ? progressiveFlightInsights
@@ -395,10 +401,18 @@ struct AssistantView: View {
         }
         .task(id: intelligenceRefreshID) {
             async let intelligenceTask: Void = refreshAssistantIntelligenceIfNeeded()
+            async let missionTask: Void = store.refreshAgentMissions()
             if let trip {
                 await store.refreshGuardian(for: trip)
             }
             await intelligenceTask
+            await missionTask
+        }
+        .task(id: missionPollingID) {
+            let hasRunningMission = store.agentMissions.contains { $0.status == .queued || $0.status == .running }
+            guard hasRunningMission else { return }
+            try? await Task.sleep(for: .seconds(3))
+            await store.refreshAgentMissions()
         }
     }
 
@@ -792,7 +806,9 @@ private struct AgentMissionBoardCard: View {
     @State private var draft = ""
 
     private var activeMissions: [AgentMission] {
-        missions.filter { $0.status == .active || $0.status == .waiting }
+        missions.filter {
+            $0.status == .queued || $0.status == .active || $0.status == .running || $0.status == .waiting
+        }
     }
 
     var body: some View {
@@ -860,7 +876,17 @@ private struct AgentMissionBoardCard: View {
                         Text(mission.detail)
                             .font(.caption)
                             .foregroundStyle(Color.voyaMuted)
-                            .lineLimit(2)
+                            .lineLimit(mission.resultSummary == nil ? 2 : 1)
+                        if let result = mission.resultSummary {
+                            Text(result)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(mission.requiresApproval == true ? Color.voyaGold : Color.voyaTeal)
+                                .lineLimit(3)
+                        } else {
+                            Text(missionStatus(mission))
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(Color.voyaTeal)
+                        }
                     }
                     Spacer(minLength: 4)
                     Button { onComplete(mission) } label: {
@@ -898,6 +924,18 @@ private struct AgentMissionBoardCard: View {
         guard !title.isEmpty else { return }
         onStart(.planning, title, String(localized: "Coordinator will route this mission to the right Voya specialists."))
         draft = ""
+    }
+
+    private func missionStatus(_ mission: AgentMission) -> String {
+        switch mission.status {
+        case .queued: String(localized: "Queued for Voya's team")
+        case .running: String(localized: "Agents are working")
+        case .active: String(localized: "Watching in the background")
+        case .waiting: String(localized: "Waiting for your decision")
+        case .completed: String(localized: "Completed")
+        case .failed: mission.lastError ?? String(localized: "Needs another attempt")
+        case .cancelled: String(localized: "Cancelled")
+        }
     }
 }
 

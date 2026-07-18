@@ -1,8 +1,8 @@
 import type { VercelRequest } from "@vercel/node";
 import { randomUUID } from "node:crypto";
-import { redisCommand, storageConfigured } from "./_storage.js";
+import { normalizeDeviceToken, redisCommand, storageConfigured } from "./_storage.js";
 
-export type AgentMissionStatus = "active" | "waiting" | "completed" | "cancelled";
+export type AgentMissionStatus = "queued" | "active" | "running" | "waiting" | "completed" | "failed" | "cancelled";
 
 export type AgentMission = {
   id: string;
@@ -13,10 +13,52 @@ export type AgentMission = {
   title: string;
   detail: string;
   status: AgentMissionStatus;
+  deviceToken?: string;
+  context?: Record<string, unknown>;
+  assignedAgents?: string[];
+  resultTitle?: string;
+  resultSummary?: string;
+  resultActions?: string[];
+  requiresApproval?: boolean;
+  lastRunAt?: string;
+  runCount?: number;
+  lastError?: string;
   createdAt: string;
   updatedAt: string;
   nextCheckAt?: string;
 };
+
+export type InspirationReleaseStatus = "preparing" | "ready" | "failed";
+
+export type InspirationRelease = {
+  id: string;
+  installId: string;
+  status: InspirationReleaseStatus;
+  mood: string;
+  deviceToken?: string;
+  stage: "scouting" | "verifying" | "editing" | "curating" | "ready" | "failed";
+  progress: number;
+  requestedAt: string;
+  updatedAt: string;
+  readyAt?: string;
+  curatorNote?: string;
+  stories?: unknown[];
+  usedAI?: boolean;
+  error?: string;
+  agents: Array<{
+    id: "scout" | "verifier" | "editor" | "curator";
+    name: string;
+    state: "waiting" | "working" | "complete" | "failed";
+    detail: string;
+  }>;
+};
+
+export type AgentJob =
+  | { type: "inspiration"; installId: string; releaseId: string }
+  | { type: "mission"; installId: string; missionId: string };
+
+const developmentMissions = new Map<string, AgentMission>();
+const developmentReleases = new Map<string, InspirationRelease>();
 
 export function requestInstallId(req: VercelRequest) {
   const raw = req.headers["x-voya-install-id"];
@@ -26,6 +68,10 @@ export function requestInstallId(req: VercelRequest) {
 
 function missionKey(installId: string) {
   return `voya:agent-missions:${installId}`;
+}
+
+function releaseKey(installId: string) {
+  return `voya:inspiration-release:${installId}`;
 }
 
 function parseHash(value: unknown): Array<[string, string]> {
@@ -44,7 +90,11 @@ function parseHash(value: unknown): Array<[string, string]> {
 }
 
 export async function listMissions(installId: string) {
-  if (!storageConfigured()) return [];
+  if (!storageConfigured()) {
+    return [...developmentMissions.values()]
+      .filter((mission) => mission.installId === installId)
+      .sort((lhs, rhs) => rhs.updatedAt.localeCompare(lhs.updatedAt));
+  }
   const raw = await redisCommand<unknown>(["HGETALL", missionKey(installId)]);
   return parseHash(raw).flatMap(([, value]) => {
     try {
@@ -56,7 +106,7 @@ export async function listMissions(installId: string) {
 }
 
 export async function readMission(installId: string, id: string) {
-  if (!storageConfigured()) return undefined;
+  if (!storageConfigured()) return developmentMissions.get(`${installId}:${id}`);
   const raw = await redisCommand<string>(["HGET", missionKey(installId), id]);
   if (!raw) return undefined;
   try {
@@ -67,16 +117,122 @@ export async function readMission(installId: string, id: string) {
 }
 
 export async function saveMission(mission: AgentMission) {
-  if (!storageConfigured()) return mission;
+  if (!storageConfigured()) {
+    developmentMissions.set(`${mission.installId}:${mission.id}`, mission);
+    return mission;
+  }
   const key = missionKey(mission.installId);
   await redisCommand(["HSET", key, mission.id, JSON.stringify(mission)]);
   await redisCommand(["EXPIRE", key, 180 * 24 * 60 * 60]);
+  const dueMember = `${mission.installId}:${mission.id}`;
+  if ((mission.status === "active" || mission.status === "queued") && mission.nextCheckAt) {
+    await redisCommand(["ZADD", "voya:agent-missions:due", Date.parse(mission.nextCheckAt), dueMember]);
+  } else {
+    await redisCommand(["ZREM", "voya:agent-missions:due", dueMember]);
+  }
+  if (mission.kind === "guardian" && mission.tripId) {
+    const tripKey = `voya:guardian-missions:trip:${mission.tripId}`;
+    if (mission.status === "cancelled" || mission.status === "completed" || mission.status === "failed") {
+      await redisCommand(["SREM", tripKey, dueMember]);
+    } else {
+      await redisCommand(["SADD", tripKey, dueMember]);
+      await redisCommand(["EXPIRE", tripKey, 180 * 24 * 60 * 60]);
+    }
+  }
   return mission;
+}
+
+export async function dispatchGuardianEvent(tripId: string | undefined, event: Record<string, unknown>) {
+  if (!tripId || !storageConfigured()) return 0;
+  const members = await redisCommand<string[]>(["SMEMBERS", `voya:guardian-missions:trip:${tripId}`]);
+  let dispatched = 0;
+  for (const member of members ?? []) {
+    const separator = member.indexOf(":");
+    const installId = member.slice(0, separator);
+    const missionId = member.slice(separator + 1);
+    const mission = await readMission(installId, missionId);
+    if (!mission || mission.status === "cancelled") continue;
+    mission.status = "queued";
+    mission.nextCheckAt = new Date().toISOString();
+    mission.updatedAt = new Date().toISOString();
+    mission.context = {
+      ...(mission.context ?? {}),
+      latestEvent: JSON.stringify(event).slice(0, 4_000)
+    };
+    await saveMission(mission);
+    if (await enqueueAgentJob({ type: "mission", installId, missionId })) dispatched += 1;
+  }
+  return dispatched;
+}
+
+export async function dueMissionMembers(now = Date.now(), limit = 20) {
+  if (!storageConfigured()) return [];
+  return await redisCommand<string[]>(["ZRANGEBYSCORE", "voya:agent-missions:due", 0, now, "LIMIT", 0, limit]) ?? [];
+}
+
+export async function readInspirationRelease(installId: string) {
+  if (!storageConfigured()) return developmentReleases.get(installId);
+  const raw = await redisCommand<string>(["GET", releaseKey(installId)]);
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as InspirationRelease;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function saveInspirationRelease(release: InspirationRelease) {
+  if (!storageConfigured()) {
+    developmentReleases.set(release.installId, release);
+    return release;
+  }
+  await redisCommand(["SET", releaseKey(release.installId), JSON.stringify(release), "EX", 90 * 24 * 60 * 60]);
+  return release;
+}
+
+export function newInspirationRelease(installId: string, mood: string, deviceToken?: string): InspirationRelease {
+  const now = new Date().toISOString();
+  return {
+    id: randomUUID(),
+    installId,
+    status: "preparing",
+    mood,
+    deviceToken: normalizeDeviceToken(deviceToken),
+    stage: "scouting",
+    progress: 0.08,
+    requestedAt: now,
+    updatedAt: now,
+    agents: [
+      { id: "scout", name: "Scout", state: "working", detail: "Finding promising reasons to travel" },
+      { id: "verifier", name: "Verifier", state: "waiting", detail: "Checking dates, place, and source evidence" },
+      { id: "editor", name: "Story Editor", state: "waiting", detail: "Turning facts into a travel story" },
+      { id: "curator", name: "Curator", state: "waiting", detail: "Shaping your first collection" }
+    ]
+  };
+}
+
+export async function enqueueAgentJob(job: AgentJob, delaySeconds = 0) {
+  const token = process.env.QSTASH_TOKEN?.trim();
+  const secret = process.env.AGENT_WORKER_SECRET?.trim();
+  const baseURL = process.env.VOYA_API_PUBLIC_BASE_URL?.trim().replace(/\/$/, "");
+  if (!token || !secret || !baseURL) return false;
+  const destination = `${baseURL}/api/agent-worker`;
+  const response = await fetch(`https://qstash.upstash.io/v2/publish/${encodeURIComponent(destination)}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "Upstash-Forward-Authorization": `Bearer ${secret}`,
+      ...(delaySeconds > 0 ? { "Upstash-Delay": `${Math.max(1, Math.floor(delaySeconds))}s` } : {})
+    },
+    body: JSON.stringify(job)
+  });
+  return response.ok;
 }
 
 export function newMission(
   installId: string,
-  input: Pick<AgentMission, "kind" | "title" | "detail"> & Partial<Pick<AgentMission, "tripId" | "inspirationId" | "nextCheckAt">>
+  input: Pick<AgentMission, "kind" | "title" | "detail"> & Partial<Pick<AgentMission, "tripId" | "inspirationId" | "nextCheckAt" | "deviceToken" | "context">>
 ): AgentMission {
   const now = new Date().toISOString();
   return {
@@ -87,11 +243,25 @@ export function newMission(
     kind: input.kind,
     title: input.title,
     detail: input.detail,
-    status: "active",
+    status: "queued",
+    deviceToken: normalizeDeviceToken(input.deviceToken),
+    context: input.context,
+    assignedAgents: agentsForMission(input.kind),
+    runCount: 0,
     createdAt: now,
     updatedAt: now,
     nextCheckAt: input.nextCheckAt
   };
+}
+
+function agentsForMission(kind: AgentMission["kind"]) {
+  switch (kind) {
+    case "guardian": return ["sentinel", "navigator", "clerk", "coordinator"];
+    case "inspiration": return ["scout", "coordinator"];
+    case "recovery": return ["recovery", "navigator", "coordinator"];
+    case "concierge": return ["concierge", "navigator", "coordinator"];
+    case "planning": return ["scout", "navigator", "coordinator"];
+  }
 }
 
 export function cleanText(value: unknown, maximum = 1_000) {
