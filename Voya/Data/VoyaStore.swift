@@ -5,6 +5,8 @@ import SwiftUI
 @MainActor
 final class VoyaStore: ObservableObject {
     static let pastedConfirmationSourceName = String(localized: "Pasted confirmation")
+    static let inspirationSourceName = String(localized: "Voya Inspiration")
+    static let inspirationMarkerPrefix = "voya-inspiration:"
 
     var modelContext: ModelContext?
 

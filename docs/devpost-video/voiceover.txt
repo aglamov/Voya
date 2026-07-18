@@ -1,0 +1,17 @@
+Meet Voya, the agentic travel companion that turns scattered confirmations into a verified, living journey — and tells travelers what to do next.
+
+Travel starts before a destination is chosen. In Inspiration, the traveler describes a feeling or occasion. Voya uses bounded agents to search, verify, and curate a small set of real possibilities. The user stays in control of what becomes a trip.
+
+After booking on any trusted service, a confirmation can arrive as a PDF, pasted text, screenshot, or photo. Voya extracts structured itinerary fields, keeps confidence visible, and asks for review instead of silently overwriting uncertain details.
+
+Confirmed items become one calm, time-zone-aware timeline. Flights, stays, transfers, and events are connected, so Voya can understand what is next and how one change affects the rest of the journey.
+
+Each itinerary item can be enriched with live operational context. Provider facts such as flight status, routes, weather, places, air quality, and pollen remain separate from model judgment. When data is missing, Voya degrades transparently instead of inventing an answer.
+
+Trip Guardian watches the journey as a whole. Specialist agents focus on bounded tasks such as flight disruption, mobility, booking completeness, recovery, discovery, and concierge support. They surface fewer, more actionable findings while the traveler keeps authority over every itinerary change.
+
+Voya is a native SwiftUI and SwiftData iPhone app with a TypeScript backend deployed on Vercel. GPT five point six powers structured extraction, travel briefs, second-pass risk assessment, and grounded recommendation explanations.
+
+Codex was the primary engineering collaborator during OpenAI Build Week. It helped design agent boundaries, implement Swift and TypeScript features, validate provider integrations, trace time-zone and data-merging bugs, run simulator builds, review diffs, and strengthen failure states across the product.
+
+Voya is not another booking platform. It is the calm operational layer around the services travelers already trust — from the first idea to the next best action.

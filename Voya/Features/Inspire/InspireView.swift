@@ -10,19 +10,26 @@ import Vision
 
 struct InspireView: View {
     @EnvironmentObject private var store: VoyaStore
+    @Binding var selectedTab: VoyaTab
     @State private var mood = ""
     @State private var selectedStory: InspirationStory?
+    @State private var storyToBuild: InspirationStory?
     @State private var createdMission: AgentMission?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
-                HeaderBar(title: "Inspiration", subtitle: "Journeys worth wanting")
+                HeaderBar(
+                    title: "Inspiration",
+                    subtitle: String(localized: "Tell Voya a feeling. Agents find a real reason to go.")
+                )
 
                 if store.inspirationRelease?.status == "ready" {
                     InspirationReadyHeader(
                         mood: $mood,
+                        originalMood: store.inspirationRelease?.mood ?? "",
                         curatorNote: store.inspirationCuratorNote,
+                        storyCount: store.inspirationStories.count,
                         isLoading: store.isLoadingInspiration
                     ) {
                         prepareCollection()
@@ -40,7 +47,7 @@ struct InspireView: View {
                 if let createdMission {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Mission started")
+                            Text("Agents are turning this idea into a trip")
                                 .font(.subheadline.weight(.bold))
                             Text(createdMission.title)
                                 .font(.caption.weight(.medium))
@@ -56,14 +63,21 @@ struct InspireView: View {
                 }
 
                 if !store.inspirationStories.isEmpty {
-                    SectionHeader(title: "Selected by Voya", action: "")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Start with these")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                        Text("Each idea has a reason to travel, a timing window, a source, and a risk worth knowing.")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.voyaMuted)
+                    }
 
                     LazyVStack(spacing: 16) {
                         ForEach(store.inspirationStories) { story in
                             InspirationStoryCard(story: story) {
                                 selectedStory = story
                             } onWant: {
-                                startMission(for: story)
+                                storyToBuild = story
                             }
                         }
                     }
@@ -88,25 +102,45 @@ struct InspireView: View {
         .sheet(item: $selectedStory) { story in
             InspirationStoryDetail(story: story) {
                 selectedStory = nil
-                startMission(for: story)
+                Task { @MainActor in
+                    await Task.yield()
+                    storyToBuild = story
+                }
+            }
+        }
+        .sheet(item: $storyToBuild) { story in
+            InspirationTripBuilderSheet(story: story) {
+                createTrip(from: story)
             }
         }
     }
 
     private func prepareCollection() {
         Task {
-            await store.prepareInspiration(mood: mood)
+            let brief = mood.trimmingCharacters(in: .whitespacesAndNewlines)
+            await store.prepareInspiration(
+                mood: brief.isEmpty ? String(localized: "Surprise me with something worth travelling for") : brief
+            )
         }
     }
 
-    private func startMission(for story: InspirationStory) {
+    private func createTrip(from story: InspirationStory) {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-            createdMission = store.startMission(
-                kind: .inspiration,
-                title: String(localized: "Shape a trip to \(story.destination)"),
-                detail: String(localized: "Turn “\(story.title)” into a realistic journey, verify the best timing, and surface the decisions that matter."),
-                inspirationID: story.id
-            )
+            let trip = store.createDraftTrip(from: story)
+            createdMission = store.agentMissions.first(where: {
+                $0.tripId == trip.id
+                    && $0.inspirationId == story.id
+                    && $0.status != .failed
+                    && $0.status != .cancelled
+            }) ?? store.startMission(
+                    kind: .planning,
+                    title: String(localized: "Prepare the first plan for \(story.destination)"),
+                    detail: String(localized: "Build a realistic \(story.idealDays)-day plan around “\(story.title)”. Use \(story.timing) as the timing window. Preserve the reason to travel, verify the route, and surface the decisions the traveller must confirm. Main known risk: \(story.mainRisk)"),
+                    tripID: trip.id,
+                    inspirationID: story.id
+                )
+            storyToBuild = nil
+            selectedTab = .trips
         }
     }
 }
@@ -118,6 +152,15 @@ private struct InspirationAnnouncementCard: View {
     let onPrepare: () -> Void
 
     private var isPreparing: Bool { release?.status == "preparing" }
+    private var suggestions: [String] {
+        [
+            String(localized: "Surprise me"),
+            String(localized: "See something extraordinary"),
+            String(localized: "Live music in a new city"),
+            String(localized: "Ocean and silence"),
+            String(localized: "Art, design and architecture")
+        ]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -134,30 +177,44 @@ private struct InspirationAnnouncementCard: View {
                         .font(.headline.monospacedDigit())
                         .foregroundStyle(.white.opacity(0.82))
                 } else {
-                    Text("FIRST EDITION")
+                    Text("START HERE")
                         .font(.caption2.weight(.black))
                         .tracking(1.4)
                         .foregroundStyle(.white.opacity(0.7))
                 }
             }
 
-            Spacer(minLength: 42)
-
             VStack(alignment: .leading, spacing: 10) {
-                Text(isPreparing ? "Voya is preparing your collection" : "Some journeys begin before you know where to go.")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                Text(isPreparing
+                     ? String(localized: "Agents are finding real reasons to travel")
+                     : String(localized: "What kind of journey do you want to feel?"))
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(isPreparing
-                     ? "Scout is finding the possibilities. Verifier checks the facts. The editor and curator will turn the strongest ones into a small travel edition."
-                     : "Tell us what you want to feel. Voya's agents will search for real moments, rare places, and beautiful reasons to leave home.")
+                     ? String(localized: "Your brief is saved. You can leave this tab — the finished shortlist will appear here and Voya can notify you when it is ready.")
+                     : String(localized: "Describe a mood or occasion, not a destination. Voya searches events, natural moments, culture, and remarkable places, then returns a short verified collection."))
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white.opacity(0.76))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             if isPreparing {
-                VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("YOUR BRIEF")
+                            .font(.caption2.weight(.black))
+                            .tracking(1)
+                            .foregroundStyle(.white.opacity(0.55))
+                        Text(release?.mood.nilIfEmpty ?? String(localized: "Surprise me with something worth travelling for"))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
                     ProgressView(value: release?.progress ?? 0)
                         .tint(.white)
                     ForEach(release?.agents ?? []) { agent in
@@ -172,10 +229,36 @@ private struct InspirationAnnouncementCard: View {
                         }
                         .foregroundStyle(.white)
                     }
+
+                    Label("No booking or budget estimate is created at this stage.", systemImage: "info.circle")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.66))
                 }
             } else {
-                VStack(spacing: 12) {
-                    TextField("Awe, silence, music, the ocean…", text: $mood)
+                VStack(alignment: .leading, spacing: 14) {
+                    InspirationHowItWorks()
+
+                    Text("Try a direction")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.68))
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(suggestions, id: \.self) { suggestion in
+                                Button { mood = suggestion } label: {
+                                    Text(suggestion)
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 12)
+                                        .frame(height: 36)
+                                        .background(.white.opacity(mood == suggestion ? 0.24 : 0.11))
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    TextField("For example: wonder, jazz, the ocean…", text: $mood)
                         .font(.body.weight(.medium))
                         .padding(.horizontal, 14)
                         .frame(height: 50)
@@ -187,7 +270,9 @@ private struct InspirationAnnouncementCard: View {
 
                     Button(action: onPrepare) {
                         HStack {
-                            Text(release?.status == "failed" ? "Try again" : "Prepare my first collection")
+                            Text(release?.status == "failed"
+                                 ? String(localized: "Ask the agents again")
+                                 : String(localized: "Ask agents to find ideas"))
                             Spacer()
                             if isLoading {
                                 ProgressView().tint(Color.voyaInk)
@@ -204,6 +289,10 @@ private struct InspirationAnnouncementCard: View {
                     }
                     .disabled(isLoading)
 
+                    Text("First we find a compelling reason to go. Dates, routes, and price decisions come after you choose an idea.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.62))
+
                     if let error = release?.error {
                         Text(error)
                             .font(.caption.weight(.medium))
@@ -213,7 +302,7 @@ private struct InspirationAnnouncementCard: View {
             }
         }
         .padding(22)
-        .frame(maxWidth: .infinity, minHeight: 520, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             ZStack {
                 LinearGradient(
@@ -238,23 +327,81 @@ private struct InspirationAnnouncementCard: View {
     }
 }
 
+private struct InspirationHowItWorks: View {
+    private var steps: [(String, String)] {
+        [
+            ("1", String(localized: "You describe a feeling or occasion")),
+            ("2", String(localized: "Agents search and verify real possibilities")),
+            ("3", String(localized: "You receive a small shortlist and choose what becomes a trip"))
+        ]
+    }
+
+    var body: some View {
+        VStack(spacing: 9) {
+            ForEach(steps, id: \.0) { step in
+                HStack(spacing: 11) {
+                    Text(step.0)
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(Color.voyaInk)
+                        .frame(width: 28, height: 28)
+                        .background(Color.voyaMint)
+                        .clipShape(Circle())
+                    Text(step.1)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.86))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+}
+
 private struct InspirationReadyHeader: View {
     @Binding var mood: String
+    let originalMood: String
     let curatorNote: String
+    let storyCount: Int
     let isLoading: Bool
     let onPrepare: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("YOUR VOYA EDITION", systemImage: "checkmark.seal.fill")
+            Label("COLLECTION READY", systemImage: "checkmark.seal.fill")
                 .font(.caption.weight(.black))
                 .tracking(1.1)
                 .foregroundStyle(Color.voyaTeal)
-            Text(curatorNote)
+            Text("\(storyCount) ideas checked by Voya's agents")
                 .font(.title3.weight(.bold))
                 .foregroundStyle(Color.voyaInk)
+            if !originalMood.isEmpty {
+                Text("Your brief: “\(originalMood)”")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaTeal)
+            }
+            Text(curatorNote)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.voyaMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                InspirationReadyCheck(title: String(localized: "Source"))
+                InspirationReadyCheck(title: String(localized: "Timing"))
+                InspirationReadyCheck(title: String(localized: "Place"))
+            }
+            Divider()
+            VStack(alignment: .leading, spacing: 9) {
+                Text("How an idea becomes a trip")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.voyaInk)
+                Text("Choose an idea → Voya creates a draft and starts the planning agents → you confirm dates and add real bookings.")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Want a different direction?")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaMuted)
             HStack(spacing: 10) {
-                TextField("A different mood…", text: $mood)
+                TextField("Describe another feeling…", text: $mood)
                     .font(.subheadline.weight(.medium))
                     .padding(.horizontal, 12)
                     .frame(height: 44)
@@ -264,12 +411,13 @@ private struct InspirationReadyHeader: View {
                     if isLoading {
                         ProgressView().tint(.white)
                     } else {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.subheadline.weight(.bold))
+                        Text("Refine")
+                            .font(.caption.weight(.bold))
                     }
                 }
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
+                .padding(.horizontal, 14)
+                .frame(height: 44)
                 .background(Color.voyaInk)
                 .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             }
@@ -278,6 +426,147 @@ private struct InspirationReadyHeader: View {
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+}
+
+private struct InspirationReadyCheck: View {
+    let title: String
+
+    var body: some View {
+        Label(title, systemImage: "checkmark.circle.fill")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(Color.voyaTeal)
+            .padding(.horizontal, 9)
+            .frame(maxWidth: .infinity, minHeight: 32)
+            .background(Color.voyaMint)
+            .clipShape(Capsule())
+    }
+}
+
+private struct InspirationTripBuilderSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let story: InspirationStory
+    let onCreate: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppBackground().ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 22) {
+                        VStack(alignment: .leading, spacing: 9) {
+                            Label("TURN THIS IDEA INTO A TRIP", systemImage: "arrow.triangle.branch")
+                                .font(.caption.weight(.black))
+                                .tracking(0.8)
+                                .foregroundStyle(Color.voyaTeal)
+                            Text(story.title)
+                                .font(.system(size: 30, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.voyaInk)
+                            Text("Nothing will be booked. Voya will create a working draft you can shape before spending anything.")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.voyaMuted)
+                        }
+
+                        VStack(spacing: 0) {
+                            InspirationBuildStep(
+                                number: "1",
+                                title: "Create a draft trip",
+                                detail: "The destination, reason to travel, suggested duration, timing window, source, and known risk are saved in Trips.",
+                                symbol: "doc.badge.plus"
+                            )
+                            InspirationBuildStep(
+                                number: "2",
+                                title: "Let planning agents prepare it",
+                                detail: "They turn the idea into a route, check the order of places, and identify the decisions that need your approval.",
+                                symbol: "point.3.connected.trianglepath.dotted"
+                            )
+                            InspirationBuildStep(
+                                number: "3",
+                                title: "Confirm dates and bookings",
+                                detail: "You choose the final dates and import real tickets or reservations. Only then does the draft become a confirmed itinerary.",
+                                symbol: "checkmark.seal"
+                            )
+                        }
+                        .background(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("WHAT VOYA ALREADY KNOWS", systemImage: "checkmark.circle.fill")
+                                .font(.caption2.weight(.black))
+                                .tracking(0.8)
+                                .foregroundStyle(Color.voyaTeal)
+                            buildFact("Destination", value: "\(story.destination), \(story.country)")
+                            buildFact("Timing window", value: story.timing)
+                            buildFact("Suggested length", value: String(localized: "\(story.idealDays) days"))
+                            buildFact("Reason", value: story.clearSelectionReason)
+                        }
+                        .padding(18)
+                        .background(Color.voyaMint)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+
+                        Button(action: onCreate) {
+                            Label("Create draft and start agents", systemImage: "sparkles")
+                                .font(.headline.weight(.bold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity, minHeight: 56)
+                                .background(Color.voyaInk)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(20)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Not now") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func buildFact(_ title: LocalizedStringKey, value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.voyaInk)
+                .frame(width: 104, alignment: .leading)
+            Text(value)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.voyaMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct InspirationBuildStep: View {
+    let number: String
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
+    let symbol: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 13) {
+            ZStack {
+                Circle().fill(Color.voyaMint)
+                Text(number)
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(Color.voyaInk)
+            }
+            .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Label(title, systemImage: symbol)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.voyaInk)
+                Text(detail)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.voyaMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
     }
 }
 
@@ -341,6 +630,31 @@ private struct InspirationEditorCard: View {
     }
 }
 
+private extension InspirationStory {
+    var clearSelectionReason: String {
+        if let selectionReason = selectionReason?.nilIfEmpty {
+            return selectionReason
+        }
+        switch theme {
+        case .music:
+            return String(localized: "A real performance gives the trip a clear centre and leaves room to discover the city around it.")
+        case .nature:
+            return String(localized: "The place supports a complete journey even if wildlife or conditions do not behave exactly as hoped.")
+        case .culture:
+            return String(localized: "A cultural programme gives this journey a stronger point of view than a generic city break.")
+        case .phenomenon:
+            return String(localized: "A natural phenomenon creates a genuine reason to travel now, not just another destination on a list.")
+        case .seasonal:
+            return String(localized: "The experience depends on a limited season, so timing shapes the whole journey.")
+        }
+    }
+
+    var clearVerificationSummary: String {
+        verificationSummary?.nilIfEmpty
+            ?? String(localized: "\(timing) · \(sourceTitle) · \(Int((confidence * 100).rounded()))% source confidence")
+    }
+}
+
 private struct InspirationStoryCard: View {
     let story: InspirationStory
     let onOpen: () -> Void
@@ -363,7 +677,7 @@ private struct InspirationStoryCard: View {
                     HStack {
                         Label(story.timing, systemImage: "calendar")
                         Spacer()
-                        Text("\(story.idealDays) days")
+                        Label("Verified", systemImage: "checkmark.seal.fill")
                     }
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white.opacity(0.84))
@@ -394,9 +708,30 @@ private struct InspirationStoryCard: View {
                     .foregroundStyle(Color.voyaMuted)
                     .fixedSize(horizontal: false, vertical: true)
 
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("WHY VOYA PICKED IT")
+                        .font(.caption2.weight(.black))
+                        .tracking(0.8)
+                        .foregroundStyle(Color.voyaTeal)
+                    Text(story.clearSelectionReason)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.voyaInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .background(Color.voyaMint)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                HStack(spacing: 6) {
+                    Label("\(story.idealDays) days", systemImage: "calendar.badge.clock")
+                    Label(story.agentChecks?.last ?? String(localized: "Source verified"), systemImage: "checkmark.circle")
+                }
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(Color.voyaMuted)
+
                 HStack(spacing: 10) {
                     Button(action: onOpen) {
-                        Label("Explore", systemImage: "book.pages")
+                        Label("See why", systemImage: "book.pages")
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(Color.voyaInk)
                             .frame(maxWidth: .infinity, minHeight: 46)
@@ -404,7 +739,7 @@ private struct InspirationStoryCard: View {
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     Button(action: onWant) {
-                        Label("I want this", systemImage: "sparkles")
+                        Label("Turn into a trip", systemImage: "arrow.triangle.branch")
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity, minHeight: 46)
@@ -444,6 +779,9 @@ private struct InspirationStoryDetail: View {
                             .font(.title3.weight(.medium))
                             .foregroundStyle(Color.voyaMuted)
 
+                        InspirationDetailSection(title: "Agent verdict", lines: [story.clearSelectionReason])
+                        InspirationDetailSection(title: "What was checked", lines: [story.clearVerificationSummary])
+
                         InspirationDetailSection(title: "Why this journey", lines: [story.whyNow])
                         InspirationDetailSection(title: "The experience", lines: story.experience)
                         InspirationDetailSection(title: "Know before you go", lines: story.practicalNotes + [story.mainRisk])
@@ -478,7 +816,7 @@ private struct InspirationStoryDetail: View {
                         .buttonStyle(.plain)
 
                         Button(action: onWant) {
-                            Label("Turn this into a mission", systemImage: "sparkles")
+                            Label("Turn into a trip", systemImage: "arrow.triangle.branch")
                                 .font(.headline.weight(.bold))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity, minHeight: 54)

@@ -105,7 +105,7 @@ async function processInspiration(job: Extract<AgentJob, { type: "inspiration" }
     await update("verifying", 0.45, "verifier");
     await update("editing", 0.68, "editor");
     await update("curating", 0.86, "curator");
-    const feed = await buildInspirationFeed(release.mood);
+    const feed = await buildInspirationFeed(release.mood, [], release.locale);
     const now = new Date().toISOString();
     const ready = {
       ...release,

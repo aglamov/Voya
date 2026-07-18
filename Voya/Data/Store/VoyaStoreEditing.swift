@@ -4,6 +4,59 @@ import SwiftUI
 
 @MainActor
 extension VoyaStore {
+    @discardableResult
+    func createDraftTrip(from story: InspirationStory) -> Trip {
+        let marker = Self.inspirationMarkerPrefix + story.id
+        if let existing = trips.first(where: { $0.rawData == marker }) {
+            selectedTripID = existing.id
+            return existing
+        }
+
+        let startDate = exactInspirationDate(story.timing)
+        let endDate = startDate.flatMap {
+            Calendar.current.date(byAdding: .day, value: max(0, story.idealDays - 1), to: $0)
+        }
+        let notes = [
+            String(localized: "Why now") + ":\n" + story.whyNow,
+            String(localized: "Known risk") + ":\n" + story.mainRisk,
+            String(localized: "Verified source") + ":\n" + story.sourceTitle + "\n" + story.sourceURL.absoluteString
+        ].joined(separator: "\n\n")
+        let trip = Trip(
+            title: story.title,
+            dates: story.timing,
+            summary: story.hook,
+            destination: story.destination,
+            destinationLocation: story.place?.address,
+            startsAt: startDate,
+            endsAt: endDate,
+            items: [],
+            sourceName: Self.inspirationSourceName,
+            notes: notes,
+            rawData: marker
+        )
+        modelContext?.insert(trip)
+        trips.insert(trip, at: 0)
+        selectedTripID = trip.id
+        saveTrips()
+        return trip
+    }
+
+    func isInspirationDraft(_ trip: Trip) -> Bool {
+        trip.rawData?.hasPrefix(Self.inspirationMarkerPrefix) == true && trip.items.isEmpty
+    }
+
+    private func exactInspirationDate(_ value: String) -> Date? {
+        guard value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: value)
+    }
+
     func deleteItineraryItem(_ item: ItineraryItem) {
         guard let trip = trips.first(where: { trip in
             trip.items.contains(where: { $0.id == item.id })

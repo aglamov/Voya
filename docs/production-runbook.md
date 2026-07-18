@@ -66,7 +66,7 @@ Create a second QStash schedule with cron expression `*/10 * * * *`, destination
 
 When QStash is not configured outside production, initial jobs execute inline so local development remains usable. Production health requires QStash and both agent secrets.
 
-Enable Places API (New), Air Quality API, and Pollen API in the Google Cloud project. Configure either a shared `GOOGLE_MAPS_API_KEY` or the restricted `GOOGLE_PLACES_API_KEY`, `GOOGLE_AIR_QUALITY_API_KEY`, and `GOOGLE_POLLEN_API_KEY` variables. The restricted-key setup is preferred: allow only the matching API on each key and restrict usage to the backend environment. `/api/health` reports each capability independently without exposing key values.
+Enable Places API (New), Air Quality API, and Pollen API in the Google Cloud project. The existing `GOOGLE_ROUTES_API_KEY` is reused automatically, so no additional Vercel variables are required when that key allows Routes API plus these three APIs. A shared `GOOGLE_MAPS_API_KEY` or separate service keys remain supported. Restrict the shared key to those four APIs and backend usage. `/api/health` performs real probe requests and reports each capability independently without exposing key values.
 
 Manual agent monitor run:
 

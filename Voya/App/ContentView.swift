@@ -23,7 +23,7 @@ struct ContentView: View {
             Group {
                 switch selectedTab {
                 case .inspire:
-                    InspireView()
+                    InspireView(selectedTab: $selectedTab)
                 case .trips:
                     TripsView(selectedTab: $selectedTab)
                 case .import:

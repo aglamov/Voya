@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { googleTravelContext } from "../../api/_google-context.js";
 import { redisCommand, storageConfigured } from "../../api/_storage.js";
 
 function firstHeader(value: string | string[] | undefined) {
@@ -45,9 +46,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     openWeather: configured("OPENWEATHER_API_KEY"),
     flightAware: configured("FLIGHTAWARE_AEROAPI_KEY"),
     googleRoutes: configured("GOOGLE_ROUTES_API_KEY", "GOOGLE_MAPS_API_KEY"),
-    googlePlaces: configured("GOOGLE_PLACES_API_KEY", "GOOGLE_MAPS_API_KEY"),
-    googleAirQuality: configured("GOOGLE_AIR_QUALITY_API_KEY", "GOOGLE_MAPS_API_KEY"),
-    googlePollen: configured("GOOGLE_POLLEN_API_KEY", "GOOGLE_MAPS_API_KEY"),
+    googlePlaces: configured("GOOGLE_PLACES_API_KEY", "GOOGLE_MAPS_API_KEY", "GOOGLE_ROUTES_API_KEY"),
+    googleAirQuality: configured("GOOGLE_AIR_QUALITY_API_KEY", "GOOGLE_MAPS_API_KEY", "GOOGLE_ROUTES_API_KEY"),
+    googlePollen: configured("GOOGLE_POLLEN_API_KEY", "GOOGLE_MAPS_API_KEY", "GOOGLE_ROUTES_API_KEY"),
     ticketmaster: configured("TICKETMASTER_API_KEY", "TICKETMASTER_CONSUMER_KEY"),
     redis: storageConfigured(),
     apns: configured("APNS_KEY_ID") && configured("APNS_TEAM_ID") && configured("APNS_PRIVATE_KEY") && configured("APNS_BUNDLE_ID"),
@@ -68,15 +69,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       redisReachable = false;
     }
   }
+  const googleProbe = checks.googlePlaces && checks.googleAirQuality && checks.googlePollen
+    ? await googleTravelContext("Googleplex, Mountain View, California", "en")
+    : undefined;
+  const googleReachable = {
+    googlePlacesReachable: Boolean(googleProbe && "data" in googleProbe.place),
+    googleAirQualityReachable: Boolean(googleProbe?.airQuality && "data" in googleProbe.airQuality),
+    googlePollenReachable: Boolean(googleProbe?.pollen && "data" in googleProbe.pollen)
+  };
 
   const requiredChecks = Object.entries(checks)
     .filter(([name]) => name !== "clientProtection")
     .map(([, value]) => value);
-  const ready = requiredChecks.every(Boolean) && redisReachable;
+  const ready = requiredChecks.every(Boolean) && redisReachable && Object.values(googleReachable).every(Boolean);
   return res.status(ready ? 200 : 503).json({
     ready,
     environment: process.env.VERCEL_ENV ?? "local",
-    checks: { ...checks, redisReachable },
+    checks: { ...checks, ...googleReachable, redisReachable },
     checkedAt: new Date().toISOString()
   });
 }

@@ -96,6 +96,39 @@ See [docs/flight-services.md](docs/flight-services.md) for the recommended fligh
 
 See [docs/mobility-services.md](docs/mobility-services.md) for the recommended route planning, transfer recommendation, maps provider, time-to-leave, and regional mobility strategy.
 
+## OpenAI Build Week: Codex and GPT-5.6
+
+Voya was developed for OpenAI Build Week with Codex as the primary engineering collaborator and GPT-5.6 as the reasoning layer behind the product's agentic travel workflows.
+
+Codex was used to:
+
+- Implement and refine the SwiftUI experience for Inspiration, Trips, Import, and Assistant.
+- Design the bounded multi-agent architecture behind Trip Guardian.
+- Build and debug the Vercel API routes and provider adapters.
+- Add tests, simulator validation, production diagnostics, and operational documentation.
+- Review failure states so missing provider data degrades visibly instead of becoming fabricated travel advice.
+
+GPT-5.6 is used at runtime to:
+
+- Extract structured itinerary data from pasted text and uploaded confirmations.
+- Repair malformed extraction output while preserving confidence and review flags.
+- Create concise trip briefs from itinerary and provider context.
+- Perform a second-pass risk assessment after deterministic itinerary checks.
+- Support specialist agents that reason over grounded flight, weather, mobility, place, air-quality, and pollen signals.
+
+The model does not book travel, make payments, or silently overwrite uncertain details. Provider facts and deterministic checks are kept separate from model judgment, and low-confidence fields remain visible for user review.
+
+## Quick Start for Judges
+
+Requirements: macOS with Xcode and an iOS 18+ simulator.
+
+1. Open `Voya.xcodeproj` in Xcode.
+2. Select the `Voya` scheme and an iPhone simulator.
+3. Build and run the app.
+4. Try Inspiration, import a confirmation as text or a file, then inspect the generated trip and Trip Guardian.
+
+The checked-in build configuration points to the deployed Vercel backend. If it is unavailable, confirmation import falls back to the built-in on-device parser so the core review flow remains testable. No judge credentials are required.
+
 ## Vercel AI Extraction
 
 The app calls a Vercel Function at `POST /api/extract` to recognize pasted or uploaded travel confirmations. The function calls OpenAI directly and returns normalized itinerary JSON for the review screen.
@@ -121,7 +154,7 @@ Optional enrichment environment variables:
 - `PEXELS_API_KEY`: enables curated landscape hero photos for trip destinations. The app falls back to Wikipedia when Pexels is unavailable or has no matching photo.
 - `FLIGHTAWARE_AEROAPI_KEY`: enables `GET/POST /api/flight-status` and `POST /api/booking-validation` through FlightAware AeroAPI for flight existence checks, airline schedules, gate assignments, gate times, baggage claim, delay fields, aircraft details, tracking data, and alert capability.
 - `GOOGLE_ROUTES_API_KEY` or `GOOGLE_MAPS_API_KEY`: enables `POST /api/mobility` through Google Routes API for live transfer duration, traffic-aware driving, public transit, walking, cycling, route comparison, and time-to-leave planning.
-- `GOOGLE_PLACES_API_KEY`, `GOOGLE_AIR_QUALITY_API_KEY`, and `GOOGLE_POLLEN_API_KEY`: enable Google place verification, current Universal AQI, and the three-day pollen outlook. A shared server-side `GOOGLE_MAPS_API_KEY` can be used instead, although separate restricted keys make quotas and incident response easier to control. Enable Places API (New), Air Quality API, and Pollen API in the same Google Cloud project.
+- `GOOGLE_PLACES_API_KEY`, `GOOGLE_AIR_QUALITY_API_KEY`, and `GOOGLE_POLLEN_API_KEY`: optionally enable separate Google credentials for place verification, current Universal AQI, and the three-day pollen outlook. If they are absent, Voya reuses the existing server-side `GOOGLE_MAPS_API_KEY` or `GOOGLE_ROUTES_API_KEY`, so one key can power all Google integrations when Places API (New), Air Quality API, Pollen API, and Routes API are enabled for it.
 - `UBER_CLIENT_ID` and `UBER_CLIENT_SECRET`: optional Uber developer credentials. `GET /api/uber-diagnostics` checks whether OAuth and estimates/products endpoints are accessible without exposing secrets.
 - `VOYA_API_PUBLIC_BASE_URL`: required public backend URL used for the FlightAware callback endpoint, for example `https://voya-lime.vercel.app`.
 - `FLIGHTAWARE_ALERT_WEBHOOK_SECRET`: required shared secret for `POST /api/flightaware-alerts`.
@@ -149,7 +182,7 @@ Google travel context:
 - `POST /api/enrich` resolves a hotel, venue, airport, or destination through Places Text Search and adds Google Places, air-quality, and pollen cards when the corresponding APIs are configured.
 - `POST /api/guardian` evaluates the most relevant upcoming itinerary location and attributes air and pollen findings to Sentinel. Provider failures are omitted instead of replacing deterministic itinerary checks.
 - Inspiration stories are enriched with a verified Google Maps destination handoff after the Curator orders the collection. Recurring missions receive the same provider context before a specialist runs.
-- Results use short-lived in-memory caches and narrow Places field masks. Keep Google keys server-side, apply API restrictions, and preserve Google attribution in the UI.
+- Results use short-lived in-memory caches and narrow Places field masks. Keep the shared Google key server-side, restrict it to the four enabled APIs, and preserve Google attribution in the UI. The protected `/api/health` endpoint makes real low-volume probe requests and reports reachability for Places, Air Quality, and Pollen separately.
 
 Destination image endpoint:
 

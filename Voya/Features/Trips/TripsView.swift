@@ -85,6 +85,18 @@ struct TripsView: View {
                         await store.loadHeroImageIfNeeded(for: trip)
                     }
 
+                    if store.isInspirationDraft(trip) {
+                        InspirationDraftStatusCard(
+                            mission: store.agentMissions.first(where: {
+                                $0.tripId == trip.id && $0.inspirationId != nil
+                            })
+                        ) {
+                            selectedTab = .assistant
+                        } onImport: {
+                            selectedTab = .import
+                        }
+                    }
+
                     if displayedTrips.count > 1 {
                         if tripListMode == .archive {
                             Menu {
@@ -693,6 +705,90 @@ struct TripsView: View {
         hiddenTransferIDsRaw = remainingIDs.sorted().joined(separator: "\n")
     }
 
+}
+
+private struct InspirationDraftStatusCard: View {
+    let mission: AgentMission?
+    let onOpenAgents: () -> Void
+    let onImport: () -> Void
+
+    private var agentStateTitle: String {
+        switch mission?.status {
+        case .completed?: String(localized: "Agent plan ready")
+        case .waiting?: String(localized: "Your decision is needed")
+        case .failed?: String(localized: "Agents need another attempt")
+        default: String(localized: "Agents working")
+        }
+    }
+
+    private var agentStateSymbol: String {
+        switch mission?.status {
+        case .completed?: "checkmark.circle.fill"
+        case .waiting?: "questionmark.circle.fill"
+        case .failed?: "exclamationmark.circle.fill"
+        default: "circle.dotted.circle.fill"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("DRAFT FROM INSPIRATION", systemImage: "sparkles")
+                .font(.caption2.weight(.black))
+                .tracking(0.8)
+                .foregroundStyle(Color.voyaTeal)
+            Text("This is now a trip — but not a confirmed itinerary yet")
+                .font(.headline)
+                .foregroundStyle(Color.voyaInk)
+            Text("The idea, destination, timing window, and source are saved. Planning agents are preparing the route and decisions. Confirm dates and add real bookings when you are ready.")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.voyaMuted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 7) {
+                draftState(String(localized: "Idea saved"), symbol: "checkmark.circle.fill", active: true)
+                draftState(agentStateTitle, symbol: agentStateSymbol, active: mission?.status != .failed)
+                draftState(String(localized: "Bookings"), symbol: "circle", active: false)
+            }
+
+            HStack(spacing: 10) {
+                Button(action: onOpenAgents) {
+                    Label(
+                        mission?.resultSummary == nil
+                            ? String(localized: "View agent progress")
+                            : String(localized: "View agent plan"),
+                        systemImage: "point.3.connected.trianglepath.dotted"
+                    )
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Color.voyaMint)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+                Button(action: onImport) {
+                    Label("Add a booking", systemImage: "tray.and.arrow.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Color.voyaInk)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private func draftState(_ title: String, symbol: String, active: Bool) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(active ? Color.voyaTeal : Color.voyaMuted)
+            .frame(maxWidth: .infinity, minHeight: 34)
+            .background(active ? Color.voyaMint : Color.voyaSurface)
+            .clipShape(Capsule())
+    }
 }
 
 struct RestoreHiddenTransfersCard: View {

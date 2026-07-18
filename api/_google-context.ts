@@ -59,7 +59,7 @@ function providerKey(service: "places" | "air" | "pollen") {
     : service === "air"
       ? process.env.GOOGLE_AIR_QUALITY_API_KEY
       : process.env.GOOGLE_POLLEN_API_KEY;
-  return (specific ?? process.env.GOOGLE_MAPS_API_KEY)?.trim();
+  return (specific ?? process.env.GOOGLE_MAPS_API_KEY ?? process.env.GOOGLE_ROUTES_API_KEY)?.trim();
 }
 
 export function googleContextConfigured(service?: "places" | "air" | "pollen") {

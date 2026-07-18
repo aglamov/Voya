@@ -35,6 +35,7 @@ export type InspirationRelease = {
   installId: string;
   status: InspirationReleaseStatus;
   mood: string;
+  locale?: string;
   deviceToken?: string;
   stage: "scouting" | "verifying" | "editing" | "curating" | "ready" | "failed";
   progress: number;
@@ -190,23 +191,53 @@ export async function saveInspirationRelease(release: InspirationRelease) {
   return release;
 }
 
-export function newInspirationRelease(installId: string, mood: string, deviceToken?: string): InspirationRelease {
+export function newInspirationRelease(installId: string, mood: string, deviceToken?: string, locale = "en"): InspirationRelease {
   const now = new Date().toISOString();
+  const russian = locale.toLowerCase().startsWith("ru");
   return {
     id: randomUUID(),
     installId,
     status: "preparing",
     mood,
+    locale,
     deviceToken: normalizeDeviceToken(deviceToken),
     stage: "scouting",
     progress: 0.08,
     requestedAt: now,
     updatedAt: now,
     agents: [
-      { id: "scout", name: "Scout", state: "working", detail: "Finding promising reasons to travel" },
-      { id: "verifier", name: "Verifier", state: "waiting", detail: "Checking dates, place, and source evidence" },
-      { id: "editor", name: "Story Editor", state: "waiting", detail: "Turning facts into a travel story" },
-      { id: "curator", name: "Curator", state: "waiting", detail: "Shaping your first collection" }
+      {
+        id: "scout",
+        name: russian ? "Исследователь" : "Scout",
+        state: "working",
+        detail: russian
+          ? "Ищет события, природные явления, культурные поводы и удивительные места"
+          : "Searching live events, natural moments, culture, and remarkable places"
+      },
+      {
+        id: "verifier",
+        name: russian ? "Проверяющий" : "Verifier",
+        state: "waiting",
+        detail: russian
+          ? "Проверяет источник, время, место и реальность повода для поездки"
+          : "Checking the source, timing, destination, and whether the reason is real"
+      },
+      {
+        id: "editor",
+        name: russian ? "Редактор историй" : "Story Editor",
+        state: "waiting",
+        detail: russian
+          ? "Объясняет, почему поездка того стоит, и называет главный риск"
+          : "Explaining why the journey is worth taking and naming the main risk"
+      },
+      {
+        id: "curator",
+        name: russian ? "Куратор" : "Curator",
+        state: "waiting",
+        detail: russian
+          ? "Сравнивает варианты, убирает повторы и оставляет самые сильные"
+          : "Comparing candidates, removing repetition, and keeping only the strongest"
+      }
     ]
   };
 }

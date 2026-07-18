@@ -192,6 +192,91 @@ struct AssistantView: View {
         }
     }
 
+    private var displayedRecommendations: [AssistantRecommendation] {
+        var candidates = intelligence.recommendations.filter { recommendation in
+            let id = recommendation.id.lowercased()
+            return !id.contains("check-in-")
+                && !id.contains("boarding-pass-")
+                && !id.contains("flight-reliability-")
+                && !id.contains("flight-plane-")
+                && !id.contains("flight-status-pending-")
+                && !id.contains("weather-trip-prep")
+        }
+
+        if let report = trip.flatMap({ store.guardianReports[$0.id] }) {
+            candidates.append(contentsOf: report.findings.compactMap { finding in
+                guard finding.severity == "action" || finding.severity == "watch" else { return nil }
+                return AssistantRecommendation(
+                    id: "guardian-\(finding.id)",
+                    urgency: finding.severity == "action" ? .now : .soon,
+                    title: finding.title,
+                    detail: finding.detail,
+                    symbol: finding.severity == "action" ? "exclamationmark.circle.fill" : "shield.lefthalf.filled",
+                    itemID: finding.itemId
+                )
+            })
+        }
+
+        candidates.sort { lhs, rhs in
+            let rank: (AssistantRecommendationUrgency) -> Int = { urgency in
+                switch urgency {
+                case .now: 0
+                case .soon: 1
+                case .later: 2
+                }
+            }
+            return rank(lhs.urgency) == rank(rhs.urgency)
+                ? lhs.title < rhs.title
+                : rank(lhs.urgency) < rank(rhs.urgency)
+        }
+
+        var result: [AssistantRecommendation] = []
+        for candidate in candidates {
+            let meaning = "\(candidate.title) \(candidate.detail)"
+            guard !result.contains(where: {
+                assistantMeaningfullyMatches("\($0.title) \($0.detail)", meaning)
+            }) else { continue }
+            result.append(candidate)
+            if result.count == 4 { break }
+        }
+        return result
+    }
+
+    private var displayedEnvironment: [AssistantEnvironmentSignal] {
+        var result: [AssistantEnvironmentSignal] = []
+        for signal in intelligence.environment where signal.kind != .place {
+            let meaning = "\(signal.title) \(signal.value) \(signal.detail ?? "")"
+            let repeatsAction = displayedRecommendations.contains {
+                assistantMeaningfullyMatches("\($0.title) \($0.detail)", meaning)
+            }
+            let repeatsSignal = result.contains {
+                assistantMeaningfullyMatches("\($0.title) \($0.value) \($0.detail ?? "")", meaning)
+            }
+            guard !repeatsAction, !repeatsSignal else { continue }
+            result.append(signal)
+            if result.count == 4 { break }
+        }
+        return result
+    }
+
+    private var displayedFlightInsights: [TravelAlert] {
+        var result: [TravelAlert] = []
+        for insight in flightInsights {
+            let meaning = "\(insight.title) \(insight.message)"
+            let alreadyShown = displayedRecommendations.contains {
+                assistantMeaningfullyMatches("\($0.title) \($0.detail)", meaning)
+            } || displayedEnvironment.contains {
+                assistantMeaningfullyMatches("\($0.title) \($0.value) \($0.detail ?? "")", meaning)
+            } || result.contains {
+                assistantMeaningfullyMatches("\($0.title) \($0.message)", meaning)
+            }
+            guard !alreadyShown else { continue }
+            result.append(insight)
+            if result.count == 3 { break }
+        }
+        return result
+    }
+
     private var conversationCard: some View {
         AssistantConversationCard(
             question: $assistantQuestion,
@@ -250,15 +335,6 @@ struct AssistantView: View {
                         Task { await store.refreshGuardian(for: trip) }
                     }
 
-                    AgentMissionBoardCard(
-                        trip: trip,
-                        missions: store.agentMissions.filter { $0.tripId == nil || $0.tripId == trip.id },
-                        onStart: { kind, title, detail in
-                            store.startMission(kind: kind, title: title, detail: detail, tripID: trip.id)
-                        },
-                        onComplete: store.completeMission
-                    )
-
                     AssistantSyncStatusCard(
                         stage: processingStage,
                         isRefreshing: isRefreshingIntelligence || intelligence.isPlaceholder,
@@ -286,10 +362,16 @@ struct AssistantView: View {
                         .buttonStyle(.plain)
                     }
 
-                    conversationCard
+                    AssistantActionPlanCard(recommendations: displayedRecommendations) { recommendation in
+                        guard let itemID = recommendation.itemID,
+                              let item = itinerary.first(where: { $0.id == itemID }) else {
+                            return
+                        }
+                        itemBeingViewed = item
+                    }
 
-                    if !intelligence.environment.isEmpty {
-                        AssistantEnvironmentCard(signals: intelligence.environment) { signal in
+                    if !displayedEnvironment.isEmpty {
+                        AssistantEnvironmentCard(signals: displayedEnvironment) { signal in
                             if let actionURL = signal.actionURL {
                                 openURL(actionURL)
                             } else if let itemID = signal.itemID,
@@ -299,13 +381,16 @@ struct AssistantView: View {
                         }
                     }
 
-                    AssistantActionPlanCard(recommendations: intelligence.recommendations) { recommendation in
-                        guard let itemID = recommendation.itemID,
-                              let item = itinerary.first(where: { $0.id == itemID }) else {
-                            return
-                        }
-                        itemBeingViewed = item
-                    }
+                    conversationCard
+
+                    AgentMissionBoardCard(
+                        trip: trip,
+                        missions: store.agentMissions.filter { $0.tripId == nil || $0.tripId == trip.id },
+                        onStart: { kind, title, detail in
+                            store.startMission(kind: kind, title: title, detail: detail, tripID: trip.id)
+                        },
+                        onComplete: store.completeMission
+                    )
                 } else {
                     EmptyTripsCard(
                         title: "No trip to watch",
@@ -315,16 +400,8 @@ struct AssistantView: View {
                     conversationCard
                 }
 
-                if trip != nil {
-                    AssistantTripRisksCard(
-                        alerts: intelligence.alerts,
-                        aiAdvice: isRefreshingIntelligence ? nil : intelligence.aiAdvice,
-                        isRefreshing: isRefreshingIntelligence
-                    )
-                }
-
-                if !flightInsights.isEmpty {
-                    AssistantFlightInsightsCard(insights: flightInsights)
+                if !displayedFlightInsights.isEmpty {
+                    AssistantFlightInsightsCard(insights: displayedFlightInsights)
                 }
 
                 if !checkInActions.isEmpty {
@@ -769,25 +846,17 @@ private struct TripGuardianCard: View {
                 HStack(spacing: 8) {
                     Label("\(report.watchCount) watched", systemImage: "eye")
                     Label("\(report.agents.count) agents", systemImage: "point.3.connected.trianglepath.dotted")
+                    if !attentionFindings.isEmpty {
+                        Label("\(attentionFindings.count) to review", systemImage: "checklist")
+                    }
                 }
                 .font(.caption.weight(.bold))
                 .foregroundStyle(Color.voyaInk)
 
-                ForEach(report.findings.prefix(3)) { finding in
-                    HStack(alignment: .top, spacing: 10) {
-                        Circle()
-                            .fill(finding.severity == "action" ? Color.voyaCoral : finding.severity == "watch" ? Color.voyaGold : Color.voyaTeal)
-                            .frame(width: 8, height: 8)
-                            .padding(.top, 5)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(finding.title)
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(Color.voyaInk)
-                            Text(finding.detail)
-                                .font(.caption)
-                                .foregroundStyle(Color.voyaMuted)
-                        }
-                    }
+                if !attentionFindings.isEmpty {
+                    Label("Important findings are merged into What to do next below.", systemImage: "arrow.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(accent)
                 }
             }
         }
@@ -795,6 +864,10 @@ private struct TripGuardianCard: View {
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+    }
+
+    private var attentionFindings: [GuardianFinding] {
+        report?.findings.filter { $0.severity == "action" || $0.severity == "watch" } ?? []
     }
 }
 
@@ -809,6 +882,12 @@ private struct AgentMissionBoardCard: View {
         missions.filter {
             $0.status == .queued || $0.status == .active || $0.status == .running || $0.status == .waiting
         }
+    }
+
+    private var visibleMissions: [AgentMission] {
+        missions
+            .filter { $0.status != .cancelled && $0.status != .failed }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     var body: some View {
@@ -860,7 +939,7 @@ private struct AgentMissionBoardCard: View {
                 }
             }
 
-            ForEach(activeMissions.prefix(4)) { mission in
+            ForEach(visibleMissions.prefix(4)) { mission in
                 HStack(spacing: 11) {
                     Image(systemName: mission.kind.symbol)
                         .font(.subheadline.weight(.bold))
@@ -882,6 +961,12 @@ private struct AgentMissionBoardCard: View {
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(mission.requiresApproval == true ? Color.voyaGold : Color.voyaTeal)
                                 .lineLimit(3)
+                            ForEach((mission.resultActions ?? []).prefix(2), id: \.self) { action in
+                                Label(action, systemImage: "arrow.right.circle")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(Color.voyaMuted)
+                                    .lineLimit(2)
+                            }
                         } else {
                             Text(missionStatus(mission))
                                 .font(.caption2.weight(.bold))
@@ -889,12 +974,14 @@ private struct AgentMissionBoardCard: View {
                         }
                     }
                     Spacer(minLength: 4)
-                    Button { onComplete(mission) } label: {
-                        Image(systemName: "checkmark.circle")
-                            .font(.headline)
-                            .foregroundStyle(Color.voyaMuted)
+                    if mission.status != .completed {
+                        Button { onComplete(mission) } label: {
+                            Image(systemName: "checkmark.circle")
+                                .font(.headline)
+                                .foregroundStyle(Color.voyaMuted)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1264,10 +1351,10 @@ struct AssistantEnvironmentCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Around this stage")
+                    Text("Useful context")
                         .font(.headline)
                         .foregroundStyle(Color.voyaInk)
-                    Text("Place, conditions, movement, and nearby activity")
+                    Text("Only information that is not already in your plan")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Color.voyaMuted)
                 }
@@ -1347,10 +1434,10 @@ struct AssistantActionPlanCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Your plan")
+                    Text("What to do next")
                         .font(.headline)
                         .foregroundStyle(Color.voyaInk)
-                    Text("The most useful actions, in travel order")
+                    Text("One prioritized list from Guardian and the specialist agents")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Color.voyaMuted)
                 }

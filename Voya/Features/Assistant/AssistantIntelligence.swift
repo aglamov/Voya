@@ -328,7 +328,7 @@ struct AssistantJourneyStage {
     }
 }
 
-enum AssistantEnvironmentKind {
+enum AssistantEnvironmentKind: Equatable {
     case place
     case weather
     case route
@@ -380,6 +380,44 @@ struct AssistantRecommendation: Identifiable {
     var detail: String
     var symbol: String
     var itemID: UUID?
+}
+
+func assistantSemanticTokens(_ value: String) -> Set<String> {
+    let ignored: Set<String> = [
+        "the", "and", "for", "with", "from", "this", "that", "your", "you", "into", "before", "after",
+        "для", "или", "это", "этот", "ваш", "перед", "после", "нужно", "надо", "будет"
+    ]
+    return Set(value.lowercased()
+        .components(separatedBy: CharacterSet.alphanumerics.inverted)
+        .filter { $0.count > 2 && !ignored.contains($0) }
+        .map { token in
+            if token.hasPrefix("tim") || token.hasPrefix("врем") { return "time" }
+            if token.hasPrefix("place") || token.hasPrefix("address") || token.hasPrefix("location") || token.hasPrefix("мест") || token.hasPrefix("адрес") { return "place" }
+            if token.hasPrefix("route") || token.hasPrefix("transfer") || token.hasPrefix("leave") || token.hasPrefix("маршрут") || token.hasPrefix("трансфер") || token.hasPrefix("вые") { return "route" }
+            if token.hasPrefix("weather") || token.hasPrefix("forecast") || token.hasPrefix("погод") || token.hasPrefix("прогноз") { return "weather" }
+            if token.hasPrefix("checkin") || token == "check" || token.hasPrefix("регистрац") { return "checkin" }
+            if token.hasPrefix("board") || token.hasPrefix("посадоч") { return "boarding" }
+            if token.hasPrefix("book") || token.hasPrefix("reserv") || token.hasPrefix("брон") { return "booking" }
+            if token.hasPrefix("accommod") || token.hasPrefix("hotel") || token.hasPrefix("sleep") || token.hasPrefix("отел") || token.hasPrefix("ноч") { return "stay" }
+            if token.hasPrefix("flight") || token.hasPrefix("aircraft") || token.hasPrefix("рейс") || token.hasPrefix("самолет") || token.hasPrefix("самолёт") { return "flight" }
+            if token.hasPrefix("pollen") || token.hasPrefix("пыльц") { return "pollen" }
+            return token
+        })
+}
+
+func assistantMeaningfullyMatches(_ lhs: String, _ rhs: String) -> Bool {
+    let left = assistantSemanticTokens(lhs)
+    let right = assistantSemanticTokens(rhs)
+    guard !left.isEmpty, !right.isEmpty else {
+        return lhs.trimmingCharacters(in: .whitespacesAndNewlines).localizedCaseInsensitiveCompare(
+            rhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        ) == .orderedSame
+    }
+    let overlap = left.intersection(right).count
+    let ratio = Double(overlap) / Double(max(1, min(left.count, right.count)))
+    let concepts: Set<String> = ["time", "place", "route", "weather", "checkin", "boarding", "booking", "stay", "flight", "pollen"]
+    let sharedConcept = !left.intersection(right).intersection(concepts).isEmpty
+    return ratio >= 0.58 || (sharedConcept && overlap >= 2)
 }
 
 struct AssistantTripAssessment {
@@ -1301,9 +1339,12 @@ struct AssistantIntelligenceBuilder {
         var signals: [AssistantEnvironmentSignal] = []
 
         func append(_ signal: AssistantEnvironmentSignal) {
-            let key = "\(signal.title.lowercased())|\(signal.value.lowercased())"
-            guard !signals.contains(where: {
-                "\($0.title.lowercased())|\($0.value.lowercased())" == key
+            let meaning = "\(signal.title) \(signal.value) \(signal.detail ?? "")"
+            guard !signals.contains(where: { existing in
+                assistantMeaningfullyMatches(
+                    "\(existing.title) \(existing.value) \(existing.detail ?? "")",
+                    meaning
+                )
             }) else {
                 return
             }
@@ -1434,10 +1475,10 @@ struct AssistantIntelligenceBuilder {
         var result: [AssistantRecommendation] = []
 
         func append(_ recommendation: AssistantRecommendation) {
-            let normalized = recommendation.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard !normalized.isEmpty,
+            let meaning = "\(recommendation.title) \(recommendation.detail)"
+            guard !recommendation.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   !result.contains(where: {
-                      $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
+                      assistantMeaningfullyMatches("\($0.title) \($0.detail)", meaning)
                   }) else {
                 return
             }

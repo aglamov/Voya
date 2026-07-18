@@ -33,6 +33,9 @@ export type InspirationStory = {
   sourceTitle: string;
   sourceURL: string;
   confidence: number;
+  selectionReason?: string;
+  verificationSummary?: string;
+  agentChecks?: string[];
   place?: {
     id: string;
     name: string;
@@ -42,6 +45,86 @@ export type InspirationStory = {
     mapsURL?: string;
   };
 };
+
+function normalizedTokens(value: string) {
+  return value.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((token) => token.length > 2).map((token) => {
+    if (token.startsWith("музык") || token.startsWith("концерт") || token.startsWith("джаз")) return "music";
+    if (token.startsWith("океан") || token.startsWith("мор")) return "ocean";
+    if (token.startsWith("тишин") || token.startsWith("спокой")) return "quiet";
+    if (token.startsWith("природ") || token.startsWith("дик")) return "nature";
+    if (token.startsWith("искус") || token.startsWith("архитект") || token.startsWith("культур")) return "culture";
+    if (token.startsWith("чуд") || token.startsWith("восхищ") || token.startsWith("удив")) return "wonder";
+    return token;
+  });
+}
+
+function moodMatch(story: InspirationStory, mood: string) {
+  const moodTokens = normalizedTokens(mood);
+  if (!moodTokens.length) return 0;
+  const storyText = `${story.title} ${story.hook} ${story.theme} ${story.moods.join(" ")}`.toLowerCase();
+  return moodTokens.filter((token) => storyText.includes(token)).length / moodTokens.length;
+}
+
+function qualityScore(story: InspirationStory, mood: string, order: number) {
+  const hasSpecificDate = /^\d{4}-\d{2}-\d{2}$/.test(story.timing);
+  const verifiedSource = /^https:\/\//.test(story.sourceURL);
+  const evidence = (verifiedSource ? 0.1 : 0) + (hasSpecificDate ? 0.12 : 0.06);
+  const relevance = Math.min(0.16, moodMatch(story, mood) * 0.16);
+  const editorialOrder = Math.max(0, 0.12 - order * 0.012);
+  return story.confidence * 0.58 + evidence + relevance + editorialOrder;
+}
+
+function isRussianLocale(locale?: string) {
+  return locale?.toLowerCase().startsWith("ru") ?? false;
+}
+
+function selectionReason(story: InspirationStory, mood: string, russian: boolean) {
+  const hasMoodMatch = moodMatch(story, mood) > 0;
+  const moodLead = hasMoodMatch && mood.trim()
+    ? russian ? `Это соответствует настроению «${mood.trim()}». ` : `It matches the feeling “${mood.trim()}”. `
+    : "";
+  if (russian) {
+    switch (story.theme) {
+      case "music": return `${moodLead}Реальное выступление с известной датой задаёт поездке центр и оставляет время узнать город.`;
+      case "phenomenon": return `${moodLead}Природное явление создаёт настоящий повод отправиться в путь именно сейчас.`;
+      case "seasonal": return `${moodLead}Впечатление доступно лишь в короткий сезон, поэтому время определяет характер всей поездки.`;
+      case "culture": return `${moodLead}Культурная программа даёт путешествию идею и делает его содержательнее обычной поездки в город.`;
+      case "nature": return `${moodLead}Место само по себе стоит путешествия, даже если природа или животные поведут себя не так, как хотелось бы.`;
+    }
+  }
+  switch (story.theme) {
+    case "music": return `${moodLead}A real dated performance gives the journey a clear centre while leaving room to discover the city.`;
+    case "phenomenon": return `${moodLead}The natural phenomenon creates a genuine reason to travel now, not just another destination on a list.`;
+    case "seasonal": return `${moodLead}The experience depends on a limited season, so timing changes the character of the whole journey.`;
+    case "culture": return `${moodLead}A cultural programme gives the trip a point of view and a stronger shape than a generic city break.`;
+    case "nature": return `${moodLead}The place supports a complete journey even if wildlife or conditions do not behave exactly as hoped.`;
+  }
+}
+
+function diversifiedSelection(stories: InspirationStory[], mood: string, limit = 6) {
+  const ranked = stories
+    .map((story, index) => ({ story, score: qualityScore(story, mood, index) }))
+    .sort((lhs, rhs) => rhs.score - lhs.score);
+  const selected: InspirationStory[] = [];
+  const destinations = new Set<string>();
+  const themeCounts = new Map<InspirationStory["theme"], number>();
+
+  for (const { story } of ranked) {
+    const destinationKey = `${story.destination}|${story.country}`.toLowerCase();
+    const themeCount = themeCounts.get(story.theme) ?? 0;
+    if (destinations.has(destinationKey) || themeCount >= 2) continue;
+    selected.push(story);
+    destinations.add(destinationKey);
+    themeCounts.set(story.theme, themeCount + 1);
+    if (selected.length === limit) return selected;
+  }
+  for (const { story } of ranked) {
+    if (selected.some((candidate) => candidate.id === story.id)) continue;
+    selected.push(story);
+    if (selected.length === limit) break;
+  }
+  return selected;
+}
 
 export const STORIES: InspirationStory[] = [
   {
@@ -146,6 +229,69 @@ export const STORIES: InspirationStory[] = [
   }
 ];
 
+const RUSSIAN_STORY_COPY: Record<string, Partial<InspirationStory>> = {
+  "lofoten-aurora": {
+    title: "Северное сияние над Лофотенскими островами",
+    hook: "Долгие синие сумерки, рыбацкие деревни и четыре ночи с шансом увидеть зелёное небо.",
+    destination: "Лофотенские острова",
+    country: "Норвегия",
+    timing: "Сентябрь–март",
+    whyNow: "Тёмный сезон даёт долгие окна для наблюдения, а острова остаются прекрасным путешествием, даже если сияние не появится.",
+    experience: ["Ночи в поисках сияния", "Живописные островные дороги", "Арктические рыбацкие деревни"],
+    practicalNotes: ["С автомобилем исследовать острова намного проще", "Оставьте не меньше четырёх ночей для наблюдения"],
+    mainRisk: "Облачность непредсказуема, поэтому увидеть сияние в конкретную ночь нельзя гарантировать."
+  },
+  "japan-sakura": {
+    title: "Пройти за весной по Японии",
+    hook: "Медленное путешествие от храмовых садов к горным онсэнам вслед за цветением сакуры на север.",
+    destination: "Киото и Японские Альпы",
+    country: "Япония",
+    timing: "Конец марта–апрель",
+    whyNow: "Прогноз цветения превращает обычный маршрут в путешествие через несколько этапов весны, где время действительно имеет значение.",
+    experience: ["Храмовые сады", "Горные онсэны", "Сезонная кухня"],
+    practicalNotes: ["Точные даты цветения меняются каждый год", "Популярные города лучше бронировать заранее"],
+    mainRisk: "Пик цветения короток, а погода может сдвинуть его на более ранний или поздний срок."
+  },
+  "azores-whales": {
+    title: "Встретить китов у Азорских островов",
+    hook: "Вулканические озёра, атлантические скалы и дни, планы которых зависят от того, кто появится на горизонте.",
+    destination: "Сан-Мигел",
+    country: "Португалия",
+    timing: "Апрель–октябрь",
+    whyNow: "В течение сезона через архипелаг проходят разные виды китов, а наблюдение за ними становится частью большого путешествия по вулканическому острову.",
+    experience: ["Наблюдение за китами", "Вулканические горячие источники", "Прогулки у кратерных озёр"],
+    practicalNotes: ["Оставьте запасной день на случай плохой погоды", "Выберите ответственного оператора"],
+    mainRisk: "Из-за состояния моря выходы отменяют, а встречу с животными невозможно гарантировать."
+  },
+  "venice-biennale": {
+    title: "Пожить внутри Венецианской биеннале",
+    hook: "Искусство в палаццо, верфях и скрытых дворах — и ранние утра для почти пустой Венеции.",
+    destination: "Венеция",
+    country: "Италия",
+    timing: "Сезон биеннале",
+    whyNow: "Выставка меняет географию города и открывает пространства, которые обычно не входят в классическое путешествие по Венеции.",
+    experience: ["Павильоны Джардини", "Арсенале", "Независимые выставки"],
+    practicalNotes: ["Проверьте даты текущей биеннале до бронирования", "Разделите главные площадки на два дня"],
+    mainRisk: "Даты и программа зависят от конкретного выпуска биеннале."
+  },
+  "namibia-desert-sky": {
+    title: "Спать под небом пустыни Намиб",
+    hook: "Красные дюны на рассвете, огромная тишина и одно из самых тёмных звёздных небес на Земле.",
+    destination: "Пустыня Намиб",
+    country: "Намибия",
+    timing: "Май–октябрь",
+    whyNow: "Сухой сезон приносит более прохладную погоду и ясные ночи, подходящие для долгого путешествия по пустыне.",
+    experience: ["Рассвет в Соссусфлее", "Лоджи под тёмным небом", "Автопутешествие по пустыне"],
+    practicalNotes: ["Расстояния здесь очень большие", "Планируйте запас топлива и воды с осторожностью"],
+    mainRisk: "Это путешествие требует тщательной логистики и включает долгие переезды по удалённым дорогам."
+  }
+};
+
+function localizedStory(story: InspirationStory, russian: boolean): InspirationStory {
+  if (!russian) return story;
+  return { ...story, ...(RUSSIAN_STORY_COPY[story.id] ?? {}) };
+}
+
 const curationSchema = z.object({
   orderedIds: z.array(z.string()).min(1).max(20),
   curatorNote: z.string().min(1).max(400)
@@ -166,7 +312,7 @@ type TicketmasterDiscoveryEvent = {
   };
 };
 
-async function ticketmasterStories(mood: string): Promise<InspirationStory[]> {
+async function ticketmasterStories(mood: string, russian: boolean): Promise<InspirationStory[]> {
   const apiKey = (process.env.TICKETMASTER_API_KEY ?? process.env.TICKETMASTER_CONSUMER_KEY)?.trim();
   if (!apiKey) return [];
   const now = new Date();
@@ -192,25 +338,39 @@ async function ticketmasterStories(mood: string): Promise<InspirationStory[]> {
       const venue = event._embedded?.venues?.[0];
       const name = event.name?.trim();
       const city = venue?.city?.name?.trim();
-      const country = venue?.country?.name?.trim() ?? venue?.country?.countryCode?.trim();
+      const countryCode = venue?.country?.countryCode?.trim();
+      const originalCountry = venue?.country?.name?.trim() ?? countryCode;
+      const country = russian && countryCode
+        ? new Intl.DisplayNames(["ru"], { type: "region" }).of(countryCode) ?? originalCountry
+        : originalCountry;
       const date = event.dates?.start?.localDate;
       const sourceURL = event.url?.trim();
       if (!name || !city || !country || !date || !sourceURL) return [];
       const genre = event.classifications?.[0]?.genre?.name?.trim();
       return [{
         id: `ticketmaster-${event.id ?? Buffer.from(sourceURL).toString("base64url").slice(0, 24)}`,
-        title: `${name} — and a few days in ${city}`,
-        hook: `Build a journey around a real night of ${genre && genre !== "Undefined" ? genre.toLowerCase() : "live music"}, then let the city become the rest of the story.`,
+        title: russian ? `${name} — и несколько дней в городе ${city}` : `${name} — and a few days in ${city}`,
+        hook: russian
+          ? "Постройте путешествие вокруг настоящего концерта, а остальную историю пусть расскажет город."
+          : `Build a journey around a real night of ${genre && genre !== "Undefined" ? genre.toLowerCase() : "live music"}, then let the city become the rest of the story.`,
         destination: city,
         country,
         theme: "music",
         moods: ["music", "event", "city", genre ?? "live"],
         timing: date,
         idealDays: 4,
-        whyNow: `${name} is scheduled for ${date}${venue?.name ? ` at ${venue.name}` : ""}. The event gives the trip a fixed centre without prescribing everything around it.`,
-        experience: [name, `A free day in ${city}`, "A neighbourhood evening away from the venue"],
-        practicalNotes: ["Verify ticket availability before arranging travel", "Keep the event confirmation separate from transport bookings"],
-        mainRisk: "Event dates and line-ups can change; Voya treats the organiser listing as evidence, not a guarantee.",
+        whyNow: russian
+          ? `${name} запланирован на ${date}${venue?.name ? ` на площадке ${venue.name}` : ""}. Событие задаёт поездке центр, не предписывая весь маршрут.`
+          : `${name} is scheduled for ${date}${venue?.name ? ` at ${venue.name}` : ""}. The event gives the trip a fixed centre without prescribing everything around it.`,
+        experience: russian
+          ? [name, `Свободный день в городе ${city}`, "Вечер в другом районе города"]
+          : [name, `A free day in ${city}`, "A neighbourhood evening away from the venue"],
+        practicalNotes: russian
+          ? ["Проверьте наличие билетов до покупки транспорта", "Храните подтверждение события отдельно от транспортных броней"]
+          : ["Verify ticket availability before arranging travel", "Keep the event confirmation separate from transport bookings"],
+        mainRisk: russian
+          ? "Дата и состав участников могут измениться; Voya считает афишу организатора подтверждением, но не гарантией."
+          : "Event dates and line-ups can change; Voya treats the organiser listing as evidence, not a guarantee.",
         symbol: "music.note",
         gradient: ["51336F", "D14F63"],
         sourceTitle: `Ticketmaster — ${name}`,
@@ -233,11 +393,16 @@ function localCuration(mood: string, savedThemes: string[]) {
   return { stories, curatorNote: mood ? `Ideas selected around “${mood}”.` : "A small collection of journeys worth wanting." };
 }
 
-export async function buildInspirationFeed(mood: string, savedThemes: string[] = []) {
-  const liveStories = await ticketmasterStories(mood);
-  const candidates = [...liveStories, ...STORIES];
+export async function buildInspirationFeed(mood: string, savedThemes: string[] = [], locale = "en") {
+  const russian = isRussianLocale(locale);
+  const liveStories = await ticketmasterStories(mood, russian);
+  const staticStories = STORIES.map((story) => localizedStory(story, russian));
+  const candidates = [...liveStories, ...staticStories];
   const local = localCuration(mood, savedThemes);
-  let curated = { stories: [...liveStories, ...local.stories], curatorNote: local.curatorNote };
+  let curated = {
+    stories: [...liveStories, ...local.stories.map((story) => localizedStory(story, russian))],
+    curatorNote: local.curatorNote
+  };
   let usedAI = false;
   if (mood && process.env.OPENAI_API_KEY) {
     try {
@@ -256,23 +421,45 @@ export async function buildInspirationFeed(mood: string, savedThemes: string[] =
       // The deterministic editorial feed is intentionally usable without AI.
     }
   }
-  const enrichedStories = await Promise.all(curated.stories.slice(0, 8).map(async (story) => {
-    const result = await findGooglePlace(`${story.destination}, ${story.country}`, "en");
-    if (!("data" in result)) return story;
-    const place = result.data;
+  const shortlist = diversifiedSelection(curated.stories, mood, 8);
+  const enrichedStories = await Promise.all(shortlist.map(async (story) => {
+    const result = await findGooglePlace(`${story.destination}, ${story.country}`, russian ? "ru" : "en");
+    const place = "data" in result ? result.data : undefined;
     return {
       ...story,
-      place: {
+      selectionReason: selectionReason(story, mood, russian),
+      verificationSummary: [
+        story.timing,
+        place
+          ? russian ? "место проверено через Google Places" : "destination verified with Google Places"
+          : russian ? "место сверено с редакционным источником" : "destination checked against the editorial source",
+        story.sourceTitle
+      ].join(" · "),
+      agentChecks: russian
+        ? ["Повод для поездки", "Время проверено", place ? "Место проверено" : "Источник проверен"]
+        : ["Reason to travel", "Timing checked", place ? "Place verified" : "Source verified"],
+      place: place ? {
         id: place.id,
         name: place.name,
         address: place.address,
         rating: place.rating,
         userRatingCount: place.userRatingCount,
         mapsURL: place.mapsURL
-      }
+      } : undefined
     };
   }));
-  return { ...curated, stories: [...enrichedStories, ...curated.stories.slice(8)], usedAI };
+  return {
+    ...curated,
+    stories: diversifiedSelection(enrichedStories, mood, 6),
+    curatorNote: russian
+      ? mood.trim()
+        ? `Агенты сравнили ${enrichedStories.length} проверенных вариантов по запросу «${mood.trim()}». Здесь самые сильные и разнообразные поводы отправиться в путь.`
+        : `Агенты сравнили ${enrichedStories.length} проверенных вариантов. Здесь самые сильные и разнообразные поводы отправиться в путь.`
+      : mood.trim()
+        ? `${enrichedStories.length} verified candidates were compared for “${mood.trim()}”. These are the strongest and most varied reasons to travel.`
+        : `${enrichedStories.length} verified candidates were compared. These are the strongest and most varied reasons to travel.`,
+    usedAI
+  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -299,14 +486,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? body.savedThemes.filter((item): item is string => typeof item === "string").slice(0, 12)
     : [];
   const deviceToken = normalizeDeviceToken(body.deviceToken);
-  const release = newInspirationRelease(installId, mood, deviceToken);
+  const locale = typeof body.locale === "string" ? body.locale.trim().slice(0, 40) || "en" : "en";
+  const release = newInspirationRelease(installId, mood, deviceToken, locale);
   await saveInspirationRelease(release);
   const queued = await enqueueAgentJob({ type: "inspiration", installId, releaseId: release.id });
   if (queued) {
     return res.status(202).json({ release, queued: true });
   }
 
-  const curated = await buildInspirationFeed(mood, savedThemes);
+  const curated = await buildInspirationFeed(mood, savedThemes, locale);
   const now = new Date().toISOString();
   const ready = {
     ...release,

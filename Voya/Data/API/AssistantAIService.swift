@@ -202,6 +202,9 @@ struct InspirationStory: Identifiable, Codable, Equatable {
     var sourceTitle: String
     var sourceURL: URL
     var confidence: Double
+    var selectionReason: String? = nil
+    var verificationSummary: String? = nil
+    var agentChecks: [String]? = nil
     var place: InspirationPlace? = nil
 
     static let fallback: [InspirationStory] = [
@@ -430,11 +433,16 @@ struct VoyaAgentService {
         struct Body: Encodable {
             var mood: String
             var deviceToken: String?
+            var locale: String
         }
         let data = try await request(
             path: "api/inspiration",
             method: "POST",
-            body: Body(mood: mood, deviceToken: VoyaPushRegistrationService.shared.currentDeviceToken)
+            body: Body(
+                mood: mood,
+                deviceToken: VoyaPushRegistrationService.shared.currentDeviceToken,
+                locale: VoyaAppLocale.currentIdentifier
+            )
         )
         return try decoder.decode(InspirationReleaseResponse.self, from: data).release
     }
@@ -703,7 +711,7 @@ extension VoyaStore {
 
     private func missionContext(tripID: UUID?) -> [String: String] {
         guard let tripID, let trip = trips.first(where: { $0.id == tripID }) else {
-            return ["locale": Locale.current.identifier]
+            return ["locale": VoyaAppLocale.currentIdentifier]
         }
         let stages = itinerary(for: trip).prefix(24).map { item in
             [item.kind.rawValue, item.title, item.location, item.status, item.startsAt?.ISO8601Format() ?? "time unknown"]
@@ -711,7 +719,7 @@ extension VoyaStore {
                 .joined(separator: " · ")
         }.joined(separator: "\n")
         return [
-            "locale": Locale.current.identifier,
+            "locale": VoyaAppLocale.currentIdentifier,
             "trip": trip.title,
             "destination": trip.destination ?? "",
             "dates": trip.displayDates,

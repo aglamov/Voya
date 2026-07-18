@@ -26,12 +26,17 @@ export type SpecialistResult = z.infer<typeof resultSchema>;
 
 export async function runSpecialistAgent(input: z.infer<typeof agentSchema>) {
   if (!process.env.OPENAI_API_KEY) {
+    const russian = input.locale?.toLowerCase().startsWith("ru") ?? false;
     return {
       result: {
-        title: `${input.agent} prepared the next step`,
-        summary: `The mission “${input.mission}” is active. Voya has recorded its context and will surface a meaningful change.`,
+        title: russian ? "Voya подготовила следующий шаг" : `${input.agent} prepared the next step`,
+        summary: russian
+          ? `Миссия «${input.mission}» запущена. Voya сохранила контекст и покажет следующее полезное решение.`
+          : `The mission “${input.mission}” is active. Voya has recorded its context and will surface a meaningful change.`,
         observations: [] as string[],
-        nextActions: ["Keep the mission active and refresh it when new trip evidence arrives."],
+        nextActions: [russian
+          ? "Оставьте миссию активной и обновите её, когда появятся новые данные о поездке."
+          : "Keep the mission active and refresh it when new trip evidence arrives."],
         needsApproval: false,
         confidence: 0.45
       },
@@ -41,7 +46,7 @@ export async function runSpecialistAgent(input: z.infer<typeof agentSchema>) {
   const { object } = await generateObject({
     model: openai(openAIModelFor("brief")),
     schema: resultSchema,
-    system: `You are Voya's ${input.agent} travel specialist. Use only the supplied context. Separate facts from recommendations, admit missing evidence, and never claim that a booking or external action was performed. Any action with money, cancellation, communication, or reservation requires approval.`,
+    system: `You are Voya's ${input.agent} travel specialist. Use only the supplied context. Separate facts from recommendations, admit missing evidence, and never claim that a booking or external action was performed. Any action with money, cancellation, communication, or reservation requires approval. Respond in the language specified by the locale; use English when locale is absent.`,
     prompt: JSON.stringify(input)
   });
   return { result: object, usedAI: true };
