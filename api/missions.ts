@@ -12,7 +12,7 @@ const createSchema = z.object({
   inspirationId: z.string().max(120).optional(),
   nextCheckAt: z.string().datetime().optional(),
   deviceToken: z.string().max(256).optional(),
-  context: z.record(z.unknown()).optional()
+  context: z.record(z.string(), z.unknown()).optional()
 });
 
 const updateSchema = z.object({

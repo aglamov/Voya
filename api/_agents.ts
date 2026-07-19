@@ -19,7 +19,11 @@ export type AgentMission = {
   resultTitle?: string;
   resultSummary?: string;
   resultActions?: string[];
+  resultArtifact?: unknown;
   requiresApproval?: boolean;
+  usedAI?: boolean;
+  toolsUsed?: string[];
+  responseId?: string;
   lastRunAt?: string;
   runCount?: number;
   lastError?: string;

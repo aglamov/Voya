@@ -1,0 +1,17 @@
+Travel planning rarely starts with a perfect itinerary. It starts with a feeling, a confirmation email, or a small question: what should I do next?
+
+This is Voya, an agentic travel companion that turns scattered travel details into a verified, living journey.
+
+On Inspiration, the traveler describes a mood instead of choosing a destination. Voya can turn something as simple as “ocean air and a feeling of discovery” into a focused set of possibilities.
+
+When plans already exist, Smart Import accepts a file, pasted booking text, or a photo. The confirmation becomes structured trip data instead of another item buried in an inbox.
+
+Voya then assembles one clear timeline. The traveler can see the destination, dates, bookings, current status, and the next useful action without switching between multiple apps.
+
+The Assistant is powered by Trip Guardian. Bounded specialist agents watch the journey, review current context, and merge important findings into a short list of actions. The product clearly separates published schedule information from live provider data, so uncertainty remains visible rather than being hidden behind confident language.
+
+I used Codex as the engineering partner throughout Build Week: exploring the codebase, implementing product flows, connecting services, debugging the iOS application, running tests, and preparing the submission assets.
+
+GPT-5.6 powers the reasoning workflows behind Voya. It helps interpret unstructured travel context, coordinate specialist agents, and produce grounded, useful recommendations while preserving clear boundaries around what is known.
+
+Voya is not another place to store a booking. It is the layer that keeps a journey understandable, current, and ready for the next best action.

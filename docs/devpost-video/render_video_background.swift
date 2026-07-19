@@ -67,11 +67,8 @@ for (label, width) in pills {
 
 drawText("BUILT WITH CODEX + GPT-5.6", rect: NSRect(x: 96, y: 930, width: 650, height: 42), font: .systemFont(ofSize: 24, weight: .bold), color: NSColor(calibratedRed: 1, green: 0.82, blue: 0.32, alpha: 1))
 
-let phoneWidth: CGFloat = 460
-let phoneHeight: CGFloat = 1000
-let phoneX = size.width - phoneWidth - 92
-let phoneY: CGFloat = 40
-roundedRect(NSRect(x: phoneX - 12, y: phoneY - 12, width: phoneWidth + 24, height: phoneHeight + 24), radius: 58, color: NSColor.white.withAlphaComponent(0.94))
+// The Simulator capture is composited directly over this area. No backing
+// plate is drawn, so no white or dark corner blocks can peek around the video.
 
 image.unlockFocus()
 let bitmap = NSBitmapImageRep(data: image.tiffRepresentation!)!

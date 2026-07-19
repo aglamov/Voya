@@ -11,6 +11,12 @@
         }
       }
     },
+    "%lld tools used" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Инструментов использовано: %lld" } } } },
+    "+%lld more days in the agent plan" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "+ ещё дней в плане: %lld" } } } },
+    "OpenAI agent" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Агент OpenAI" } } } },
+    "Recommended timing" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Рекомендуемое время" } } } },
+    "Safe offline draft" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Безопасный офлайн-черновик" } } } },
+    "YOUR DECISIONS" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "ВАШИ РЕШЕНИЯ" } } } },
     " · AI review" : {
       "localizations" : {
         "ru" : {

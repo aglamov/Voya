@@ -308,6 +308,44 @@ enum AgentMissionStatus: String, Codable {
     case cancelled
 }
 
+struct AgentTripPlanDay: Codable, Equatable, Identifiable {
+    var id: Int { day }
+    var day: Int
+    var title: String
+    var area: String
+    var morning: String
+    var afternoon: String
+    var evening: String
+    var evidence: String
+}
+
+struct AgentTripPlanDecision: Codable, Equatable, Identifiable {
+    var id: String { title + detail }
+    var title: String
+    var detail: String
+    var required: Bool
+}
+
+struct AgentTripPlanSourceCheck: Codable, Equatable, Identifiable {
+    var id: String { label }
+    var label: String
+    var status: String
+    var detail: String
+}
+
+struct AgentMissionArtifact: Codable, Equatable {
+    var kind: String
+    var title: String
+    var summary: String
+    var timingRecommendation: String
+    var days: [AgentTripPlanDay]
+    var decisions: [AgentTripPlanDecision]
+    var risks: [String]
+    var sourceChecks: [AgentTripPlanSourceCheck]
+    var nextActions: [String]
+    var confidence: Double
+}
+
 struct AgentMission: Identifiable, Codable, Equatable {
     var id: UUID
     var tripId: UUID?
@@ -323,7 +361,11 @@ struct AgentMission: Identifiable, Codable, Equatable {
     var resultTitle: String?
     var resultSummary: String?
     var resultActions: [String]?
+    var resultArtifact: AgentMissionArtifact?
     var requiresApproval: Bool?
+    var usedAI: Bool?
+    var toolsUsed: [String]?
+    var responseId: String?
     var lastRunAt: Date?
     var runCount: Int?
     var lastError: String?
@@ -691,7 +733,11 @@ extension VoyaStore {
             resultTitle: nil,
             resultSummary: nil,
             resultActions: nil,
+            resultArtifact: nil,
             requiresApproval: nil,
+            usedAI: nil,
+            toolsUsed: nil,
+            responseId: nil,
             lastRunAt: nil,
             runCount: nil,
             lastError: nil
@@ -722,7 +768,11 @@ extension VoyaStore {
             "locale": VoyaAppLocale.currentIdentifier,
             "trip": trip.title,
             "destination": trip.destination ?? "",
+            "destinationLocation": trip.destinationLocation ?? "",
             "dates": trip.displayDates,
+            "summary": trip.summary,
+            "notes": trip.notes ?? "",
+            "sourceName": trip.sourceName,
             "itinerary": stages
         ]
     }

@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import CoreMedia
+import QuartzCore
 
 enum VideoAssemblyError: Error {
     case missingTrack(String)
@@ -13,9 +14,9 @@ func assembleV2() async throws {
     let workspace = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
     let folder = workspace.appendingPathComponent("docs/devpost-video")
     let rawAsset = AVURLAsset(url: folder.appendingPathComponent("raw-demo.mp4"))
-    let backgroundAsset = AVURLAsset(url: folder.appendingPathComponent("background-v3.mp4"))
-    let audioAsset = AVURLAsset(url: folder.appendingPathComponent("voiceover.aiff"))
-    let outputURL = folder.appendingPathComponent("Voya-OpenAI-Build-Week-Demo-v4.mp4")
+    let backgroundAsset = AVURLAsset(url: folder.appendingPathComponent("background-v6.mp4"))
+    let audioAsset = AVURLAsset(url: folder.appendingPathComponent("voiceover-openai.wav"))
+    let outputURL = folder.appendingPathComponent("Voya-OpenAI-Build-Week-Demo-final-v2.mp4")
 
     guard let rawSource = try await rawAsset.loadTracks(withMediaType: .video).first else {
         throw VideoAssemblyError.missingTrack("raw video")
@@ -33,7 +34,7 @@ func assembleV2() async throws {
     let orientedSize = CGSize(width: abs(rawRect.width), height: abs(rawRect.height))
     let backgroundDuration = try await backgroundAsset.load(.duration)
     let audioDuration = try await audioAsset.load(.duration)
-    let outputDuration = CMTime(seconds: 140, preferredTimescale: 600)
+    let outputDuration = CMTime(seconds: 108, preferredTimescale: 600)
 
     let composition = AVMutableComposition()
     guard let backgroundTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
@@ -50,10 +51,10 @@ func assembleV2() async throws {
 
     var cursor = CMTime.zero
     let segments: [(start: Double, end: Double, target: Double)] = [
-        (0, 44, 25),       // Inspiration
-        (44, 91, 20),      // Import
-        (91, 109, 55),     // Trips, held longer without opening inconsistent test-provider details
-        (176, 220, 40)     // Trip Guardian; skips inconsistent demo flight-provider details
+        (0, 44, 35),       // Inspiration: real typing and selection remain visible
+        (44, 91, 25),      // Import: real tab switch and import interactions
+        (91, 109, 17),     // Trips: natural-speed itinerary overview
+        (176, 220, 31)     // Trip Guardian: real scrolling and agent-state changes
     ]
 
     for segment in segments {
@@ -73,8 +74,9 @@ func assembleV2() async throws {
     }
 
     let voiceStart = CMTime(seconds: 0.8, preferredTimescale: 600)
+    let availableAudioDuration = min(audioDuration, outputDuration - voiceStart)
     try audioTrack.insertTimeRange(
-        CMTimeRange(start: .zero, duration: audioDuration),
+        CMTimeRange(start: .zero, duration: availableAudioDuration),
         of: audioSource,
         at: voiceStart
     )
@@ -107,13 +109,41 @@ func assembleV2() async throws {
     videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
     videoComposition.instructions = [instruction]
 
+    // Mask only the square corners of the Simulator capture. The live app
+    // remains visible inside a rounded device frame, with no backing plate.
+    let parentLayer = CALayer()
+    parentLayer.frame = CGRect(origin: .zero, size: renderSize)
+    parentLayer.isGeometryFlipped = true
+    let videoLayer = CALayer()
+    videoLayer.frame = parentLayer.bounds
+    parentLayer.addSublayer(videoLayer)
+
+    let phoneRect = CGRect(x: targetX, y: targetY, width: targetWidth, height: targetHeight)
+    let framePath = CGMutablePath()
+    framePath.addRect(phoneRect)
+    framePath.addRoundedRect(
+        in: phoneRect.insetBy(dx: 7, dy: 7),
+        cornerWidth: 42,
+        cornerHeight: 42
+    )
+    let deviceFrameLayer = CAShapeLayer()
+    deviceFrameLayer.frame = parentLayer.bounds
+    deviceFrameLayer.path = framePath
+    deviceFrameLayer.fillRule = .evenOdd
+    deviceFrameLayer.fillColor = NSColor(calibratedWhite: 0.015, alpha: 1).cgColor
+    parentLayer.addSublayer(deviceFrameLayer)
+    videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
+        postProcessingAsVideoLayer: videoLayer,
+        in: parentLayer
+    )
+
     let audioParameters = AVMutableAudioMixInputParameters(track: audioTrack)
     audioParameters.setVolumeRamp(
         fromStartVolume: 0,
         toEndVolume: 1,
         timeRange: CMTimeRange(start: voiceStart, duration: CMTime(seconds: 0.3, preferredTimescale: 600))
     )
-    let fadeStart = voiceStart + audioDuration - CMTime(seconds: 0.5, preferredTimescale: 600)
+    let fadeStart = voiceStart + availableAudioDuration - CMTime(seconds: 0.5, preferredTimescale: 600)
     audioParameters.setVolumeRamp(
         fromStartVolume: 1,
         toEndVolume: 0,
@@ -131,7 +161,7 @@ func assembleV2() async throws {
     exporter.videoComposition = videoComposition
     exporter.audioMix = audioMix
 
-    print("Exporting truthful 140-second cut…")
+    print("Exporting interaction-first 108-second final cut…")
     await exporter.export()
     guard exporter.status == .completed else {
         throw VideoAssemblyError.exportFailed(exporter.error?.localizedDescription ?? "unknown export error")

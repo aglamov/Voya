@@ -11,6 +11,7 @@ import {
 } from "./_agents.js";
 import { buildInspirationFeed } from "./inspiration.js";
 import { runSpecialistAgent, type SpecialistAgent } from "./specialist-agents.js";
+import { runPlanningAgent } from "./_openai-agent-runtime.js";
 import { redisCommand, storageConfigured } from "./_storage.js";
 
 function firstHeader(value: string | string[] | undefined) {
@@ -151,20 +152,30 @@ async function processMission(job: Extract<AgentJob, { type: "mission" }>) {
   await saveMission(mission);
 
   try {
+    const missionInput = `${mission.title}\n${mission.detail}`;
+    const context = mission.kind === "planning"
+      ? mission.context ?? {}
+      : await providerContext(mission.context ?? {});
+    const locale = typeof mission.context?.locale === "string" ? mission.context.locale : undefined;
     const specialist = primaryAgent(mission.kind);
-    const run = await runSpecialistAgent({
-      agent: specialist,
-      mission: `${mission.title}\n${mission.detail}`,
-      context: await providerContext(mission.context ?? {}),
-      locale: typeof mission.context?.locale === "string" ? mission.context.locale : undefined
-    });
+    const run = mission.kind === "planning"
+      ? await runPlanningAgent({ mission: missionInput, context, locale })
+      : await runSpecialistAgent({ agent: specialist, mission: missionInput, context, locale });
     const now = new Date();
     const recurring = mission.kind === "guardian";
     mission.status = recurring ? "active" : run.result.needsApproval ? "waiting" : "completed";
     mission.resultTitle = run.result.title;
     mission.resultSummary = run.result.summary;
     mission.resultActions = run.result.nextActions;
+    mission.resultArtifact = "artifact" in run ? run.artifact : undefined;
     mission.requiresApproval = run.result.needsApproval;
+    mission.usedAI = run.usedAI;
+    mission.toolsUsed = "toolsUsed" in run && Array.isArray(run.toolsUsed)
+      ? run.toolsUsed.filter((value): value is string => typeof value === "string")
+      : undefined;
+    mission.responseId = "responseId" in run && typeof run.responseId === "string"
+      ? run.responseId
+      : undefined;
     mission.lastRunAt = now.toISOString();
     mission.updatedAt = now.toISOString();
     mission.runCount = (mission.runCount ?? 0) + 1;

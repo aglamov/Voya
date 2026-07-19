@@ -8,7 +8,7 @@ import { protectPublicEndpoint } from "./_security.js";
 const agentSchema = z.object({
   agent: z.enum(["sentinel", "navigator", "clerk", "scout", "recovery", "concierge", "coordinator"]),
   mission: z.string().min(1).max(600),
-  context: z.record(z.unknown()).optional().default({}),
+  context: z.record(z.string(), z.unknown()).optional().default({}),
   locale: z.string().max(40).optional()
 });
 

@@ -1,17 +1,25 @@
 # Voya demo video
 
-Final file: `Voya-OpenAI-Build-Week-Demo-v4.mp4`
+Final file: `Voya-OpenAI-Build-Week-Demo-final-v2.mp4`
 
-Duration: 2:20. Language: English. Format: 1920×1080 MP4 (H.264 video, AAC audio) with AI narration.
+Duration: 1:48. Language: English. Format: 1920×1080 MP4 (H.264 video, AAC audio) with OpenAI narration.
 
 ## Storyboard
 
-- 00:00–00:25 — Inspiration and feeling-first discovery.
-- 00:25–00:45 — Import from files, text, and photos.
-- 00:45–01:40 — Living itinerary, next action, and grounded provider context.
-- 01:40–02:20 — Trip Guardian, bounded specialist agents, Codex, GPT-5.6, and closing.
+- 00:00–00:35 — Inspiration, live text entry, and feeling-first discovery.
+- 00:35–01:00 — Live navigation to Smart Import and its input choices.
+- 01:00–01:17 — Living itinerary and the next useful action.
+- 01:17–01:48 — Trip Guardian, bounded specialist agents, Codex, GPT-5.6, and closing.
 
-The narration in `voiceover.txt` explicitly covers what was built and how both Codex and GPT-5.6 were used, as required by OpenAI Build Week.
+The updated narration in `voiceover-v2.txt` explicitly covers what was built and how both Codex and GPT-5.6 were used, as required by OpenAI Build Week.
+
+## Generate natural OpenAI narration
+
+Add `OPENAI_API_KEY=...` to the git-ignored project file `.env.local`, then run:
+
+`node docs/devpost-video/generate_openai_voice.mjs`
+
+This uses `gpt-4o-mini-tts`, the `marin` voice, and product-demo delivery instructions. The key is read locally and is never printed.
 
 ## YouTube upload
 

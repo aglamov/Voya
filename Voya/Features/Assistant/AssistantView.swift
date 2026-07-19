@@ -940,48 +940,8 @@ private struct AgentMissionBoardCard: View {
             }
 
             ForEach(visibleMissions.prefix(4)) { mission in
-                HStack(spacing: 11) {
-                    Image(systemName: mission.kind.symbol)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(Color.voyaTeal)
-                        .frame(width: 36, height: 36)
-                        .background(Color.voyaMint)
-                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(mission.title)
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(Color.voyaInk)
-                            .lineLimit(1)
-                        Text(mission.detail)
-                            .font(.caption)
-                            .foregroundStyle(Color.voyaMuted)
-                            .lineLimit(mission.resultSummary == nil ? 2 : 1)
-                        if let result = mission.resultSummary {
-                            Text(result)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(mission.requiresApproval == true ? Color.voyaGold : Color.voyaTeal)
-                                .lineLimit(3)
-                            ForEach((mission.resultActions ?? []).prefix(2), id: \.self) { action in
-                                Label(action, systemImage: "arrow.right.circle")
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(Color.voyaMuted)
-                                    .lineLimit(2)
-                            }
-                        } else {
-                            Text(missionStatus(mission))
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(Color.voyaTeal)
-                        }
-                    }
-                    Spacer(minLength: 4)
-                    if mission.status != .completed {
-                        Button { onComplete(mission) } label: {
-                            Image(systemName: "checkmark.circle")
-                                .font(.headline)
-                                .foregroundStyle(Color.voyaMuted)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                AgentMissionResultRow(mission: mission) {
+                    onComplete(mission)
                 }
             }
         }
@@ -1013,7 +973,60 @@ private struct AgentMissionBoardCard: View {
         draft = ""
     }
 
-    private func missionStatus(_ mission: AgentMission) -> String {
+}
+
+private struct AgentMissionResultRow: View {
+    let mission: AgentMission
+    let onComplete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: mission.kind.symbol)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color.voyaTeal)
+                    .frame(width: 36, height: 36)
+                    .background(Color.voyaMint)
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mission.resultTitle ?? mission.title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(Color.voyaInk)
+                    Text(mission.resultSummary ?? mission.detail)
+                        .font(.caption.weight(mission.resultSummary == nil ? .regular : .semibold))
+                        .foregroundStyle(mission.resultSummary == nil ? Color.voyaMuted : Color.voyaTeal)
+                        .lineLimit(mission.resultArtifact == nil ? 3 : 4)
+                    if mission.resultSummary == nil {
+                        Text(missionStatus)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Color.voyaTeal)
+                    }
+                }
+                Spacer(minLength: 4)
+                if mission.status != .completed {
+                    Button(action: onComplete) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.headline)
+                            .foregroundStyle(Color.voyaMuted)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if let artifact = mission.resultArtifact, artifact.kind == "trip_plan" {
+                AgentTripPlanPreview(artifact: artifact, mission: mission)
+            } else if mission.resultSummary != nil {
+                ForEach((mission.resultActions ?? []).prefix(2), id: \.self) { action in
+                    Label(action, systemImage: "arrow.right.circle")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Color.voyaMuted)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var missionStatus: String {
         switch mission.status {
         case .queued: String(localized: "Queued for Voya's team")
         case .running: String(localized: "Agents are working")
@@ -1022,6 +1035,91 @@ private struct AgentMissionBoardCard: View {
         case .completed: String(localized: "Completed")
         case .failed: mission.lastError ?? String(localized: "Needs another attempt")
         case .cancelled: String(localized: "Cancelled")
+        }
+    }
+}
+
+private struct AgentTripPlanPreview: View {
+    let artifact: AgentMissionArtifact
+    let mission: AgentMission
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Divider()
+            HStack(spacing: 7) {
+                Label(
+                    mission.usedAI == true ? String(localized: "OpenAI agent") : String(localized: "Safe offline draft"),
+                    systemImage: mission.usedAI == true ? "brain.head.profile" : "doc.text"
+                )
+                if let tools = mission.toolsUsed, !tools.isEmpty {
+                    Label("\(tools.count) tools used", systemImage: "wrench.and.screwdriver")
+                }
+                Text("\(Int((artifact.confidence * 100).rounded()))%")
+            }
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(Color.voyaTeal)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Recommended timing")
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(Color.voyaMuted)
+                Text(artifact.timingRecommendation)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.voyaInk)
+            }
+
+            ForEach(artifact.days.prefix(4)) { day in
+                HStack(alignment: .top, spacing: 10) {
+                    Text("\(day.day)")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(Color.voyaInk)
+                        .frame(width: 28, height: 28)
+                        .background(Color.voyaMint)
+                        .clipShape(Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(day.title)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                        Text(day.area)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(Color.voyaTeal)
+                        Text([day.morning, day.afternoon, day.evening].filter { !$0.isEmpty }.joined(separator: " · "))
+                            .font(.caption2)
+                            .foregroundStyle(Color.voyaMuted)
+                            .lineLimit(3)
+                    }
+                }
+            }
+
+            if artifact.days.count > 4 {
+                Text("+\(artifact.days.count - 4) more days in the agent plan")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color.voyaTeal)
+            }
+
+            let requiredDecisions = artifact.decisions.filter(\.required)
+            if !requiredDecisions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("YOUR DECISIONS")
+                        .font(.caption2.weight(.black))
+                        .tracking(0.6)
+                        .foregroundStyle(Color.voyaGold)
+                    ForEach(requiredDecisions.prefix(3)) { decision in
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(decision.title).font(.caption.weight(.bold))
+                                Text(decision.detail).font(.caption2).foregroundStyle(Color.voyaMuted)
+                            }
+                        } icon: {
+                            Image(systemName: "questionmark.circle.fill")
+                        }
+                    }
+                }
+                .foregroundStyle(Color.voyaInk)
+                .padding(10)
+                .background(Color.voyaGold.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
         }
     }
 }

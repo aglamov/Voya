@@ -5,10 +5,10 @@ import CoreVideo
 let workspace = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let folder = workspace.appendingPathComponent("docs/devpost-video")
 let imageURL = folder.appendingPathComponent("background.png")
-let outputURL = folder.appendingPathComponent("background-v3.mp4")
+let outputURL = folder.appendingPathComponent("background-v6.mp4")
 let width = 1920
 let height = 1080
-let duration = CMTime(seconds: 140, preferredTimescale: 600)
+let duration = CMTime(seconds: 108, preferredTimescale: 600)
 
 guard let image = NSImage(contentsOf: imageURL),
       let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {

@@ -6,13 +6,13 @@ let folder = workspace.appendingPathComponent("docs/devpost-video")
 let frames = folder.appendingPathComponent("frames")
 try FileManager.default.createDirectory(at: frames, withIntermediateDirectories: true)
 
-let asset = AVURLAsset(url: folder.appendingPathComponent("Voya-OpenAI-Build-Week-Demo-v4.mp4"))
+let asset = AVURLAsset(url: folder.appendingPathComponent("Voya-OpenAI-Build-Week-Demo-final-v2.mp4"))
 let generator = AVAssetImageGenerator(asset: asset)
 generator.appliesPreferredTrackTransform = true
 generator.requestedTimeToleranceBefore = .zero
 generator.requestedTimeToleranceAfter = .zero
 
-for second in [2, 28, 58, 88, 112, 136] {
+for second in [2, 22, 48, 68, 88, 104] {
     let image = try generator.copyCGImage(
         at: CMTime(seconds: Double(second), preferredTimescale: 600),
         actualTime: nil
