@@ -15,6 +15,7 @@ import {
   type TravelEvent,
   type TravelEventType
 } from "./_travel-events.js";
+import { markFlightAlertSelfTestGateReceived } from "./_flight-self-test.js";
 
 export type FlightSignal = {
   provider: "flightaware";
@@ -299,6 +300,20 @@ export async function processFlightSignal(signal: FlightSignal) {
       gate: signal.gate
     }
   });
+  if (event.type === "gate_assigned" || event.type === "gate_changed") {
+    const installIds = [...new Set(storedTargets.flatMap((target) => target.appInstallId ?? []))];
+    await Promise.all(installIds.map((installId) => markFlightAlertSelfTestGateReceived({
+      installId,
+      flightNumber: signal.flightNumber,
+      flightDate: signal.flightDate,
+      gate: signal.gate.departureGate,
+      terminal: signal.gate.departureTerminal,
+      eventId: event.id,
+      eventSummary: event.summary,
+      receivedAt: signal.receivedAt,
+      pushSent: notification.drain.sent > 0
+    })));
+  }
 
   const tripIds = [...new Set(storedTargets.flatMap((target) => target.tripId ?? []))];
   const dispatches = await Promise.all(tripIds.map((tripId) => dispatchGuardianEvent(tripId, {

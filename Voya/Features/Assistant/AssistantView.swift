@@ -335,6 +335,8 @@ struct AssistantView: View {
                         Task { await store.refreshGuardian(for: trip) }
                     }
 
+                    FlightAlertLiveTestCard()
+
                     AssistantSyncStatusCard(
                         stage: processingStage,
                         isRefreshing: isRefreshingIntelligence || intelligence.isPlaceholder,
@@ -397,6 +399,7 @@ struct AssistantView: View {
                         message: "Import a confirmation and Voya will turn the itinerary into stages, local context, risks, and a practical plan.",
                         symbol: "message.badge"
                     )
+                    FlightAlertLiveTestCard()
                     conversationCard
                 }
 
@@ -2836,6 +2839,189 @@ struct AssistantConversationCard: View {
 
     private var canSend: Bool {
         !isAnswering && !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+private struct FlightAlertLiveTestCard: View {
+    @State private var result: FlightAlertSelfTestResponse?
+    @State private var isStarting = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: statusSymbol)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(statusColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Live gate notification test")
+                        .font(.headline)
+                        .foregroundStyle(Color.voyaInk)
+                    Text(statusTitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                }
+                Spacer()
+            }
+
+            Text(statusDetail)
+                .font(.subheadline)
+                .foregroundStyle(Color.voyaMuted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let flight = result?.flightNumber {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(flight)
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                        Text(routeText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.voyaMuted)
+                    }
+                    Spacer()
+                    if let departureText {
+                        Text(departureText)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.voyaInk)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+                .padding(13)
+                .background(Color.voyaSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            }
+
+            if result?.status == "armed" {
+                Label(
+                    result?.confirmationPushSent == true
+                        ? String(localized: "Test push delivered. The next push must come from a real gate event.")
+                        : String(localized: "The FlightAware subscription is active; waiting for a real gate event."),
+                    systemImage: result?.confirmationPushSent == true ? "checkmark.circle.fill" : "clock.badge.checkmark"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.voyaTeal)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                Task { await start() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isStarting {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                    }
+                    Text(buttonTitle)
+                        .font(.subheadline.weight(.bold))
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .foregroundStyle(.white)
+                .background(isStarting ? Color.voyaMuted : Color.voyaInk)
+                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isStarting)
+        }
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 10)
+        .task {
+            await refresh()
+        }
+        .task(id: result?.status) {
+            while !Task.isCancelled, result?.status == "armed" {
+                try? await Task.sleep(for: .seconds(20))
+                await refresh()
+            }
+        }
+    }
+
+    private var statusTitle: String {
+        if isStarting || result?.status == "searching" { return String(localized: "Finding a real flight") }
+        switch result?.status {
+        case "armed": return String(localized: "FlightAware subscription active")
+        case "gate_received": return String(localized: "Gate notification received")
+        case "failed": return String(localized: "Test needs attention")
+        default: return String(localized: "Ready to verify the full chain")
+        }
+    }
+
+    private var statusDetail: String {
+        if let error = result?.error, !error.isEmpty { return error }
+        switch result?.status {
+        case "armed":
+            return String(localized: "The agent found a flight with no departure gate, registered a FlightAware alert, and is now waiting. Voya will push the assigned gate to this iPhone.")
+        case "gate_received":
+            if let gate = result?.gate {
+                let prefix = result?.gatePushSent == true
+                    ? String(localized: "The complete FlightAware → Voya → APNs chain worked. Gate:")
+                    : String(localized: "Voya received the real gate event, but APNs delivery was not confirmed. Gate:")
+                return prefix + " \(gate)."
+            }
+            return String(localized: "The complete FlightAware → Voya → APNs chain worked.")
+        case "failed":
+            return String(localized: "Run the test again after checking notification access and backend configuration.")
+        default:
+            return String(localized: "Voya will find an upcoming flight whose gate is not assigned yet, subscribe to its real FlightAware updates, and send the result to this iPhone.")
+        }
+    }
+
+    private var buttonTitle: String {
+        if isStarting { return String(localized: "Finding flight…") }
+        return result?.status == "armed"
+            ? String(localized: "Refresh live status")
+            : String(localized: "Run live test")
+    }
+
+    private var statusSymbol: String {
+        switch result?.status {
+        case "armed": "bell.badge.fill"
+        case "gate_received": "checkmark.seal.fill"
+        case "failed": "exclamationmark.triangle.fill"
+        default: "airplane.departure"
+        }
+    }
+
+    private var statusColor: Color {
+        switch result?.status {
+        case "armed": Color.voyaTeal
+        case "gate_received": Color.green
+        case "failed": Color.orange
+        default: Color.voyaInk
+        }
+    }
+
+    private var routeText: String {
+        [result?.originAirport, result?.destinationAirport]
+            .compactMap { $0 }
+            .joined(separator: " → ")
+    }
+
+    private var departureText: String? {
+        guard let value = result?.departureAt else { return nil }
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value) else { return value }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func start() async {
+        isStarting = true
+        result = await VoyaPushRegistrationService.shared.startFlightAlertSelfTest()
+        isStarting = false
+    }
+
+    private func refresh() async {
+        if let current = await VoyaPushRegistrationService.shared.flightAlertSelfTestStatus(),
+           current.status != "idle" {
+            result = current
+        }
     }
 }
 

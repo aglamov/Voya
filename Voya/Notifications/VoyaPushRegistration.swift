@@ -55,6 +55,36 @@ final class VoyaPushRegistrationService {
         userDefaults.string(forKey: deviceTokenKey)
     }
 
+    func startFlightAlertSelfTest() async -> FlightAlertSelfTestResponse {
+        guard await VoyaNotificationScheduler.shared.requestAuthorizationIfNeeded() else {
+            return FlightAlertSelfTestResponse(
+                status: "failed",
+                error: String(localized: "Notifications are disabled for Voya. Enable them in iPhone Settings and try again.")
+            )
+        }
+        UIApplication.shared.registerForRemoteNotifications()
+        if currentDeviceToken == nil {
+            for _ in 0..<20 where currentDeviceToken == nil {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+        guard let deviceToken = currentDeviceToken else {
+            return FlightAlertSelfTestResponse(
+                status: "failed",
+                error: String(localized: "Voya could not get an APNs token. Run this test on a physical iPhone.")
+            )
+        }
+        return await flightAlertSelfTestRequest(method: "POST", deviceToken: deviceToken)
+            ?? FlightAlertSelfTestResponse(
+                status: "failed",
+                error: String(localized: "The live FlightAware test could not reach the Voya backend.")
+            )
+    }
+
+    func flightAlertSelfTestStatus() async -> FlightAlertSelfTestResponse? {
+        await flightAlertSelfTestRequest(method: "GET", deviceToken: nil)
+    }
+
     func registerDeviceToken(_ data: Data) async {
         let token = data.map { String(format: "%02x", $0) }.joined()
         let previousToken = userDefaults.string(forKey: deviceTokenKey)
@@ -293,6 +323,33 @@ final class VoyaPushRegistrationService {
         }
     }
 
+    private func flightAlertSelfTestRequest(method: String, deviceToken: String?) async -> FlightAlertSelfTestResponse? {
+        guard let baseURL else {
+            return FlightAlertSelfTestResponse(
+                status: "failed",
+                error: String(localized: "The Voya backend URL is not configured.")
+            )
+        }
+
+        do {
+            var request = URLRequest(url: baseURL.appendingPathComponent("api/flight-alert-self-test"))
+            VoyaAPIConfiguration.authorize(&request)
+            request.httpMethod = method
+            request.timeoutInterval = 45
+            if let deviceToken {
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONEncoder().encode(FlightAlertSelfTestPayload(deviceToken: deviceToken))
+            }
+            let (data, _) = try await session.data(for: request)
+            return try JSONDecoder().decode(FlightAlertSelfTestResponse.self, from: data)
+        } catch {
+            #if DEBUG
+            print("[Voya] Flight alert self-test failed: \(error.localizedDescription)")
+            #endif
+            return nil
+        }
+    }
+
     private var installID: String {
         VoyaAPIConfiguration.installID
     }
@@ -437,4 +494,34 @@ struct FlightAlertWatchStatus: Decodable {
     var location: String?
     var status: Int?
     var error: String?
+}
+
+private struct FlightAlertSelfTestPayload: Encodable {
+    var deviceToken: String
+}
+
+struct FlightAlertSelfTestResponse: Decodable, Equatable {
+    var status: String
+    var flightNumber: String?
+    var flightDate: String?
+    var originAirport: String?
+    var destinationAirport: String?
+    var departureAt: String?
+    var terminal: String?
+    var gate: String?
+    var alertId: String?
+    var monitoringState: String?
+    var fallbackPolling: Bool?
+    var confirmationPushSent: Bool?
+    var gatePushSent: Bool?
+    var createdAt: String?
+    var updatedAt: String?
+    var gateReceivedAt: String?
+    var eventSummary: String?
+    var error: String?
+
+    init(status: String, error: String? = nil) {
+        self.status = status
+        self.error = error
+    }
 }

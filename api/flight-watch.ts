@@ -11,7 +11,7 @@ import {
 import { protectPublicEndpoint } from "./_security.js";
 import { flightWatchMonitoringStatus, scheduleFlightWatch } from "./_flight-monitor.js";
 
-type FlightWatchPayload = {
+export type FlightWatchPayload = {
   appInstallId?: string;
   deviceToken?: string;
   itemId?: string;
@@ -73,15 +73,14 @@ function flightAwareAlertPayload(
   destinationAirport: string | undefined
 ) {
   return {
-    description: `Voya ${flightNumber}${date ? ` ${date}` : ""}`,
     ident: flightNumber,
     ident_iata: flightNumber,
     origin_iata: iataAirport(originAirport),
     destination_iata: iataAirport(destinationAirport),
     start: date,
     end: date,
-    enabled: true,
     target_url: flightAwareAlertTargetURL(),
+    impending_departure: [30, 15, 5],
     events: {
       arrival: true,
       cancelled: true,
@@ -260,14 +259,7 @@ async function flightAwareAlertStatus(key: string) {
   };
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-  if (!await protectPublicEndpoint(req, res, { name: "flight-watch", hourlyIPLimit: 120, hourlyInstallLimit: 40, maxBodyBytes: 24_000 })) return;
-
-  const payload = req.body as FlightWatchPayload;
+export async function registerFlightWatch(payload: FlightWatchPayload) {
   const flightNumber = normalizeFlightNumber(payload.flightNumber);
   const date = normalizeFlightDate(payload.date);
   const deviceToken = normalizeDeviceToken(payload.deviceToken);
@@ -277,14 +269,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const departureAt = clean(payload.departureAt);
 
   if (!flightNumber) {
-    return res.status(400).json({ error: "Invalid flight number." });
+    return { status: 400, body: { error: "Invalid flight number." } };
   }
   if (!appInstallId || !deviceToken) {
-    return res.status(400).json({ error: "A valid app installation ID and APNs device token are required." });
+    return { status: 400, body: { error: "A valid app installation ID and APNs device token are required." } };
   }
 
   if (!storageConfigured()) {
-    return res.status(202).json({
+    return { status: 202, body: {
       accepted: true,
       stored: false,
       flightKey: flightWatchKey(flightNumber, date),
@@ -301,7 +293,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         fallbackPolling: false,
         lastError: "Redis is required for durable flight monitoring."
       }
-    });
+    } };
   }
 
   const key = flightWatchKey(flightNumber, date);
@@ -368,7 +360,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
   const monitoring = await flightWatchMonitoringStatus(flightNumber, date);
 
-  return res.status(202).json({
+  return { status: 202, body: {
     accepted: true,
     stored: true,
     flightKey: key,
@@ -376,5 +368,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     alertWatch,
     monitoring,
     updatedAt: now
-  });
+  } };
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  if (!await protectPublicEndpoint(req, res, { name: "flight-watch", hourlyIPLimit: 120, hourlyInstallLimit: 40, maxBodyBytes: 24_000 })) return;
+  const result = await registerFlightWatch(req.body as FlightWatchPayload);
+  return res.status(result.status).json(result.body);
 }
