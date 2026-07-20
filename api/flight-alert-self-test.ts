@@ -75,8 +75,9 @@ async function scheduledDepartures(airport: string, now: Date) {
   const apiKey = process.env.FLIGHTAWARE_AEROAPI_KEY?.trim();
   if (!apiKey) throw new Error("FlightAware AeroAPI is not configured.");
 
-  const start = new Date(now.getTime() + 45 * 60_000).toISOString();
-  const end = new Date(now.getTime() + 8 * 60 * 60_000).toISOString();
+  const aeroAPITimestamp = (value: Date) => value.toISOString().replace(/\.\d{3}Z$/, "Z");
+  const start = aeroAPITimestamp(new Date(now.getTime() + 45 * 60_000));
+  const end = aeroAPITimestamp(new Date(now.getTime() + 8 * 60 * 60_000));
   const url = new URL(`/aeroapi/airports/${airport}/flights/scheduled_departures`, "https://aeroapi.flightaware.com");
   url.searchParams.set("start", start);
   url.searchParams.set("end", end);
@@ -86,7 +87,7 @@ async function scheduledDepartures(airport: string, now: Date) {
   });
   const data = await response.json().catch(() => undefined) as ScheduledDeparturesResponse & { detail?: string } | undefined;
   if (!response.ok) {
-    throw new Error(data?.detail ?? `FlightAware departure search failed with HTTP ${response.status}.`);
+    throw new Error(`FlightAware departure search at ${airport} failed: ${data?.detail ?? `HTTP ${response.status}`}.`);
   }
   return data?.scheduled_departures ?? data?.flights ?? [];
 }
@@ -166,9 +167,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     const alertWatch = "alertWatch" in registration.body ? registration.body.alertWatch : undefined;
     if (registration.status >= 300 || !alertWatch?.subscribed) {
-      throw new Error(alertWatch && "error" in alertWatch
+      const reason = alertWatch && "error" in alertWatch
         ? alertWatch.error
-        : "FlightAware did not confirm the alert subscription.");
+        : "FlightAware did not confirm the alert subscription.";
+      throw new Error(`FlightAware alert registration failed: ${reason}`);
     }
 
     const monitoring = "monitoring" in registration.body ? registration.body.monitoring : undefined;
