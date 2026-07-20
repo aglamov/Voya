@@ -129,7 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!await protectPublicEndpoint(req, res, {
     name: "flight-alert-self-test",
     hourlyIPLimit: 30,
-    hourlyInstallLimit: 8,
+    hourlyInstallLimit: 30,
     maxBodyBytes: 8_000
   })) return;
 
