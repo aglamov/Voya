@@ -25,6 +25,7 @@ struct ItineraryItemDetailView: View {
     @State private var isRefreshingFlightStatus = false
     @State private var flightStatusMessage: String?
     @State private var flightAlertWatchStatus: FlightAlertWatchStatus?
+    @State private var flightWatchMonitoringStatus: FlightWatchMonitoringStatus?
     @State private var isUpdatingFlightAlertWatch = false
     @State private var flightAlertWatchMessage: String?
     @State private var isBookingDetailsExpanded = false
@@ -721,7 +722,14 @@ struct ItineraryItemDetailView: View {
 
     private var flightAlertWatchDetail: String {
         if let error = flightAlertWatchStatus?.error?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            if flightWatchMonitoringStatus?.fallbackPolling == true {
+                return String(localized: "Provider alerts are degraded. Voya is checking the flight automatically instead.")
+            }
             return error
+        }
+
+        if isFlightAlertSubscribed && flightWatchMonitoringStatus?.fallbackPolling == true {
+            return String(localized: "FlightAware events and automatic checks are monitoring gate and schedule changes.")
         }
 
         if isFlightAlertSubscribed {
@@ -830,12 +838,14 @@ struct ItineraryItemDetailView: View {
             if let candidate = response.candidate {
                 let watchResponse = await VoyaPushRegistrationService.shared.registerFlightWatch(for: item, tripID: tripID, candidate: candidate)
                 flightAlertWatchStatus = watchResponse?.alertWatch
+                flightWatchMonitoringStatus = watchResponse?.monitoring
                 if showCompletionMessage {
                     flightStatusMessage = String(localized: "Flight status refreshed.")
                 }
             } else {
                 let watchResponse = await VoyaPushRegistrationService.shared.registerFlightWatch(for: item, tripID: tripID)
                 flightAlertWatchStatus = watchResponse?.alertWatch
+                flightWatchMonitoringStatus = watchResponse?.monitoring
                 flightStatusMessage = response.warnings.first ?? response.validation.reasons.first ?? String(localized: "No matching live flight was found.")
             }
         } catch {
@@ -849,6 +859,7 @@ struct ItineraryItemDetailView: View {
     private func updateFlightAlertWatchState() async {
         let response = await VoyaPushRegistrationService.shared.registerFlightWatch(for: item, tripID: tripID)
         flightAlertWatchStatus = response?.alertWatch
+        flightWatchMonitoringStatus = response?.monitoring
     }
 
     @MainActor
@@ -868,6 +879,7 @@ struct ItineraryItemDetailView: View {
             subscribeToAlerts: true
         )
         flightAlertWatchStatus = response?.alertWatch
+        flightWatchMonitoringStatus = response?.monitoring
 
         if response?.alertWatch?.subscribed == true {
             flightAlertWatchMessage = String(localized: "Flight alerts are enabled for this flight.")

@@ -351,6 +351,7 @@ struct TripsView: View {
         .onAppear {
             selectDisplayedTripIfNeeded()
             openNotificationItemIfNeeded()
+            openNotificationTransferIfNeeded()
         }
         .onChange(of: tripListMode) { _, _ in
             selectDisplayedTripIfNeeded()
@@ -358,9 +359,13 @@ struct TripsView: View {
         .onChange(of: store.trips.count) { _, _ in
             selectDisplayedTripIfNeeded()
             openNotificationItemIfNeeded()
+            openNotificationTransferIfNeeded()
         }
         .onChange(of: store.notificationItemID) { _, _ in
             openNotificationItemIfNeeded()
+        }
+        .onChange(of: store.notificationTransferID) { _, _ in
+            openNotificationTransferIfNeeded()
         }
         .sheet(item: $tripBeingEdited) { trip in
             EditTripView(trip: trip) { draft in
@@ -514,6 +519,38 @@ struct TripsView: View {
                 return
             }
             itemBeingViewed = item
+        }
+    }
+
+    private func openNotificationTransferIfNeeded() {
+        guard let transferID = store.notificationTransferID else {
+            return
+        }
+
+        let destination = store.trips.lazy.compactMap { trip -> (Trip, MobilityTransferContext)? in
+            let context = transferContexts(
+                for: trip,
+                itinerary: store.timelineItinerary(for: trip)
+            ).first(where: { $0.id == transferID })
+            return context.map { (trip, $0) }
+        }.first
+
+        // Consume before changing presentation state to prevent onChange from
+        // attempting to present the same transfer twice.
+        store.notificationTransferID = nil
+        guard let (trip, context) = destination else { return }
+
+        tripListMode = store.isArchived(trip, at: Date()) ? .archive : .upcoming
+        store.selectedTripID = trip.id
+        tripBeingEdited = nil
+        tripAddingItem = nil
+        itemBeingViewed = nil
+        transferBeingViewed = nil
+
+        Task { @MainActor in
+            await Task.yield()
+            guard transferBeingViewed == nil else { return }
+            transferBeingViewed = context
         }
     }
 

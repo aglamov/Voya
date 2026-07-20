@@ -8,6 +8,7 @@ extension Notification.Name {
 struct VoyaNotificationDestination: Sendable {
     let tripID: UUID?
     let itemID: UUID?
+    let transferID: String?
     let eventType: String?
 }
 
@@ -153,13 +154,17 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
         content.body = String(localized: "Open the route and start moving to \(context.destination).")
         content.sound = .default
         content.threadIdentifier = context.id
-        content.userInfo = [
+        var userInfo: [String: Any] = [
             "transferID": context.id,
             "kind": "transfer",
             "mode": option.mode.rawValue,
             "leaveBy": leaveBy,
             "reminderMinutes": Int(transferReminderLeadTime / 60)
         ]
+        if let tripID = context.tripID {
+            userInfo["tripID"] = tripID.uuidString
+        }
+        content.userInfo = userInfo
 
         let trigger = UNTimeIntervalNotificationTrigger(
             timeInterval: triggerInterval,
@@ -208,12 +213,20 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
             ?? (remoteData?["itemID"] as? String)
             ?? (userInfo["itemId"] as? String)
             ?? (userInfo["itemID"] as? String)
+        let transferID = (remoteData?["transferId"] as? String)
+            ?? (remoteData?["transferID"] as? String)
+            ?? (userInfo["transferId"] as? String)
+            ?? (userInfo["transferID"] as? String)
         let eventType = (remoteData?["eventType"] as? String)
             ?? (userInfo["eventType"] as? String)
+            ?? ((userInfo["kind"] as? String) == "transfer" ? "transfer" : nil)
+        let resolvedTripID = tripID.flatMap(UUID.init(uuidString:))
+            ?? Self.tripID(fromNotificationIdentifier: response.notification.request.identifier)
         await MainActor.run {
             let destination = VoyaNotificationDestination(
-                tripID: tripID.flatMap(UUID.init(uuidString:)),
+                tripID: resolvedTripID,
                 itemID: itemID.flatMap(UUID.init(uuidString:)),
+                transferID: transferID,
                 eventType: eventType
             )
             pendingDestination = destination
@@ -223,6 +236,13 @@ final class VoyaNotificationScheduler: NSObject, UNUserNotificationCenterDelegat
                 userInfo: ["destination": destination]
             )
         }
+    }
+
+    private nonisolated static func tripID(fromNotificationIdentifier identifier: String) -> UUID? {
+        let prefix = "voya.trip."
+        guard identifier.hasPrefix(prefix) else { return nil }
+        let suffix = identifier.dropFirst(prefix.count)
+        return UUID(uuidString: String(suffix.prefix(36)))
     }
 
     private func notificationRequests(for trip: VoyaNotificationTrip, now: Date) -> [UNNotificationRequest] {

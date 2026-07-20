@@ -393,41 +393,21 @@ function localCuration(mood: string, savedThemes: string[]) {
   return { stories, curatorNote: mood ? `Ideas selected around “${mood}”.` : "A small collection of journeys worth wanting." };
 }
 
-export async function buildInspirationFeed(mood: string, savedThemes: string[] = [], locale = "en") {
+export async function scoutInspirationCandidates(mood: string, savedThemes: string[] = [], locale = "en") {
   const russian = isRussianLocale(locale);
   const liveStories = await ticketmasterStories(mood, russian);
-  const staticStories = STORIES.map((story) => localizedStory(story, russian));
-  const candidates = [...liveStories, ...staticStories];
   const local = localCuration(mood, savedThemes);
-  let curated = {
-    stories: [...liveStories, ...local.stories.map((story) => localizedStory(story, russian))],
-    curatorNote: local.curatorNote
-  };
-  let usedAI = false;
-  if (mood && process.env.OPENAI_API_KEY) {
-    try {
-      const { object } = await generateObject({
-        model: openai(openAIModelFor("brief")),
-        schema: curationSchema,
-        system: "You are Voya's travel editor. Rank only the supplied verified story IDs. Never invent an event, date, price, or destination. Prefer a varied, emotionally coherent collection over generic popularity.",
-        prompt: JSON.stringify({ mood, savedThemes, candidates: candidates.map(({ id, title, hook, theme, moods, timing, mainRisk }) => ({ id, title, hook, theme, moods, timing, mainRisk })) })
-      });
-      const byId = new Map(candidates.map((story) => [story.id, story]));
-      const ordered = object.orderedIds.flatMap((id) => byId.get(id) ?? []);
-      const remainder = candidates.filter((story) => !object.orderedIds.includes(story.id));
-      curated = { stories: [...ordered, ...remainder], curatorNote: object.curatorNote };
-      usedAI = true;
-    } catch {
-      // The deterministic editorial feed is intentionally usable without AI.
-    }
-  }
-  const shortlist = diversifiedSelection(curated.stories, mood, 8);
-  const enrichedStories = await Promise.all(shortlist.map(async (story) => {
+  return [...liveStories, ...local.stories.map((story) => localizedStory(story, russian))];
+}
+
+export async function verifyInspirationCandidates(candidates: InspirationStory[], mood: string, locale = "en") {
+  const russian = isRussianLocale(locale);
+  const shortlist = diversifiedSelection(candidates, mood, 8);
+  return await Promise.all(shortlist.map(async (story) => {
     const result = await findGooglePlace(`${story.destination}, ${story.country}`, russian ? "ru" : "en");
     const place = "data" in result ? result.data : undefined;
     return {
       ...story,
-      selectionReason: selectionReason(story, mood, russian),
       verificationSummary: [
         story.timing,
         place
@@ -448,18 +428,62 @@ export async function buildInspirationFeed(mood: string, savedThemes: string[] =
       } : undefined
     };
   }));
+}
+
+export function editInspirationCandidates(candidates: InspirationStory[], mood: string, locale = "en") {
+  const russian = isRussianLocale(locale);
+  return candidates.map((story) => ({
+    ...story,
+    selectionReason: selectionReason(story, mood, russian)
+  }));
+}
+
+export async function curateInspirationCandidates(
+  candidates: InspirationStory[],
+  mood: string,
+  savedThemes: string[] = [],
+  locale = "en"
+) {
+  const russian = isRussianLocale(locale);
+  let ordered = candidates;
+  let usedAI = false;
+  let aiCuratorNote: string | undefined;
+  if (mood && process.env.OPENAI_API_KEY) {
+    try {
+      const { object } = await generateObject({
+        model: openai(openAIModelFor("brief")),
+        schema: curationSchema,
+        system: "You are Voya's travel editor. Rank only the supplied verified story IDs. Never invent an event, date, price, or destination. Prefer a varied, emotionally coherent collection over generic popularity.",
+        prompt: JSON.stringify({ mood, savedThemes, candidates: candidates.map(({ id, title, hook, theme, moods, timing, mainRisk }) => ({ id, title, hook, theme, moods, timing, mainRisk })) })
+      });
+      const byId = new Map(candidates.map((story) => [story.id, story]));
+      const ranked = object.orderedIds.flatMap((id) => byId.get(id) ?? []);
+      const remainder = candidates.filter((story) => !object.orderedIds.includes(story.id));
+      ordered = [...ranked, ...remainder];
+      aiCuratorNote = object.curatorNote;
+      usedAI = true;
+    } catch {
+      // The deterministic editorial feed is intentionally usable without AI.
+    }
+  }
   return {
-    ...curated,
-    stories: diversifiedSelection(enrichedStories, mood, 6),
-    curatorNote: russian
+    stories: diversifiedSelection(ordered, mood, 6),
+    curatorNote: aiCuratorNote ?? (russian
       ? mood.trim()
-        ? `Агенты сравнили ${enrichedStories.length} проверенных вариантов по запросу «${mood.trim()}». Здесь самые сильные и разнообразные поводы отправиться в путь.`
-        : `Агенты сравнили ${enrichedStories.length} проверенных вариантов. Здесь самые сильные и разнообразные поводы отправиться в путь.`
+        ? `Агенты сравнили ${candidates.length} проверенных вариантов по запросу «${mood.trim()}». Здесь самые сильные и разнообразные поводы отправиться в путь.`
+        : `Агенты сравнили ${candidates.length} проверенных вариантов. Здесь самые сильные и разнообразные поводы отправиться в путь.`
       : mood.trim()
-        ? `${enrichedStories.length} verified candidates were compared for “${mood.trim()}”. These are the strongest and most varied reasons to travel.`
-        : `${enrichedStories.length} verified candidates were compared. These are the strongest and most varied reasons to travel.`,
+        ? `${candidates.length} verified candidates were compared for “${mood.trim()}”. These are the strongest and most varied reasons to travel.`
+        : `${candidates.length} verified candidates were compared. These are the strongest and most varied reasons to travel.`),
     usedAI
   };
+}
+
+export async function buildInspirationFeed(mood: string, savedThemes: string[] = [], locale = "en") {
+  const scouted = await scoutInspirationCandidates(mood, savedThemes, locale);
+  const verified = await verifyInspirationCandidates(scouted, mood, locale);
+  const edited = editInspirationCandidates(verified, mood, locale);
+  return await curateInspirationCandidates(edited, mood, savedThemes, locale);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -489,7 +513,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const locale = typeof body.locale === "string" ? body.locale.trim().slice(0, 40) || "en" : "en";
   const release = newInspirationRelease(installId, mood, deviceToken, locale);
   await saveInspirationRelease(release);
-  const queued = await enqueueAgentJob({ type: "inspiration", installId, releaseId: release.id });
+  const queued = await enqueueAgentJob({ type: "inspiration", installId, releaseId: release.id, stage: "scouting" });
   if (queued) {
     return res.status(202).json({ release, queued: true });
   }

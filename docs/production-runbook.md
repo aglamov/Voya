@@ -62,9 +62,13 @@ OpenWeather One Call 4.0 includes a finite free daily allowance. Start with the 
 
 Set `QSTASH_TOKEN` to the Upstash QStash publish token. Voya publishes jobs to `/api/agent-worker` with `Authorization: Bearer <AGENT_WORKER_SECRET>` forwarded by QStash.
 
-Create a second QStash schedule with cron expression `*/10 * * * *`, destination `https://voya-lime.vercel.app/api/agent-monitor`, method `POST`, and `Authorization: Bearer <AGENT_MONITOR_SECRET>`. The monitor dispatches due recurring Guardian missions. FlightAware and weather events can also wake the relevant Guardian immediately.
+Create a second QStash schedule with cron expression `*/10 * * * *`, destination `https://voya-lime.vercel.app/api/agent-monitor`, method `POST`, and `Authorization: Bearer <AGENT_MONITOR_SECRET>`. This is the durable travel monitor: it dispatches due Guardian missions, performs adaptive FlightAware fallback checks, and retries pending APNs outbox deliveries. FlightAware and weather events can also wake the relevant Guardian immediately.
+
+Gate and schedule notifications do not depend on an AI run. A FlightAware callback is verified against a fresh operational snapshot, converted into a deterministic travel event such as `gate_assigned` or `gate_changed`, persisted, and queued for APNs delivery before Guardian receives the same event. Registered flights are also checked adaptively: infrequently when distant, hourly inside 24 hours, and every 10–15 minutes around departure. `FLIGHT_MONITOR_MAX_PER_RUN` optionally caps checks per monitor invocation and defaults to 12.
 
 When QStash is not configured outside production, initial jobs execute inline so local development remains usable. Production health requires QStash and both agent secrets.
+
+Inspiration is also a durable staged workflow. Scout gathers editorial and live-event candidates, Verifier resolves evidence and destinations, Editor prepares the traveller-facing rationale, and Curator ranks only the verified set. Intermediate work is stored separately for 24 hours and every stage queues the next one, so the progress shown in the app corresponds to completed work rather than decorative timers. The inline fallback runs the same four operations in one request.
 
 Enable Places API (New), Air Quality API, and Pollen API in the Google Cloud project. The existing `GOOGLE_ROUTES_API_KEY` is reused automatically, so no additional Vercel variables are required when that key allows Routes API plus these three APIs. A shared `GOOGLE_MAPS_API_KEY` or separate service keys remain supported. Restrict the shared key to those four APIs and backend usage. `/api/health` performs real probe requests and reports each capability independently without exposing key values.
 
@@ -96,7 +100,7 @@ curl --fail-with-body \
   --header "Authorization: Bearer YOUR_WEATHER_MONITOR_SECRET"
 ```
 
-`/api/health` returns HTTP 200 only when every retained production provider, Redis, APNs production mode, weather-schedule protection, callback secret, and public URL are configured and Redis responds. It reports the optional shared client-key protection separately.
+`/api/health` returns HTTP 200 only when every retained production provider, Redis, APNs production mode, weather-schedule protection, callback secret, and public URL are configured, Redis responds, and `agentMonitorRecent` confirms that the durable monitor completed within the last 30 minutes. It reports the optional shared client-key protection separately.
 
 ## 8. Release smoke test
 
@@ -109,8 +113,9 @@ curl --fail-with-body \
 7. Check QStash delivery logs and Vercel function logs after at least one ten-minute interval.
 8. Verify `/api/health` returns HTTP 200.
 9. Open Inspiration on a fresh install, verify the announcement is initially empty, request a collection, observe the preparing state, and confirm the ready push opens the finished edition.
-10. Create a mission, verify `queued → running → completed/active`, and confirm its result appears in Assistant.
-11. Refresh Trip Guardian for a trip with a destination and verify Sentinel reports attributed air-quality and pollen context or omits an unsupported regional forecast without failing the report.
+10. Register a dated flight and verify the response contains `alertWatch.subscribed` plus `monitoring.fallbackPolling`. Trigger a controlled FlightAware callback twice and verify the first produces one typed travel event while the duplicate does not create a second APNs delivery.
+11. Create a mission, verify `queued → running → completed/active`, and confirm its result appears in Assistant.
+12. Refresh Trip Guardian for a trip with a destination and verify Sentinel reports attributed air-quality and pollen context or omits an unsupported regional forecast without failing the report.
 
 ## 9. App Store essentials
 

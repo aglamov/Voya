@@ -204,6 +204,7 @@ final class VoyaPushRegistrationService {
                 itemId: item.id.uuidString,
                 flightNumber: flightNumber,
                 date: Self.flightDate(for: item),
+                departureAt: item.startsAt,
                 originAirport: candidate?.originAirport ?? candidate?.originAirportIcao,
                 destinationAirport: candidate?.destinationAirport ?? candidate?.destinationAirportIcao,
                 subscribeToAlerts: subscribeToAlerts
@@ -400,6 +401,7 @@ private struct FlightWatchRegistrationPayload: Encodable {
     var itemId: String
     var flightNumber: String
     var date: String?
+    var departureAt: Date?
     var originAirport: String?
     var destinationAirport: String?
     var subscribeToAlerts: Bool
@@ -411,8 +413,19 @@ struct FlightWatchRegistrationResponse: Decodable {
     var flightKey: String?
     var deviceLinked: Bool?
     var alertWatch: FlightAlertWatchStatus?
+    var monitoring: FlightWatchMonitoringStatus?
     var updatedAt: String?
     var warning: String?
+}
+
+struct FlightWatchMonitoringStatus: Decodable {
+    var state: String
+    var fallbackPolling: Bool
+    var nextCheckAt: String?
+    var lastCheckedAt: String?
+    var lastProviderEventAt: String?
+    var lastEventType: String?
+    var lastError: String?
 }
 
 struct FlightAlertWatchStatus: Decodable {

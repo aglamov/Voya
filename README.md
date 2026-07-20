@@ -163,6 +163,7 @@ Optional enrichment environment variables:
 - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`: required production Redis storage for rate limiting, watches, and deduplication.
 - `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_PRIVATE_KEY`, and `APNS_ENV`: required push credentials. Use `APNS_ENV=production` for TestFlight/App Store builds.
 - `VOYA_PUSH_TEST_DEVICE_TOKENS`: optional comma-separated APNs token fallback for testing webhook delivery before Redis-backed device registration is enabled.
+- `FLIGHT_MONITOR_MAX_PER_RUN`: optional cap for adaptive FlightAware fallback checks performed by the existing agent-monitor schedule; defaults to 12.
 
 Flight support endpoints:
 

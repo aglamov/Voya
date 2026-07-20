@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import http2 from "node:http2";
 
-type APNsAlert = {
+export type APNsAlert = {
   title: string;
   body: string;
   threadId?: string;

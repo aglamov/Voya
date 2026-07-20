@@ -4,15 +4,31 @@ import { sendAPNsAlert } from "./_apns.js";
 import { googleTravelContext } from "./_google-context.js";
 import {
   type AgentJob,
+  type InspirationAgentStage,
+  enqueueAgentJob,
   readInspirationRelease,
   readMission,
   saveInspirationRelease,
   saveMission
 } from "./_agents.js";
-import { buildInspirationFeed } from "./inspiration.js";
+import {
+  curateInspirationCandidates,
+  editInspirationCandidates,
+  scoutInspirationCandidates,
+  verifyInspirationCandidates,
+  type InspirationStory
+} from "./inspiration.js";
 import { runSpecialistAgent, type SpecialistAgent } from "./specialist-agents.js";
 import { runPlanningAgent } from "./_openai-agent-runtime.js";
 import { redisCommand, storageConfigured } from "./_storage.js";
+
+type InspirationWork = {
+  candidates?: InspirationStory[];
+  verified?: InspirationStory[];
+  edited?: InspirationStory[];
+};
+
+const developmentInspirationWork = new Map<string, InspirationWork>();
 
 function firstHeader(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -61,7 +77,7 @@ async function providerContext(context: Record<string, unknown>) {
 
 async function claim(job: AgentJob) {
   if (!storageConfigured()) return true;
-  const id = job.type === "mission" ? job.missionId : job.releaseId;
+  const id = job.type === "mission" ? job.missionId : `${job.releaseId}:${job.stage ?? "scouting"}`;
   const result = await redisCommand<string | null>([
     "SET",
     `voya:agent-job-lock:${job.type}:${id}`,
@@ -73,17 +89,49 @@ async function claim(job: AgentJob) {
   return result === "OK";
 }
 
-async function processInspiration(job: Extract<AgentJob, { type: "inspiration" }>) {
+async function readInspirationWork(releaseId: string) {
+  if (!storageConfigured()) return developmentInspirationWork.get(releaseId) ?? {};
+  const raw = await redisCommand<string>(["GET", `voya:inspiration-work:${releaseId}`]);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as InspirationWork;
+  } catch {
+    return {};
+  }
+}
+
+async function saveInspirationWork(releaseId: string, work: InspirationWork) {
+  if (!storageConfigured()) {
+    developmentInspirationWork.set(releaseId, work);
+    return;
+  }
+  await redisCommand([
+    "SET",
+    `voya:inspiration-work:${releaseId}`,
+    JSON.stringify(work),
+    "EX",
+    24 * 60 * 60
+  ]);
+}
+
+async function clearInspirationWork(releaseId: string) {
+  developmentInspirationWork.delete(releaseId);
+  await redisCommand(["DEL", `voya:inspiration-work:${releaseId}`]);
+}
+
+async function processInspiration(
+  job: Extract<AgentJob, { type: "inspiration" }>
+): Promise<Record<string, unknown>> {
   const release = await readInspirationRelease(job.installId);
   if (!release || release.id !== job.releaseId || release.status === "ready") {
     return { skipped: true, reason: "Release is missing, replaced, or already ready." };
   }
 
-  const update = async (
-    stage: typeof release.stage,
-    progress: number,
-    active: "scout" | "verifier" | "editor" | "curator"
-  ) => {
+  const update = async (stage: InspirationAgentStage, progress: number) => {
+    const active = stage === "scouting" ? "scout"
+      : stage === "verifying" ? "verifier"
+        : stage === "editing" ? "editor"
+          : "curator";
     const next = {
       ...release,
       stage,
@@ -101,12 +149,44 @@ async function processInspiration(job: Extract<AgentJob, { type: "inspiration" }
     await saveInspirationRelease(release);
   };
 
+  const continueWith = async (stage: InspirationAgentStage): Promise<Record<string, unknown>> => {
+    const nextJob = { ...job, stage };
+    if (await enqueueAgentJob(nextJob)) {
+      return { ready: false, completedStage: job.stage ?? "scouting", queuedStage: stage };
+    }
+    return await processInspiration(nextJob);
+  };
+
   try {
-    await update("scouting", 0.2, "scout");
-    await update("verifying", 0.45, "verifier");
-    await update("editing", 0.68, "editor");
-    await update("curating", 0.86, "curator");
-    const feed = await buildInspirationFeed(release.mood, [], release.locale);
+    const stage = job.stage ?? "scouting";
+    const work = await readInspirationWork(release.id);
+    if (stage === "scouting") {
+      await update("scouting", 0.16);
+      work.candidates = await scoutInspirationCandidates(release.mood, [], release.locale);
+      await saveInspirationWork(release.id, work);
+      await update("verifying", 0.34);
+      return await continueWith("verifying");
+    }
+    if (stage === "verifying") {
+      await update("verifying", 0.42);
+      if (!work.candidates?.length) throw new Error("Scout candidates are missing.");
+      work.verified = await verifyInspirationCandidates(work.candidates, release.mood, release.locale);
+      await saveInspirationWork(release.id, work);
+      await update("editing", 0.62);
+      return await continueWith("editing");
+    }
+    if (stage === "editing") {
+      await update("editing", 0.68);
+      if (!work.verified?.length) throw new Error("Verified inspiration candidates are missing.");
+      work.edited = editInspirationCandidates(work.verified, release.mood, release.locale);
+      await saveInspirationWork(release.id, work);
+      await update("curating", 0.82);
+      return await continueWith("curating");
+    }
+
+    await update("curating", 0.88);
+    if (!work.edited?.length) throw new Error("Edited inspiration candidates are missing.");
+    const feed = await curateInspirationCandidates(work.edited, release.mood, [], release.locale);
     const now = new Date().toISOString();
     const ready = {
       ...release,
@@ -121,6 +201,7 @@ async function processInspiration(job: Extract<AgentJob, { type: "inspiration" }
       agents: release.agents.map((agent) => ({ ...agent, state: "complete" as const }))
     };
     await saveInspirationRelease(ready);
+    await clearInspirationWork(release.id);
     if (ready.deviceToken) {
       await sendAPNsAlert([ready.deviceToken], {
         title: "Your Voya collection is ready",

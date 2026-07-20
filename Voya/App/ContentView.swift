@@ -96,16 +96,28 @@ struct ContentView: View {
         }
         selectedTab = .trips
 
-        if let itemID = destination.itemID,
+        if let transferID = destination.transferID {
+            if let tripID = destination.tripID,
+               store.trips.contains(where: { $0.id == tripID }) {
+                store.selectedTripID = tripID
+            } else {
+                _ = store.selectCurrentTripIfAvailable()
+            }
+            store.notificationItemID = nil
+            store.notificationTransferID = transferID
+        } else if let itemID = destination.itemID,
            let trip = store.trips.first(where: { trip in trip.items.contains(where: { $0.id == itemID }) }) {
             store.selectedTripID = trip.id
+            store.notificationTransferID = nil
             store.notificationItemID = itemID
         } else if let tripID = destination.tripID,
                   store.trips.contains(where: { $0.id == tripID }) {
             store.selectedTripID = tripID
             store.notificationItemID = nil
+            store.notificationTransferID = nil
         } else {
             store.notificationItemID = nil
+            store.notificationTransferID = nil
             _ = store.selectCurrentTripIfAvailable()
         }
     }

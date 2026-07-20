@@ -9,6 +9,7 @@ import {
   storageConfigured
 } from "./_storage.js";
 import { protectPublicEndpoint } from "./_security.js";
+import { flightWatchMonitoringStatus, scheduleFlightWatch } from "./_flight-monitor.js";
 
 type FlightWatchPayload = {
   appInstallId?: string;
@@ -17,6 +18,7 @@ type FlightWatchPayload = {
   tripId?: string;
   flightNumber?: string;
   date?: string;
+  departureAt?: string;
   originAirport?: string;
   destinationAirport?: string;
   subscribeToAlerts?: boolean;
@@ -272,6 +274,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const appInstallId = validInstallID(payload.appInstallId);
   const tripId = validInstallID(payload.tripId);
   const itemId = validInstallID(payload.itemId);
+  const departureAt = clean(payload.departureAt);
 
   if (!flightNumber) {
     return res.status(400).json({ error: "Invalid flight number." });
@@ -292,6 +295,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         subscribed: false,
         existing: false,
         error: "Flight watches must be persisted before creating FlightAware alerts."
+      },
+      monitoring: {
+        state: "unavailable",
+        fallbackPolling: false,
+        lastError: "Redis is required for durable flight monitoring."
       }
     });
   }
@@ -306,6 +314,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     flightNumber,
     "date",
     date ?? "",
+    "departureAt",
+    departureAt ?? "",
     "originAirport",
     clean(payload.originAirport)?.toUpperCase() ?? "",
     "destinationAirport",
@@ -349,6 +359,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         clean(payload.destinationAirport)?.toUpperCase()
       )
     : await flightAwareAlertStatus(key);
+  await scheduleFlightWatch({
+    key,
+    departureAt,
+    date,
+    subscribed: alertWatch.subscribed,
+    error: "error" in alertWatch ? alertWatch.error : undefined
+  });
+  const monitoring = await flightWatchMonitoringStatus(flightNumber, date);
 
   return res.status(202).json({
     accepted: true,
@@ -356,6 +374,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     flightKey: key,
     deviceLinked: true,
     alertWatch,
+    monitoring,
     updatedAt: now
   });
 }

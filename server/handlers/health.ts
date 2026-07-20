@@ -62,9 +62,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     agentMonitor: configured("AGENT_MONITOR_SECRET", "CRON_SECRET")
   };
   let redisReachable = false;
+  let agentMonitorRecent = false;
   if (checks.redis) {
     try {
       redisReachable = await redisCommand<string>(["PING"]) === "PONG";
+      const lastMonitorRun = await redisCommand<string>(["GET", "voya:agent-monitor:last-successful-run"]);
+      const age = lastMonitorRun ? Date.now() - Date.parse(lastMonitorRun) : Number.POSITIVE_INFINITY;
+      agentMonitorRecent = Number.isFinite(age) && age >= 0 && age <= 30 * 60 * 1000;
     } catch {
       redisReachable = false;
     }
@@ -81,11 +85,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requiredChecks = Object.entries(checks)
     .filter(([name]) => name !== "clientProtection")
     .map(([, value]) => value);
-  const ready = requiredChecks.every(Boolean) && redisReachable && Object.values(googleReachable).every(Boolean);
+  const ready = requiredChecks.every(Boolean)
+    && redisReachable
+    && agentMonitorRecent
+    && Object.values(googleReachable).every(Boolean);
   return res.status(ready ? 200 : 503).json({
     ready,
     environment: process.env.VERCEL_ENV ?? "local",
-    checks: { ...checks, ...googleReachable, redisReachable },
+    checks: { ...checks, ...googleReachable, redisReachable, agentMonitorRecent },
     checkedAt: new Date().toISOString()
   });
 }

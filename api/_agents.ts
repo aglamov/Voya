@@ -58,8 +58,10 @@ export type InspirationRelease = {
   }>;
 };
 
+export type InspirationAgentStage = "scouting" | "verifying" | "editing" | "curating";
+
 export type AgentJob =
-  | { type: "inspiration"; installId: string; releaseId: string }
+  | { type: "inspiration"; installId: string; releaseId: string; stage?: InspirationAgentStage }
   | { type: "mission"; installId: string; missionId: string };
 
 const developmentMissions = new Map<string, AgentMission>();
