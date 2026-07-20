@@ -18,7 +18,11 @@ type APNsSendResult = {
 };
 
 class APNsDeliveryError extends Error {
-  constructor(message: string, readonly invalidToken: boolean) {
+  constructor(
+    message: string,
+    readonly invalidToken: boolean,
+    readonly tryAlternateEnvironment: boolean
+  ) {
     super(message);
   }
 }
@@ -148,9 +152,11 @@ async function sendOne(
         } catch {
           // APNs may return an empty or non-JSON proxy response.
         }
+        const invalidToken = reason === "BadDeviceToken" || reason === "Unregistered";
         reject(new APNsDeliveryError(
           reason || `APNs returned HTTP ${status}`,
-          reason === "BadDeviceToken" || reason === "Unregistered"
+          invalidToken,
+          invalidToken || reason === "BadEnvironmentKeyInToken"
         ));
       }
     });
@@ -192,7 +198,7 @@ export async function sendAPNsAlert(deviceTokens: string[], alert: APNsAlert): P
         await sendOne(deviceToken, alert, token, config);
         result.sent += 1;
       } catch (error) {
-        if (error instanceof APNsDeliveryError && error.invalidToken) {
+        if (error instanceof APNsDeliveryError && error.tryAlternateEnvironment) {
           try {
             await sendOne(deviceToken, alert, token, config, config.alternateHost);
             result.sent += 1;
