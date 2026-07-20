@@ -62,11 +62,13 @@ final class VoyaPushRegistrationService {
                 error: String(localized: "Notifications are disabled for Voya. Enable them in iPhone Settings and try again.")
             )
         }
+        // A development build and an Ad Hoc/TestFlight build use different APNs
+        // environments. Do not reuse a token persisted by the previously installed
+        // build; wait for APNs to return the token for the current signature.
+        userDefaults.removeObject(forKey: deviceTokenKey)
         UIApplication.shared.registerForRemoteNotifications()
-        if currentDeviceToken == nil {
-            for _ in 0..<20 where currentDeviceToken == nil {
-                try? await Task.sleep(for: .milliseconds(250))
-            }
+        for _ in 0..<40 where currentDeviceToken == nil {
+            try? await Task.sleep(for: .milliseconds(250))
         }
         guard let deviceToken = currentDeviceToken else {
             return FlightAlertSelfTestResponse(
