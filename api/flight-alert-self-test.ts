@@ -147,6 +147,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       && existing.departureAt
       && Date.parse(existing.departureAt) > Date.now() - 2 * 60 * 60_000) {
     if (existing.confirmationPushSent !== true && existing.flightNumber) {
+      const registration = await registerFlightWatch({
+        appInstallId: installId,
+        deviceToken,
+        itemId: randomUUID(),
+        flightNumber: existing.flightNumber,
+        date: existing.flightDate,
+        departureAt: existing.departureAt,
+        originAirport: existing.originAirport,
+        destinationAirport: existing.destinationAirport,
+        subscribeToAlerts: true
+      });
+      if (registration.status >= 300) {
+        const error = "error" in registration.body
+          ? registration.body.error
+          : "Could not link the current APNs device token to the existing flight alert.";
+        const relinkFailed = {
+          ...existing,
+          confirmationPushSent: false,
+          confirmationPushError: error,
+          updatedAt: new Date().toISOString()
+        };
+        await saveFlightAlertSelfTest(relinkFailed);
+        return res.status(502).json(relinkFailed);
+      }
+
       const confirmation = await sendAPNsAlert([deviceToken], {
         title: "Voya live test armed",
         body: `${existing.flightNumber} ${existing.originAirport ?? ""}–${existing.destinationAirport ?? ""}: waiting for FlightAware to assign the gate.`,
