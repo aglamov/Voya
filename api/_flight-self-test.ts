@@ -16,6 +16,7 @@ export type FlightAlertSelfTestRecord = {
   monitoringState?: string;
   fallbackPolling?: boolean;
   confirmationPushSent?: boolean;
+  confirmationPushError?: string;
   gatePushSent?: boolean;
   createdAt: string;
   updatedAt: string;

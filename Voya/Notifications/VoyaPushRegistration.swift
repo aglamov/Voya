@@ -513,6 +513,7 @@ struct FlightAlertSelfTestResponse: Decodable, Equatable {
     var monitoringState: String?
     var fallbackPolling: Bool?
     var confirmationPushSent: Bool?
+    var confirmationPushError: String?
     var gatePushSent: Bool?
     var createdAt: String?
     var updatedAt: String?

@@ -146,6 +146,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (existing?.status === "armed"
       && existing.departureAt
       && Date.parse(existing.departureAt) > Date.now() - 2 * 60 * 60_000) {
+    if (existing.confirmationPushSent !== true && existing.flightNumber) {
+      const confirmation = await sendAPNsAlert([deviceToken], {
+        title: "Voya live test armed",
+        body: `${existing.flightNumber} ${existing.originAirport ?? ""}–${existing.destinationAirport ?? ""}: waiting for FlightAware to assign the gate.`,
+        threadId: `self-test-${existing.flightNumber}`,
+        data: { eventType: "flight_alert_test_armed", flightNumber: existing.flightNumber, flightDate: existing.flightDate }
+      });
+      const retried = {
+        ...existing,
+        confirmationPushSent: confirmation.sent > 0,
+        confirmationPushError: confirmation.errors[0],
+        updatedAt: new Date().toISOString()
+      };
+      await saveFlightAlertSelfTest(retried);
+      return res.status(200).json(retried);
+    }
     return res.status(200).json(existing);
   }
 
@@ -192,6 +208,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       monitoringState: monitoring?.state,
       fallbackPolling: monitoring?.fallbackPolling,
       confirmationPushSent: confirmation.sent > 0,
+      confirmationPushError: confirmation.errors[0],
       createdAt: now,
       updatedAt: new Date().toISOString()
     };

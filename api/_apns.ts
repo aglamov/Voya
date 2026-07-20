@@ -39,7 +39,8 @@ function apnsConfig() {
     teamId,
     bundleId,
     privateKey,
-    host: environment === "production" ? "https://api.push.apple.com" : "https://api.sandbox.push.apple.com"
+    host: environment === "production" ? "https://api.push.apple.com" : "https://api.sandbox.push.apple.com",
+    alternateHost: environment === "production" ? "https://api.sandbox.push.apple.com" : "https://api.push.apple.com"
   };
 }
 
@@ -97,8 +98,14 @@ function authToken(config: NonNullable<ReturnType<typeof apnsConfig>>) {
   return `${unsigned}.${base64url(signature)}`;
 }
 
-async function sendOne(deviceToken: string, alert: APNsAlert, token: string, config: NonNullable<ReturnType<typeof apnsConfig>>) {
-  const client = http2.connect(config.host);
+async function sendOne(
+  deviceToken: string,
+  alert: APNsAlert,
+  token: string,
+  config: NonNullable<ReturnType<typeof apnsConfig>>,
+  host = config.host
+) {
+  const client = http2.connect(host);
   const payload = JSON.stringify({
     aps: {
       alert: {
@@ -185,11 +192,22 @@ export async function sendAPNsAlert(deviceTokens: string[], alert: APNsAlert): P
         await sendOne(deviceToken, alert, token, config);
         result.sent += 1;
       } catch (error) {
+        if (error instanceof APNsDeliveryError && error.invalidToken) {
+          try {
+            await sendOne(deviceToken, alert, token, config, config.alternateHost);
+            result.sent += 1;
+            return;
+          } catch (alternateError) {
+            result.failed += 1;
+            result.errors.push(alternateError instanceof Error ? alternateError.message : "APNs push failed in both environments.");
+            if (alternateError instanceof APNsDeliveryError && alternateError.invalidToken) {
+              result.invalidDeviceTokens.push(deviceToken);
+            }
+            return;
+          }
+        }
         result.failed += 1;
         result.errors.push(error instanceof Error ? error.message : "APNs push failed.");
-        if (error instanceof APNsDeliveryError && error.invalidToken) {
-          result.invalidDeviceTokens.push(deviceToken);
-        }
       }
     }));
   }
